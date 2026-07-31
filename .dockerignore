@@ -1,0 +1,11 @@
+.git
+.env
+.env.docker
+node_modules
+vendor
+public/build
+storage/logs/*
+database/database.sqlite
+npm-debug.log
+Dockerfile*
+compose*.yaml
