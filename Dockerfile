@@ -22,7 +22,7 @@ FROM php:8.5-apache
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl libfreetype6-dev libicu-dev libjpeg62-turbo-dev libonig-dev libpng-dev libpq-dev libzip-dev \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
-    && docker-php-ext-install -j"$(nproc)" bcmath gd intl mbstring opcache pcntl pdo_pgsql zip \
+    && docker-php-ext-install -j1 bcmath gd intl mbstring opcache pcntl pdo_pgsql zip \
     && a2enmod headers rewrite \
     && rm -rf /var/lib/apt/lists/*
 
