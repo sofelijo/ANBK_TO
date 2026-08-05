@@ -1,6 +1,7 @@
 name: anbk-cerdas
 
 x-app: &app
+  image: anbk-cerdas-app:latest
   build:
     context: .
   env_file:
