@@ -7,6 +7,7 @@ use App\Enums\AiGenerationType;
 use App\Enums\QuestionStatus;
 use App\Enums\UserRole;
 use App\Models\AiGeneration;
+use App\Models\AuditLog;
 use App\Models\Competency;
 use App\Models\Question;
 use App\Models\School;
@@ -214,6 +215,49 @@ class QuestionWorkflowTest extends TestCase
         $this->actingAs($teacher)
             ->post(route('story-questions.store'), ['theme' => ''])
             ->assertSessionHasErrors('theme');
+    }
+
+    public function test_teacher_can_publish_all_questions_in_a_story_bundle_at_once(): void
+    {
+        config()->set('ai.driver', 'fake');
+        config()->set('queue.default', 'sync');
+        [$teacher] = $this->teacherAndCompetency();
+
+        $this->actingAs($teacher)->post(route('story-questions.store'), [
+            'theme' => 'hemat energi di sekolah',
+            'paragraph_count' => 2,
+            'question_count' => 3,
+        ]);
+
+        $generation = AiGeneration::firstOrFail();
+        $questionIds = $generation->result_payload['question_ids'];
+
+        $this->assertTrue(Question::query()->whereIn('id', $questionIds)->get()->every(
+            fn (Question $question): bool => $question->status === QuestionStatus::Draft,
+        ));
+
+        $this->actingAs($teacher)
+            ->post(route('story-questions.publish', $generation))
+            ->assertRedirect()
+            ->assertSessionHas('success');
+
+        $publishedQuestions = Question::query()->whereIn('id', $questionIds)->get();
+        $this->assertTrue($publishedQuestions->every(
+            fn (Question $question): bool => $question->status === QuestionStatus::Published
+                && $question->approved_by === $teacher->id
+                && $question->approved_at !== null,
+        ));
+        $this->assertDatabaseHas('audit_logs', [
+            'action' => 'story_bundle.published',
+            'auditable_type' => (new AiGeneration)->getMorphClass(),
+            'auditable_id' => $generation->id,
+        ]);
+        $this->assertSame(3, AuditLog::query()->where('action', 'story_bundle.published')->firstOrFail()->metadata['question_count']);
+
+        $this->actingAs($teacher)
+            ->post(route('story-questions.publish', $generation))
+            ->assertRedirect()
+            ->assertSessionHas('success', 'Seluruh soal dalam bundle sudah terbit.');
     }
 
     public function test_story_questions_appear_as_one_searchable_bundle_in_question_bank(): void
@@ -436,7 +480,7 @@ class QuestionWorkflowTest extends TestCase
         ]);
     }
 
-    public function test_teacher_can_edit_duplicate_and_archive_question(): void
+    public function test_editing_a_published_question_creates_an_immutable_revision(): void
     {
         [$teacher, $competency] = $this->teacherAndCompetency();
         $question = $this->question($teacher, $competency);
@@ -444,25 +488,39 @@ class QuestionWorkflowTest extends TestCase
             'illustration' => ['disk' => 'public', 'path' => 'question-illustrations/test.png'],
         ]]);
 
-        $this->actingAs($teacher)
+        $response = $this->actingAs($teacher)
             ->put(route('questions.update', $question), $this->payload($competency, 'Pertanyaan yang sudah diperbarui?'))
-            ->assertRedirect(route('questions.show', $question));
+            ->assertRedirect();
 
         $question->refresh();
-        $this->assertSame('Pertanyaan yang sudah diperbarui?', $question->prompt);
-        $this->assertSame(QuestionStatus::Draft, $question->status);
-        $this->assertSame('question-illustrations/test.png', data_get($question->metadata, 'illustration.path'));
+        $revision = Question::query()->where('revision_of_id', $question->id)->firstOrFail();
+        $response->assertRedirect(route('questions.show', $revision));
+        $this->assertSame('Manakah jawaban yang benar?', $question->prompt);
+        $this->assertSame(QuestionStatus::Published, $question->status);
+        $this->assertSame('Pertanyaan yang sudah diperbarui?', $revision->prompt);
+        $this->assertSame(QuestionStatus::Draft, $revision->status);
+        $this->assertSame(2, $revision->version);
+        $this->assertSame('question-illustrations/test.png', data_get($revision->metadata, 'illustration.path'));
 
         $this->actingAs($teacher)
-            ->post(route('questions.duplicate', $question))
+            ->post(route('questions.approve', $revision))
             ->assertRedirect();
-        $duplicate = Question::query()->where('parent_id', $question->id)->firstOrFail();
-        $this->assertCount(2, $duplicate->options);
+        $this->assertSame(QuestionStatus::Archived, $question->fresh()->status);
+        $this->assertSame($revision->id, $question->fresh()->superseded_by_id);
+        $this->assertSame(QuestionStatus::Published, $revision->fresh()->status);
 
         $this->actingAs($teacher)
-            ->post(route('questions.archive', $question))
+            ->post(route('questions.duplicate', $revision))
+            ->assertRedirect();
+        $duplicate = Question::query()->where('parent_id', $revision->id)->firstOrFail();
+        $this->assertCount(2, $duplicate->options);
+        $this->assertSame(1, $duplicate->version);
+        $this->assertNull($duplicate->revision_of_id);
+
+        $this->actingAs($teacher)
+            ->post(route('questions.archive', $revision))
             ->assertRedirect(route('questions.index'));
-        $this->assertSame(QuestionStatus::Archived, $question->fresh()->status);
+        $this->assertSame(QuestionStatus::Archived, $revision->fresh()->status);
     }
 
     public function test_teacher_can_import_question_from_csv(): void

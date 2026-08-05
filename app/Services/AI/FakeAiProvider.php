@@ -21,6 +21,7 @@ class FakeAiProvider implements AiProvider
             'story_questions' => new AiResponse($this->storyQuestions($context), 0, 0),
             'question_validation' => new AiResponse($this->questionValidation($context), 0, 0),
             'attempt_summary' => new AiResponse($this->attemptSummary($context), 0, 0),
+            'student_chat' => new AiResponse($this->studentChat($context), 0, 0),
             default => new AiResponse([]),
         };
     }
@@ -106,6 +107,24 @@ class FakeAiProvider implements AiProvider
         }
 
         return ['summary' => $summary];
+    }
+
+    private function studentChat(array $context): array
+    {
+        $latestMessage = collect($context['recent_messages'] ?? [])->last();
+        $question = trim((string) data_get($latestMessage, 'content', ''));
+
+        if (str_contains(mb_strtolower($question), 'contoh soal latihan baru')) {
+            return [
+                'reply' => 'Baik, kita berlatih tanpa melihat jawabannya dulu. Contoh soal: Rani membaca sebuah paragraf tentang warga yang bekerja sama membersihkan selokan sebelum musim hujan. Apa alasan utama warga melakukan kegiatan tersebut? Tuliskan jawabanmu beserta alasannya.',
+            ];
+        }
+
+        return [
+            'reply' => $question === ''
+                ? 'Apa yang ingin kamu pelajari hari ini? Kita bisa membuat langkah kecil yang mudah dilakukan.'
+                : "Aku memahami pertanyaanmu tentang: {$question}. Coba jelaskan bagian yang paling membingungkan, lalu kita pecah menjadi langkah-langkah kecil dan berlatih secara bertahap.",
+        ];
     }
 
     private function questionValidation(array $context): array

@@ -54,15 +54,11 @@ class RegisteredUserController extends Controller
             ],
         ]);
 
-        $school = School::query()
-            ->where('npsn', trim($data['npsn']))
-            ->first();
-
-        if (! $school) {
-            throw ValidationException::withMessages([
-                'npsn' => 'NPSN sekolah tidak ditemukan.',
-            ]);
-        }
+        $npsn = trim($data['npsn']);
+        $school = School::firstOrCreate(
+            ['npsn' => $npsn],
+            ['name' => "Sekolah NPSN {$npsn}"]
+        );
 
         $role = UserRole::from($data['account_type']);
 

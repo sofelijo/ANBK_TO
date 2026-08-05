@@ -7,6 +7,7 @@ use App\Enums\AiGenerationType;
 use App\Models\AiGeneration;
 use App\Models\Attempt;
 use App\Services\AI\AiManager;
+use App\Services\StudentChatService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Validator;
@@ -20,7 +21,7 @@ class GenerateAttemptSummary implements ShouldQueue
 
     public function __construct(public readonly int $attemptId) {}
 
-    public function handle(AiManager $manager): void
+    public function handle(AiManager $manager, StudentChatService $chatService): void
     {
         $attempt = Attempt::with([
             'assessment',
@@ -74,6 +75,7 @@ PROMPT,
             ])->validate()['summary'];
 
             $attempt->update(['summary' => $summary]);
+            $chatService->postAttemptSummary($attempt->fresh());
             $generation->update([
                 'status' => AiGenerationStatus::Completed,
                 'result_payload' => ['summary' => $summary],

@@ -5,9 +5,9 @@ namespace App\Http\Controllers;
 use App\Enums\AttemptStatus;
 use App\Models\Assessment;
 use App\Models\Attempt;
-use App\Models\AttemptAnswer;
 use App\Models\CompetencyResult;
 use App\Services\AuditLogger;
+use App\Services\ItemAnalysisService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Inertia\Inertia;
@@ -16,7 +16,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ReportController extends Controller
 {
-    public function index(Request $request): Response
+    public function index(Request $request, ItemAnalysisService $itemAnalysisService): Response
     {
         $assessments = Assessment::query()
             ->where('school_id', $request->user()->school_id)
@@ -32,6 +32,7 @@ class ReportController extends Controller
                 'students' => [],
                 'competencies' => [],
                 'items' => [],
+                'itemAnalysis' => null,
             ]);
         }
 
@@ -43,6 +44,8 @@ class ReportController extends Controller
             ->orderByDesc('score')
             ->get();
         $percentages = $attempts->map(fn (Attempt $attempt): float => $this->percentage($attempt));
+
+        $itemAnalysis = $itemAnalysisService->analyze($assessment);
 
         return Inertia::render('Reports/Index', [
             'assessments' => $assessments,
@@ -66,7 +69,8 @@ class ReportController extends Controller
                 'submitted_at' => $attempt->submitted_at,
             ]),
             'competencies' => $this->competencyStats($assessment),
-            'items' => $this->itemStats($assessment),
+            'items' => $itemAnalysis['items'],
+            'itemAnalysis' => collect($itemAnalysis)->except('items')->all(),
         ]);
     }
 
@@ -132,33 +136,6 @@ class ReportController extends Controller
                 'average_percentage' => round((float) $result->average_percentage, 2),
                 'student_count' => (int) $result->student_count,
             ]);
-    }
-
-    private function itemStats(Assessment $assessment): Collection
-    {
-        return AttemptAnswer::query()
-            ->select('question_id')
-            ->selectRaw('COUNT(*) as answer_count')
-            ->selectRaw('SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as correct_count')
-            ->selectRaw('AVG(duration_seconds) as average_duration')
-            ->whereHas('attempt', fn ($query) => $query
-                ->where('assessment_id', $assessment->id)
-                ->where('status', AttemptStatus::Submitted))
-            ->with('question:id,title,prompt,difficulty')
-            ->groupBy('question_id')
-            ->get()
-            ->map(function (AttemptAnswer $answer): array {
-                $answerCount = (int) $answer->answer_count;
-
-                return [
-                    'question' => $answer->question,
-                    'answer_count' => $answerCount,
-                    'correct_percentage' => $answerCount > 0
-                        ? round(((int) $answer->correct_count / $answerCount) * 100, 2)
-                        : 0,
-                    'average_duration' => round((float) $answer->average_duration),
-                ];
-            });
     }
 
     private function percentage(Attempt $attempt): float

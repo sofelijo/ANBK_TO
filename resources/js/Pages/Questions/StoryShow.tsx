@@ -1,6 +1,6 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, Link, router } from '@inertiajs/react';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 type Generation = {
     id: number;
@@ -48,6 +48,21 @@ type Illustration = {
 export default function StoryShow({ generation, questions, illustration }: { generation: Generation; questions: Question[]; illustration?: Illustration }) {
     const waiting = generation.status === 'pending' || generation.status === 'processing';
     const illustrationWaiting = illustration?.status === 'pending' || illustration?.status === 'processing';
+    const [publishing, setPublishing] = useState(false);
+    const publishedCount = questions.filter((question) => question.status === 'published').length;
+    const unpublishedCount = questions.length - publishedCount;
+    const allPublished = questions.length > 0 && unpublishedCount === 0;
+
+    const publishBundle = () => {
+        if (allPublished || publishing) return;
+        if (!window.confirm(`Terbitkan seluruh ${questions.length} soal dalam bundle ini? Pastikan cerita, kunci jawaban, dan pembahasannya sudah diperiksa.`)) return;
+
+        router.post(route('story-questions.publish', generation.id), {}, {
+            preserveScroll: true,
+            onStart: () => setPublishing(true),
+            onFinish: () => setPublishing(false),
+        });
+    };
 
     useEffect(() => {
         if (!waiting && !illustrationWaiting) return;
@@ -104,7 +119,9 @@ export default function StoryShow({ generation, questions, illustration }: { gen
                                 </div>
                                 <div className="flex flex-wrap gap-2">
                                     <span className="rounded-full bg-indigo-50 px-3 py-1 text-sm font-semibold text-indigo-700">{generation.result_payload.paragraph_count || generation.request_payload.paragraph_count || '-'} paragraf</span>
-                                    <span className="rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-700">{questions.length} soal draft</span>
+                                    <span className={`rounded-full px-3 py-1 text-sm font-semibold ${allPublished ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                                        {allPublished ? `${publishedCount} soal terbit` : `${unpublishedCount} belum terbit · ${publishedCount} terbit`}
+                                    </span>
                                 </div>
                             </div>
                             {questions[0]?.illustration_url && (
@@ -127,20 +144,22 @@ export default function StoryShow({ generation, questions, illustration }: { gen
                                     {illustration?.status === 'completed' && <p className="mt-2 text-sm font-medium text-emerald-700">Ilustrasi selesai · {illustration.model} · estimasi US${(illustration.cost_microusd / 1_000_000).toFixed(4)}</p>}
                                     {illustration?.status === 'failed' && <p className="mt-2 text-sm font-medium text-rose-700">{illustration.error || 'Pembuatan ilustrasi gagal. Periksa billing Gemini lalu coba lagi.'}</p>}
                                 </div>
-                                {(!illustration || illustration.status === 'failed') && (
-                                    <button
-                                        onClick={() => router.post(route('story-questions.illustration.store', generation.id))}
-                                        className="shrink-0 rounded-lg bg-violet-700 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-600"
-                                    >
-                                        Buat Ilustrasi ±Rp300
-                                    </button>
-                                )}
                                 {illustrationWaiting && <div className="h-7 w-7 shrink-0 animate-spin rounded-full border-4 border-violet-200 border-t-violet-700" />}
                             </div>
                         </section>
 
-                        <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-900">
-                            AI sudah memilih kompetensi dan jenjang dari data sekolah. Periksa cerita, kunci, dan pembahasan setiap soal sebelum menerbitkannya.
+                        <div className="flex flex-col justify-between gap-4 rounded-xl border border-indigo-200 bg-indigo-50 p-4 sm:flex-row sm:items-center">
+                            <p className="text-sm text-indigo-900">
+                                AI sudah memilih kompetensi dan jenjang dari data sekolah. Periksa cerita, kunci, dan pembahasan setiap soal sebelum menerbitkannya.
+                            </p>
+                            <button
+                                type="button"
+                                onClick={publishBundle}
+                                disabled={allPublished || publishing || questions.length === 0}
+                                className="shrink-0 rounded-lg bg-indigo-700 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-600 disabled:cursor-not-allowed disabled:bg-emerald-600"
+                            >
+                                {publishing ? 'Menerbitkan...' : allPublished ? 'Bundle Sudah Terbit' : 'Verifikasi & Terbitkan 1 Bundle'}
+                            </button>
                         </div>
 
                         <section className="space-y-4">
@@ -153,6 +172,9 @@ export default function StoryShow({ generation, questions, illustration }: { gen
                                                 <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-indigo-700">{question.competency.code}</span>
                                                 <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-600">Kelas {question.grade_level}</span>
                                                 <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-600">Kesulitan {question.difficulty}</span>
+                                                <span className={`rounded-full px-2.5 py-1 ${question.status === 'published' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                                                    {question.status === 'published' ? 'Terbit' : 'Belum terbit'}
+                                                </span>
                                             </div>
                                             <h3 className="mt-3 text-lg font-semibold text-slate-900">{question.prompt}</h3>
                                         </div>

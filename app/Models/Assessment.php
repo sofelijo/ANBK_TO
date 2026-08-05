@@ -41,7 +41,7 @@ class Assessment extends Model
     public function questions(): BelongsToMany
     {
         return $this->belongsToMany(Question::class)
-            ->withPivot(['position', 'points'])
+            ->withPivot(['position', 'points', 'snapshot'])
             ->orderByPivot('position');
     }
 

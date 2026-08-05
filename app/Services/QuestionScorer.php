@@ -7,28 +7,33 @@ use App\Models\Question;
 
 class QuestionScorer
 {
-    public function isCorrect(Question $question, ?array $response): bool
+    public function isCorrect(Question $question, ?array $response, ?array $snapshot = null): bool
     {
         if (! $response) {
             return false;
         }
 
-        if ($question->type === QuestionType::ShortAnswer) {
+        $type = isset($snapshot['type'])
+            ? QuestionType::from($snapshot['type'])
+            : $question->type;
+        $metadata = $snapshot['metadata'] ?? $question->metadata ?? [];
+
+        if ($type === QuestionType::ShortAnswer) {
             $answer = $this->normalize((string) ($response['text'] ?? ''));
             $acceptedAnswers = array_map(
                 fn (mixed $acceptedAnswer): string => $this->normalize((string) $acceptedAnswer),
-                $question->metadata['accepted_answers'] ?? [],
+                $metadata['accepted_answers'] ?? [],
             );
 
             return $answer !== '' && in_array($answer, $acceptedAnswers, true);
         }
 
-        if ($question->type === QuestionType::Matching) {
+        if ($type === QuestionType::Matching) {
             $submitted = collect($response['matches'] ?? [])
                 ->mapWithKeys(fn (mixed $rightId, mixed $leftId): array => [(string) $leftId => (string) $rightId])
                 ->sortKeys()
                 ->all();
-            $answerKey = collect($question->metadata['matching_pairs'] ?? [])
+            $answerKey = collect($metadata['matching_pairs'] ?? [])
                 ->mapWithKeys(fn (array $pair): array => [(string) $pair['left_id'] => (string) $pair['right_id']])
                 ->sortKeys()
                 ->all();
@@ -36,12 +41,12 @@ class QuestionScorer
             return $answerKey !== [] && $submitted === $answerKey;
         }
 
-        if ($question->type === QuestionType::CategoryMatrix) {
+        if ($type === QuestionType::CategoryMatrix) {
             $submitted = collect($response['matrix_answers'] ?? [])
                 ->mapWithKeys(fn (mixed $columnId, mixed $rowId): array => [(string) $rowId => (string) $columnId])
                 ->sortKeys()
                 ->all();
-            $answerKey = collect($question->metadata['matrix_rows'] ?? [])
+            $answerKey = collect($metadata['matrix_rows'] ?? [])
                 ->mapWithKeys(fn (array $row): array => [(string) $row['id'] => (string) $row['correct_column_id']])
                 ->sortKeys()
                 ->all();
@@ -50,10 +55,10 @@ class QuestionScorer
         }
 
         $selected = array_map('intval', $response['option_ids'] ?? []);
-        $correct = $question->options
+        $correct = collect($snapshot['options'] ?? $question->options)
             ->where('is_correct', true)
             ->pluck('id')
-            ->map(fn (int $id): int => $id)
+            ->map(fn (mixed $id): int => (int) $id)
             ->all();
 
         sort($selected);

@@ -5,12 +5,17 @@ import { FormEvent, useMemo } from 'react';
 
 type Question = {
     id: number;
+    type: string;
     title?: string;
     prompt: string;
     grade_level: number;
     difficulty: number;
-    competency: { code: string; name: string };
+    competency: { id: number; code: string; name: string };
 };
+
+type Competency = { id: number; code: string; name: string; grade_level: number };
+type CompetencyRow = { competency_id: number; count: number };
+type BlueprintRow = { competency_id: number; type: string; difficulty: number; count: number };
 
 type AssessmentForm = {
     title: string;
@@ -19,9 +24,11 @@ type AssessmentForm = {
     duration_minutes: number;
     assessment_type: string;
     custom_type_name: string;
-    selection_mode: 'manual' | 'automatic';
+    selection_mode: 'manual' | 'automatic' | 'competency' | 'blueprint';
     question_count: number;
     question_ids: number[];
+    competency_rows: CompetencyRow[];
+    blueprint_rows: BlueprintRow[];
     starts_at: string;
     ends_at: string;
     shuffle_questions: boolean;
@@ -32,11 +39,13 @@ type AssessmentForm = {
 
 type Props = {
     questions: Question[];
+    competencies: Competency[];
     assessmentTypes: Record<string, string>;
+    questionTypes: Record<string, string>;
     assessment?: AssessmentForm & { id: number };
 };
 
-export default function Create({ questions, assessmentTypes, assessment }: Props) {
+export default function Create({ questions, competencies, assessmentTypes, questionTypes, assessment }: Props) {
     const emptyForm: AssessmentForm = {
         title: '',
         description: '',
@@ -47,6 +56,8 @@ export default function Create({ questions, assessmentTypes, assessment }: Props
         selection_mode: 'manual',
         question_count: 5,
         question_ids: [],
+        competency_rows: [],
+        blueprint_rows: [],
         starts_at: '',
         ends_at: '',
         shuffle_questions: false,
@@ -59,6 +70,50 @@ export default function Create({ questions, assessmentTypes, assessment }: Props
         () => questions.filter((question) => question.grade_level === data.grade_level),
         [questions, data.grade_level],
     );
+    const availableCompetencies = useMemo(
+        () => competencies.filter((competency) => competency.grade_level === data.grade_level),
+        [competencies, data.grade_level],
+    );
+
+    const defaultBlueprintRow = (gradeLevel = data.grade_level): BlueprintRow => ({
+        competency_id: competencies.find((competency) => competency.grade_level === gradeLevel)?.id || 0,
+        type: 'single_choice',
+        difficulty: 1,
+        count: 1,
+    });
+
+    const defaultCompetencyRow = (gradeLevel = data.grade_level): CompetencyRow => ({
+        competency_id: competencies.find((competency) => competency.grade_level === gradeLevel)?.id || 0,
+        count: 1,
+    });
+
+    const updateCompetencyRows = (rows: CompetencyRow[]) => {
+        setData((current) => ({
+            ...current,
+            competency_rows: rows,
+            question_count: rows.reduce((total, row) => total + row.count, 0),
+            question_ids: [],
+        }));
+    };
+
+    const updateBlueprintRows = (rows: BlueprintRow[]) => {
+        setData((current) => ({
+            ...current,
+            blueprint_rows: rows,
+            question_count: rows.reduce((total, row) => total + row.count, 0),
+            question_ids: [],
+        }));
+    };
+
+    const blueprintAvailability = (row: BlueprintRow) => availableQuestions.filter((question) =>
+        question.competency.id === row.competency_id
+        && question.type === row.type
+        && question.difficulty === row.difficulty,
+    ).length;
+
+    const competencyAvailability = (row: CompetencyRow) => availableQuestions.filter(
+        (question) => question.competency.id === row.competency_id,
+    ).length;
 
     const toggleQuestion = (id: number) => {
         if (data.question_ids.includes(id)) {
@@ -101,7 +156,17 @@ export default function Create({ questions, assessmentTypes, assessment }: Props
                         <label className="text-sm font-medium text-slate-700">Judul<input value={data.title} onChange={(event) => setData('title', event.target.value)} placeholder="Contoh: Simulasi ANBK Semester Ganjil" className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500" /><InputError message={errors.title} /></label>
                         <label className="text-sm font-medium text-slate-700">Jenis try out<select value={data.assessment_type} onChange={(event) => setData('assessment_type', event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500">{Object.entries(assessmentTypes).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
                         {data.assessment_type === 'custom' && <label className="text-sm font-medium text-slate-700 sm:col-span-2">Nama jenis custom<input value={data.custom_type_name} onChange={(event) => setData('custom_type_name', event.target.value)} placeholder="Contoh: Seleksi Olimpiade Sekolah" className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500" /><InputError message={errors.custom_type_name} /></label>}
-                        <label className="text-sm font-medium text-slate-700">Jenjang<select value={data.grade_level} onChange={(event) => setData((current) => ({ ...current, grade_level: Number(event.target.value), question_ids: [] }))} className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500"><option value={5}>Kelas 5</option><option value={8}>Kelas 8</option><option value={11}>Kelas 11</option></select></label>
+                        <label className="text-sm font-medium text-slate-700">Jenjang<select value={data.grade_level} onChange={(event) => {
+                            const gradeLevel = Number(event.target.value);
+                            setData((current) => ({
+                                ...current,
+                                grade_level: gradeLevel,
+                                question_ids: [],
+                                competency_rows: current.selection_mode === 'competency' ? [defaultCompetencyRow(gradeLevel)] : [],
+                                blueprint_rows: current.selection_mode === 'blueprint' ? [defaultBlueprintRow(gradeLevel)] : [],
+                                question_count: ['competency', 'blueprint'].includes(current.selection_mode) ? 1 : current.question_count,
+                            }));
+                        }} className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500"><option value={5}>Kelas 5</option><option value={8}>Kelas 8</option><option value={11}>Kelas 11</option></select></label>
                         <label className="text-sm font-medium text-slate-700">Durasi pengerjaan<input type="number" min={5} max={480} value={data.duration_minutes} onChange={(event) => setData('duration_minutes', Number(event.target.value))} className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500" /><span className="mt-1 block text-xs text-slate-400">5–480 menit</span><InputError message={errors.duration_minutes} /></label>
                         <label className="text-sm font-medium text-slate-700 sm:col-span-2">Deskripsi / petunjuk<textarea value={data.description} onChange={(event) => setData('description', event.target.value)} rows={3} placeholder="Petunjuk yang akan dibaca peserta sebelum mengerjakan." className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500" /></label>
                     </div>
@@ -110,13 +175,117 @@ export default function Create({ questions, assessmentTypes, assessment }: Props
                 <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                     <h2 className="font-semibold text-slate-900">Jumlah dan sumber soal</h2>
                     <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                        <label className="text-sm font-medium text-slate-700">Target jumlah soal<input type="number" min={1} max={100} value={data.question_count} onChange={(event) => updateQuestionCount(Number(event.target.value))} className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500" /><InputError message={errors.question_count} /></label>
-                        <label className="text-sm font-medium text-slate-700">Cara memilih soal<select value={data.selection_mode} onChange={(event) => setData((current) => ({ ...current, selection_mode: event.target.value as AssessmentForm['selection_mode'], question_ids: [] }))} className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500"><option value="manual">Dipilih guru</option><option value="automatic">Dipilih otomatis dari bank soal</option></select></label>
+                        <label className="text-sm font-medium text-slate-700">Target jumlah soal<input type="number" min={1} max={100} value={data.question_count} disabled={['competency', 'blueprint'].includes(data.selection_mode)} onChange={(event) => updateQuestionCount(Number(event.target.value))} className="mt-1 block w-full rounded-lg border-slate-300 disabled:bg-slate-100 focus:border-emerald-500 focus:ring-emerald-500" /><span className="mt-1 block text-xs text-slate-400">{['competency', 'blueprint'].includes(data.selection_mode) ? 'Dihitung otomatis dari total kuota komposisi.' : '1–100 soal'}</span><InputError message={errors.question_count} /></label>
+                        <label className="text-sm font-medium text-slate-700">Cara memilih soal<select value={data.selection_mode} onChange={(event) => {
+                            const selectionMode = event.target.value as AssessmentForm['selection_mode'];
+                            setData((current) => ({
+                                ...current,
+                                selection_mode: selectionMode,
+                                question_ids: [],
+                                competency_rows: selectionMode === 'competency'
+                                    ? (current.competency_rows.length ? current.competency_rows : [defaultCompetencyRow()])
+                                    : [],
+                                blueprint_rows: selectionMode === 'blueprint'
+                                    ? (current.blueprint_rows.length ? current.blueprint_rows : [defaultBlueprintRow()])
+                                    : [],
+                                question_count: selectionMode === 'competency'
+                                    ? (current.competency_rows.reduce((total, row) => total + row.count, 0) || 1)
+                                    : selectionMode === 'blueprint'
+                                        ? (current.blueprint_rows.reduce((total, row) => total + row.count, 0) || 1)
+                                        : current.question_count,
+                            }));
+                        }} className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500"><option value="manual">Dipilih guru</option><option value="automatic">Acak sederhana</option><option value="competency">Komposisi per kompetensi</option><option value="blueprint">Blueprint terstruktur</option></select></label>
                     </div>
 
                     {data.selection_mode === 'automatic' ? (
                         <div className="mt-5 rounded-xl border border-indigo-200 bg-indigo-50 p-5 text-sm text-indigo-900">
                             Sistem akan mengambil acak <strong>{data.question_count} soal</strong> dari {availableQuestions.length} soal terbit untuk kelas {data.grade_level} saat paket disimpan.
+                        </div>
+                    ) : data.selection_mode === 'competency' ? (
+                        <div className="mt-6 space-y-4">
+                            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+                                Tentukan jumlah soal untuk setiap kompetensi. Sistem akan mengambil soal terbit secara acak sesuai komposisi ini.
+                            </div>
+                            <InputError message={errors.competency_rows} />
+                            {data.competency_rows.map((row, index) => {
+                                const available = competencyAvailability(row);
+                                const enough = available >= row.count;
+                                const rowError = (errors as Record<string, string>)[`competency_rows.${index}.count`];
+
+                                return (
+                                    <div key={index} className="rounded-xl border border-slate-200 p-4">
+                                        <div className="grid gap-3 md:grid-cols-[1fr_140px_auto] md:items-end">
+                                            <label className="text-sm font-medium text-slate-700">Kompetensi<select value={row.competency_id} onChange={(event) => {
+                                                const rows = [...data.competency_rows];
+                                                rows[index] = { ...row, competency_id: Number(event.target.value) };
+                                                updateCompetencyRows(rows);
+                                            }} className="mt-1 block w-full rounded-lg border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500">{availableCompetencies.map((competency) => <option key={competency.id} value={competency.id}>{competency.code} · {competency.name}</option>)}</select></label>
+                                            <label className="text-sm font-medium text-slate-700">Jumlah soal<input type="number" min={1} max={100} value={row.count} onChange={(event) => {
+                                                const rows = [...data.competency_rows];
+                                                rows[index] = { ...row, count: Math.max(1, Number(event.target.value)) };
+                                                updateCompetencyRows(rows);
+                                            }} className="mt-1 block w-full rounded-lg border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500" /></label>
+                                            <button type="button" disabled={data.competency_rows.length <= 1} onClick={() => updateCompetencyRows(data.competency_rows.filter((_, rowIndex) => rowIndex !== index))} className="rounded-lg border border-rose-200 px-3 py-2 text-sm font-semibold text-rose-700 disabled:opacity-40">Hapus</button>
+                                        </div>
+                                        <p className={`mt-2 text-xs font-medium ${enough ? 'text-emerald-600' : 'text-rose-600'}`}>Tersedia {available} soal terbit · membutuhkan {row.count}{!enough && ' — bank soal belum cukup'}</p>
+                                        {rowError && <InputError message={rowError} className="mt-1" />}
+                                    </div>
+                                );
+                            })}
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                                <button type="button" disabled={data.competency_rows.length >= 30 || data.competency_rows.length >= availableCompetencies.length} onClick={() => {
+                                    const usedIds = data.competency_rows.map((row) => row.competency_id);
+                                    const nextCompetency = availableCompetencies.find((competency) => !usedIds.includes(competency.id));
+                                    if (nextCompetency) updateCompetencyRows([...data.competency_rows, { competency_id: nextCompetency.id, count: 1 }]);
+                                }} className="rounded-lg border border-emerald-300 px-4 py-2 text-sm font-semibold text-emerald-700 disabled:opacity-40">+ Tambah kompetensi</button>
+                                <span className="text-sm font-semibold text-slate-700">Total komposisi: {data.question_count} soal</span>
+                            </div>
+                        </div>
+                    ) : data.selection_mode === 'blueprint' ? (
+                        <div className="mt-6 space-y-4">
+                            <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-900">
+                                Setiap baris menentukan kuota berdasarkan kompetensi, bentuk soal, dan tingkat kesulitan. Sistem mengambil soal terbit secara acak sesuai komposisi tersebut.
+                            </div>
+                            <InputError message={errors.blueprint_rows} />
+                            {data.blueprint_rows.map((row, index) => {
+                                const available = blueprintAvailability(row);
+                                const enough = available >= row.count;
+                                const rowError = (errors as Record<string, string>)[`blueprint_rows.${index}.count`];
+
+                                return (
+                                    <div key={index} className="rounded-xl border border-slate-200 p-4">
+                                        <div className="grid gap-3 md:grid-cols-[1.5fr_1.2fr_0.8fr_0.7fr_auto] md:items-end">
+                                            <label className="text-sm font-medium text-slate-700">Kompetensi<select value={row.competency_id} onChange={(event) => {
+                                                const rows = [...data.blueprint_rows];
+                                                rows[index] = { ...row, competency_id: Number(event.target.value) };
+                                                updateBlueprintRows(rows);
+                                            }} className="mt-1 block w-full rounded-lg border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500">{availableCompetencies.map((competency) => <option key={competency.id} value={competency.id}>{competency.code} · {competency.name}</option>)}</select></label>
+                                            <label className="text-sm font-medium text-slate-700">Bentuk soal<select value={row.type} onChange={(event) => {
+                                                const rows = [...data.blueprint_rows];
+                                                rows[index] = { ...row, type: event.target.value };
+                                                updateBlueprintRows(rows);
+                                            }} className="mt-1 block w-full rounded-lg border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500">{Object.entries(questionTypes).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+                                            <label className="text-sm font-medium text-slate-700">Kesulitan<select value={row.difficulty} onChange={(event) => {
+                                                const rows = [...data.blueprint_rows];
+                                                rows[index] = { ...row, difficulty: Number(event.target.value) };
+                                                updateBlueprintRows(rows);
+                                            }} className="mt-1 block w-full rounded-lg border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500"><option value={1}>1 · Mudah</option><option value={2}>2 · Sedang</option><option value={3}>3 · Sulit</option></select></label>
+                                            <label className="text-sm font-medium text-slate-700">Kuota<input type="number" min={1} max={100} value={row.count} onChange={(event) => {
+                                                const rows = [...data.blueprint_rows];
+                                                rows[index] = { ...row, count: Math.max(1, Number(event.target.value)) };
+                                                updateBlueprintRows(rows);
+                                            }} className="mt-1 block w-full rounded-lg border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500" /></label>
+                                            <button type="button" disabled={data.blueprint_rows.length <= 1} onClick={() => updateBlueprintRows(data.blueprint_rows.filter((_, rowIndex) => rowIndex !== index))} className="rounded-lg border border-rose-200 px-3 py-2 text-sm font-semibold text-rose-700 disabled:opacity-40">Hapus</button>
+                                        </div>
+                                        <p className={`mt-2 text-xs font-medium ${enough ? 'text-emerald-600' : 'text-rose-600'}`}>Tersedia {available} soal · membutuhkan {row.count}{!enough && ' — bank soal belum cukup'}</p>
+                                        {rowError && <InputError message={rowError} className="mt-1" />}
+                                    </div>
+                                );
+                            })}
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                                <button type="button" disabled={data.blueprint_rows.length >= 30 || availableCompetencies.length === 0} onClick={() => updateBlueprintRows([...data.blueprint_rows, defaultBlueprintRow()])} className="rounded-lg border border-indigo-300 px-4 py-2 text-sm font-semibold text-indigo-700 disabled:opacity-40">+ Tambah komposisi</button>
+                                <span className="text-sm font-semibold text-slate-700">Total blueprint: {data.question_count} soal</span>
+                            </div>
                         </div>
                     ) : (
                         <div className="mt-6">
@@ -129,7 +298,7 @@ export default function Create({ questions, assessmentTypes, assessment }: Props
                                     return (
                                         <label key={question.id} className={`flex gap-4 py-4 ${limitReached ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}>
                                             <input type="checkbox" checked={selected} disabled={limitReached} onChange={() => toggleQuestion(question.id)} className="mt-1 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" />
-                                            <div><p className="font-medium text-slate-900">{question.title || question.prompt}</p><p className="mt-1 text-xs text-slate-500">{question.competency.code} · {question.competency.name} · kesulitan {question.difficulty}</p></div>
+                                            <div><p className="font-medium text-slate-900">{question.title || question.prompt}</p><p className="mt-1 text-xs text-slate-500">{question.competency.code} · {question.competency.name} · {questionTypes[question.type]} · kesulitan {question.difficulty}</p></div>
                                         </label>
                                     );
                                 })}

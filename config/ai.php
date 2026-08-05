@@ -6,6 +6,8 @@ return [
     'daily_question_limit' => (int) env('AI_DAILY_QUESTION_LIMIT', 50),
     'daily_story_limit' => (int) env('AI_DAILY_STORY_LIMIT', 10),
     'daily_image_limit' => (int) env('AI_DAILY_IMAGE_LIMIT', 20),
+    'daily_chat_limit' => (int) env('AI_DAILY_CHAT_LIMIT', 20),
+    'chat_context_messages' => (int) env('AI_CHAT_CONTEXT_MESSAGES', 12),
 
     'image' => [
         'model' => env('GEMINI_IMAGE_MODEL', 'gemini-3.1-flash-lite-image'),

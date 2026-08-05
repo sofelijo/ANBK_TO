@@ -8,7 +8,10 @@ use App\Enums\QuestionType;
 use App\Models\Assessment;
 use App\Models\Attempt;
 use App\Models\Question;
+use App\Services\AI\AiManager;
 use App\Services\AttemptSubmissionService;
+use App\Services\QuestionSnapshotService;
+use App\Services\StudentChatService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -19,18 +22,21 @@ use Inertia\Response;
 
 class AttemptController extends Controller
 {
-    public function start(Request $request, Assessment $assessment): RedirectResponse
-    {
+    public function start(
+        Request $request,
+        Assessment $assessment,
+        QuestionSnapshotService $snapshotService,
+    ): RedirectResponse {
         $user = $request->user();
         abort_unless(
-            $assessment->school_id === $user->school_id
-            && $assessment->grade_level === $user->grade_level
+            $assessment->grade_level === $user->grade_level
             && $assessment->status === AssessmentStatus::Published,
             404,
         );
 
         abort_if($assessment->starts_at?->isFuture(), 403, 'Try out belum dimulai.');
         abort_if($assessment->ends_at?->isPast(), 403, 'Try out telah ditutup.');
+        $snapshotService->snapshotAssessment($assessment);
 
         $attempt = Attempt::firstOrCreate(
             ['assessment_id' => $assessment->id, 'user_id' => $user->id],
@@ -50,6 +56,7 @@ class AttemptController extends Controller
         Request $request,
         Attempt $attempt,
         AttemptSubmissionService $submissionService,
+        QuestionSnapshotService $snapshotService,
     ): Response|RedirectResponse {
         $this->authorizeStudent($request, $attempt);
 
@@ -92,21 +99,24 @@ class AttemptController extends Controller
                     'show_navigation' => (bool) data_get($settings, 'show_navigation', true),
                     'require_all_answers' => (bool) data_get($settings, 'require_all_answers', false),
                 ],
-                'questions' => $questions->values()->map(function (Question $question, int $questionIndex) use ($answers, $attempt, $shuffleOptions): array {
-                    $options = $question->options;
+                'questions' => $questions->values()->map(function (Question $question, int $questionIndex) use ($answers, $attempt, $shuffleOptions, $snapshotService): array {
+                    $snapshot = $snapshotService->forQuestion($question);
+                    $type = QuestionType::from($snapshot['type']);
+                    $metadata = $snapshot['metadata'] ?? [];
+                    $options = collect($snapshot['options'] ?? []);
                     if ($shuffleOptions) {
                         $options = $options->sortBy(
-                            fn ($option): string => hash('sha256', "{$attempt->public_id}:question:{$question->id}:option:{$option->id}"),
+                            fn (array $option): string => hash('sha256', "{$attempt->public_id}:question:{$question->id}:option:{$option['id']}"),
                         )->values();
                     }
 
                     $matching = null;
-                    if ($question->type === QuestionType::Matching) {
-                        $pairs = collect($question->metadata['matching_pairs'] ?? []);
+                    if ($type === QuestionType::Matching) {
+                        $pairs = collect($metadata['matching_pairs'] ?? []);
                         $rightItems = $pairs->map(fn (array $pair): array => [
                             'id' => $pair['right_id'],
                             'content' => $pair['right'],
-                        ])->merge(collect($question->metadata['matching_distractors'] ?? [])->map(fn (array $distractor): array => [
+                        ])->merge(collect($metadata['matching_distractors'] ?? [])->map(fn (array $distractor): array => [
                             'id' => $distractor['id'],
                             'content' => $distractor['content'],
                         ]));
@@ -127,8 +137,8 @@ class AttemptController extends Controller
                     }
 
                     $matrix = null;
-                    if ($question->type === QuestionType::CategoryMatrix) {
-                        $columns = collect($question->metadata['matrix_columns'] ?? []);
+                    if ($type === QuestionType::CategoryMatrix) {
+                        $columns = collect($metadata['matrix_columns'] ?? []);
                         if ($shuffleOptions) {
                             $columns = $columns->sortBy(
                                 fn (array $column): string => hash('sha256', "{$attempt->public_id}:question:{$question->id}:matrix:{$column['id']}"),
@@ -140,7 +150,7 @@ class AttemptController extends Controller
                                 'id' => $column['id'],
                                 'label' => $column['label'],
                             ])->values(),
-                            'rows' => collect($question->metadata['matrix_rows'] ?? [])->map(fn (array $row): array => [
+                            'rows' => collect($metadata['matrix_rows'] ?? [])->map(fn (array $row): array => [
                                 'id' => $row['id'],
                                 'statement' => $row['statement'],
                             ])->values(),
@@ -149,18 +159,18 @@ class AttemptController extends Controller
 
                     return [
                         'id' => $question->id,
-                        'type' => $question->type->value,
-                        'title' => $question->title,
-                        'stimulus' => $question->stimulus,
-                        'illustration_url' => $question->illustration_url,
-                        'prompt' => $question->prompt,
+                        'type' => $type->value,
+                        'title' => $snapshot['title'],
+                        'stimulus' => $snapshot['stimulus'],
+                        'illustration_url' => $snapshotService->illustrationUrl($snapshot),
+                        'prompt' => $snapshot['prompt'],
                         'position' => $questionIndex + 1,
                         'matching' => $matching,
                         'matrix' => $matrix,
-                        'options' => $options->values()->map(fn ($option, int $optionIndex): array => [
-                            'id' => $option->id,
+                        'options' => $options->values()->map(fn (array $option, int $optionIndex): array => [
+                            'id' => $option['id'],
                             'label' => chr(65 + $optionIndex),
-                            'content' => $option->content,
+                            'content' => $option['content'],
                         ]),
                         'response' => $answers->get($question->id)?->response,
                     ];
@@ -169,17 +179,24 @@ class AttemptController extends Controller
         ]);
     }
 
-    public function saveAnswer(Request $request, Attempt $attempt, Question $question): JsonResponse
-    {
+    public function saveAnswer(
+        Request $request,
+        Attempt $attempt,
+        Question $question,
+        QuestionSnapshotService $snapshotService,
+    ): JsonResponse {
         $this->authorizeStudent($request, $attempt);
         abort_unless($attempt->status === AttemptStatus::InProgress, 409);
         abort_if($attempt->isExpired(), 409, 'Waktu pengerjaan telah habis.');
 
-        $belongsToAssessment = $attempt->assessment
+        $assessmentQuestion = $attempt->assessment
             ->questions()
             ->whereKey($question->id)
-            ->exists();
-        abort_unless($belongsToAssessment, 404);
+            ->first();
+        abort_unless($assessmentQuestion, 404);
+        $snapshot = $snapshotService->forQuestion($assessmentQuestion);
+        $type = QuestionType::from($snapshot['type']);
+        $metadata = $snapshot['metadata'] ?? [];
 
         $data = $request->validate([
             'option_ids' => ['sometimes', 'array', 'max:10'],
@@ -193,21 +210,21 @@ class AttemptController extends Controller
         ]);
 
         if (isset($data['option_ids'])) {
-            $validOptionCount = $question->options()->whereIn('id', $data['option_ids'])->count();
+            $validOptionCount = collect($snapshot['options'] ?? [])->whereIn('id', $data['option_ids'])->count();
             if ($validOptionCount !== count($data['option_ids'])) {
                 throw ValidationException::withMessages(['option_ids' => 'Pilihan jawaban tidak valid.']);
             }
         }
 
         if (isset($data['matches'])) {
-            if ($question->type !== QuestionType::Matching) {
+            if ($type !== QuestionType::Matching) {
                 throw ValidationException::withMessages(['matches' => 'Jawaban pasangan hanya valid untuk soal menjodohkan.']);
             }
 
-            $pairs = collect($question->metadata['matching_pairs'] ?? []);
+            $pairs = collect($metadata['matching_pairs'] ?? []);
             $validLeftIds = $pairs->pluck('left_id')->map(fn (mixed $id): string => (string) $id)->all();
             $validRightIds = $pairs->pluck('right_id')
-                ->merge(collect($question->metadata['matching_distractors'] ?? [])->pluck('id'))
+                ->merge(collect($metadata['matching_distractors'] ?? [])->pluck('id'))
                 ->map(fn (mixed $id): string => (string) $id)
                 ->all();
             $leftIds = array_map('strval', array_keys($data['matches']));
@@ -221,12 +238,12 @@ class AttemptController extends Controller
         }
 
         if (isset($data['matrix_answers'])) {
-            if ($question->type !== QuestionType::CategoryMatrix) {
+            if ($type !== QuestionType::CategoryMatrix) {
                 throw ValidationException::withMessages(['matrix_answers' => 'Jawaban kategori hanya valid untuk soal matriks.']);
             }
 
-            $validRowIds = collect($question->metadata['matrix_rows'] ?? [])->pluck('id')->map(fn (mixed $id): string => (string) $id)->all();
-            $validColumnIds = collect($question->metadata['matrix_columns'] ?? [])->pluck('id')->map(fn (mixed $id): string => (string) $id)->all();
+            $validRowIds = collect($metadata['matrix_rows'] ?? [])->pluck('id')->map(fn (mixed $id): string => (string) $id)->all();
+            $validColumnIds = collect($metadata['matrix_columns'] ?? [])->pluck('id')->map(fn (mixed $id): string => (string) $id)->all();
 
             if (array_diff(array_map('strval', array_keys($data['matrix_answers'])), $validRowIds)
                 || array_diff(array_map('strval', array_values($data['matrix_answers'])), $validColumnIds)) {
@@ -257,6 +274,7 @@ class AttemptController extends Controller
         Request $request,
         Attempt $attempt,
         AttemptSubmissionService $submissionService,
+        QuestionSnapshotService $snapshotService,
     ): RedirectResponse {
         $this->authorizeStudent($request, $attempt);
 
@@ -265,7 +283,7 @@ class AttemptController extends Controller
             $answers = $attempt->answers->keyBy('question_id');
             $answeredCount = $attempt->assessment->questions->filter(
                 fn (Question $question): bool => $this->hasCompleteResponse(
-                    $question,
+                    $snapshotService->forQuestion($question),
                     $answers->get($question->id)?->response,
                 ),
             )->count();
@@ -299,26 +317,43 @@ class AttemptController extends Controller
         return Inertia::render('Attempts/Result', ['attempt' => $attempt]);
     }
 
+    public function practiceChat(
+        Request $request,
+        Attempt $attempt,
+        StudentChatService $chatService,
+        AiManager $manager,
+    ): RedirectResponse {
+        $this->authorizeStudent($request, $attempt);
+        abort_unless($attempt->status === AttemptStatus::Submitted, 409);
+
+        $chatService->requestPracticeFor($attempt, $manager);
+
+        return to_route('student-chat.show');
+    }
+
     private function authorizeStudent(Request $request, Attempt $attempt): void
     {
         abort_unless($attempt->user_id === $request->user()->id, 404);
     }
 
-    private function hasCompleteResponse(Question $question, ?array $response): bool
+    private function hasCompleteResponse(array $snapshot, ?array $response): bool
     {
-        if ($question->type === QuestionType::Matching) {
-            $pairCount = count($question->metadata['matching_pairs'] ?? []);
+        $type = QuestionType::from($snapshot['type']);
+        $metadata = $snapshot['metadata'] ?? [];
+
+        if ($type === QuestionType::Matching) {
+            $pairCount = count($metadata['matching_pairs'] ?? []);
 
             return $pairCount > 0 && count($response['matches'] ?? []) === $pairCount;
         }
 
-        if ($question->type === QuestionType::CategoryMatrix) {
-            $rowCount = count($question->metadata['matrix_rows'] ?? []);
+        if ($type === QuestionType::CategoryMatrix) {
+            $rowCount = count($metadata['matrix_rows'] ?? []);
 
             return $rowCount > 0 && count($response['matrix_answers'] ?? []) === $rowCount;
         }
 
-        if ($question->type === QuestionType::ShortAnswer) {
+        if ($type === QuestionType::ShortAnswer) {
             return trim((string) data_get($response, 'text', '')) !== '';
         }
 

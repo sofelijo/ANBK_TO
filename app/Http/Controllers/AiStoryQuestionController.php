@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\AiGenerationStatus;
 use App\Enums\AiGenerationType;
+use App\Enums\QuestionStatus;
 use App\Jobs\GenerateStoryQuestions;
 use App\Models\AiGeneration;
 use App\Models\Question;
@@ -12,6 +13,7 @@ use App\Services\AI\StoryIllustrationService;
 use App\Services\AuditLogger;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -156,6 +158,77 @@ class AiStoryQuestionController extends Controller
         GenerateStoryQuestions::dispatch($generation->id);
 
         return back()->with('success', 'Pembuatan soal cerita dijalankan kembali.');
+    }
+
+    public function publishBundle(
+        Request $request,
+        AiGeneration $generation,
+        AuditLogger $auditLogger,
+    ): RedirectResponse {
+        $this->ensureAccessible($request, $generation);
+
+        if ($generation->status !== AiGenerationStatus::Completed) {
+            throw ValidationException::withMessages([
+                'generation' => 'Bundle hanya dapat diverifikasi setelah proses AI selesai.',
+            ]);
+        }
+
+        $questionIds = collect(data_get($generation->result_payload, 'question_ids', []))
+            ->filter(fn ($id): bool => is_int($id) || ctype_digit((string) $id))
+            ->map(fn ($id): int => (int) $id)
+            ->unique()
+            ->values();
+
+        if ($questionIds->isEmpty()) {
+            throw ValidationException::withMessages([
+                'generation' => 'Bundle ini belum memiliki soal yang dapat diverifikasi.',
+            ]);
+        }
+
+        $publishedCount = DB::transaction(function () use ($generation, $questionIds, $request): int {
+            $questions = Question::query()
+                ->where('school_id', $request->user()->school_id)
+                ->where('story_generation_id', $generation->id)
+                ->whereIn('id', $questionIds)
+                ->lockForUpdate()
+                ->get();
+
+            if ($questions->count() !== $questionIds->count()) {
+                throw ValidationException::withMessages([
+                    'generation' => 'Sebagian soal bundle tidak ditemukan. Muat ulang halaman dan periksa kembali.',
+                ]);
+            }
+
+            if ($questions->contains(fn (Question $question): bool => $question->status === QuestionStatus::Archived || $question->superseded_by_id !== null
+            )) {
+                throw ValidationException::withMessages([
+                    'generation' => 'Bundle memuat soal yang sudah diarsipkan atau digantikan. Periksa soal satu per satu.',
+                ]);
+            }
+
+            $publishable = $questions->where('status', '!=', QuestionStatus::Published);
+
+            Question::query()
+                ->whereIn('id', $publishable->pluck('id'))
+                ->update([
+                    'status' => QuestionStatus::Published,
+                    'approved_by' => $request->user()->id,
+                    'approved_at' => now(),
+                ]);
+
+            return $publishable->count();
+        });
+
+        if ($publishedCount === 0) {
+            return back()->with('success', 'Seluruh soal dalam bundle sudah terbit.');
+        }
+
+        $auditLogger->log($request, 'story_bundle.published', $generation, [
+            'question_ids' => $questionIds->all(),
+            'question_count' => $publishedCount,
+        ]);
+
+        return back()->with('success', "{$publishedCount} soal dalam bundle berhasil diverifikasi dan diterbitkan.");
     }
 
     private function ensureAccessible(Request $request, AiGeneration $generation): void

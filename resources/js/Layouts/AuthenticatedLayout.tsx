@@ -21,12 +21,22 @@ export default function AuthenticatedLayout({
             href: route('assessments.index'),
             active: 'assessments.*',
         },
+        {
+            label: canManage ? 'Chat Siswa' : 'Teman Belajar',
+            href: canManage ? route('teacher-chat.index') : route('student-chat.show'),
+            active: canManage ? 'teacher-chat.*' : 'student-chat.*',
+        },
         ...(canManage
             ? [
                   {
                       label: 'Bank Soal',
                       href: route('questions.index'),
                       active: 'questions.*',
+                  },
+                  {
+                      label: 'Kompetensi',
+                      href: route('competencies.index'),
+                      active: 'competencies.*',
                   },
                   {
                       label: 'Laporan',

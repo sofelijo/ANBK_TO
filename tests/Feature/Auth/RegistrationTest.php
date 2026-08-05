@@ -69,9 +69,8 @@ class RegistrationTest extends TestCase
         $this->assertGuest();
     }
 
-    public function test_registration_requires_an_existing_eight_digit_npsn(): void
+    public function test_registration_requires_eight_digit_npsn_and_creates_new_school_group(): void
     {
-        School::create(['name' => 'Sekolah Uji', 'npsn' => '10000007']);
         $payload = [
             'name' => 'Guru NPSN',
             'email' => 'guru-npsn@example.com',
@@ -84,8 +83,37 @@ class RegistrationTest extends TestCase
             ->assertSessionHasErrors('npsn');
 
         $this->post('/register', [...$payload, 'npsn' => '10000008'])
-            ->assertSessionHasErrors([
-                'npsn' => 'NPSN sekolah tidak ditemukan.',
-            ]);
+            ->assertRedirect(route('login'));
+
+        $school = School::query()->where('npsn', '10000008')->firstOrFail();
+        $teacher = User::query()->where('email', $payload['email'])->firstOrFail();
+
+        $this->assertSame($school->id, $teacher->school_id);
+        $this->assertSame('Sekolah NPSN 10000008', $school->name);
+    }
+
+    public function test_teacher_and_student_with_same_npsn_are_grouped_in_same_school(): void
+    {
+        $this->post(route('student-login'), [
+            'npsn' => '10000009',
+            'nisn' => '0098765432',
+            'name' => 'Siswa Satu',
+        ]);
+        $student = User::query()->where('student_identifier', '0098765432')->firstOrFail();
+
+        $this->post(route('logout'));
+
+        $this->post(route('register'), [
+            'name' => 'Guru Satu',
+            'email' => 'guru-satu@example.com',
+            'npsn' => '10000009',
+            'account_type' => UserRole::Teacher->value,
+            'password' => 'password',
+            'password_confirmation' => 'password',
+        ]);
+        $teacher = User::query()->where('email', 'guru-satu@example.com')->firstOrFail();
+
+        $this->assertSame($student->school_id, $teacher->school_id);
+        $this->assertDatabaseCount('schools', 1);
     }
 }

@@ -20,8 +20,44 @@ class AttemptWorkflowTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_student_can_view_and_start_published_assessment_from_another_school(): void
+    {
+        [, $assessment] = $this->scenario();
+        $otherSchool = School::create([
+            'name' => 'Sekolah Lain',
+            'npsn' => '10000002',
+        ]);
+        $otherStudent = User::create([
+            'school_id' => $otherSchool->id,
+            'name' => 'Siswa Sekolah Lain',
+            'email' => 'siswa-lain@example.com',
+            'password' => 'password',
+            'role' => UserRole::Student,
+            'student_identifier' => '0011111111',
+            'grade_level' => 5,
+            'email_verified_at' => now(),
+        ]);
+
+        $this->actingAs($otherStudent)
+            ->get(route('assessments.index'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Assessments/Index')
+                ->where('assessments.0.id', $assessment->id));
+
+        $this->actingAs($otherStudent)
+            ->post(route('attempts.start', $assessment))
+            ->assertRedirect();
+
+        $this->assertDatabaseHas('attempts', [
+            'assessment_id' => $assessment->id,
+            'user_id' => $otherStudent->id,
+            'status' => AttemptStatus::InProgress->value,
+        ]);
+    }
+
     public function test_student_attempt_is_scored_and_receives_weakness_recommendation(): void
     {
+        config()->set('ai.driver', 'fake');
         config()->set('queue.default', 'sync');
         [$student, $assessment, $informationQuestion, $inferenceQuestion, $inferencePractice] = $this->scenario();
 
@@ -62,6 +98,36 @@ class AttemptWorkflowTest extends TestCase
             'question_id' => $inferencePractice->id,
             'position' => 1,
         ]);
+        $this->assertDatabaseHas('chat_rooms', ['student_id' => $student->id]);
+        $this->assertDatabaseHas('chat_messages', [
+            'attempt_id' => $attempt->id,
+            'sender_type' => 'assistant',
+            'type' => 'attempt_summary',
+            'status' => 'completed',
+        ]);
+
+        $this->actingAs($student)
+            ->post(route('attempts.practice-chat', $attempt->public_id))
+            ->assertRedirect(route('student-chat.show'));
+
+        $practiceRequest = $attempt->student->chatRoom->messages()
+            ->where('source_key', "attempt-practice-request:{$attempt->id}")
+            ->firstOrFail();
+        $practiceReply = $attempt->student->chatRoom->messages()
+            ->where('source_key', "attempt-practice-reply:{$attempt->id}")
+            ->firstOrFail();
+
+        $this->assertStringContainsString('Membuat inferensi', $practiceRequest->content);
+        $this->assertStringContainsString($inferenceQuestion->prompt, $practiceRequest->content);
+        $this->assertSame('completed', $practiceReply->status);
+        $this->assertStringContainsString('Contoh soal', $practiceReply->content);
+
+        $this->actingAs($student)
+            ->post(route('attempts.practice-chat', $attempt->public_id))
+            ->assertRedirect(route('student-chat.show'));
+        $this->assertSame(1, $attempt->student->chatRoom->messages()
+            ->where('source_key', "attempt-practice-request:{$attempt->id}")
+            ->count());
     }
 
     public function test_attempt_integrity_event_is_recorded(): void
@@ -81,6 +147,46 @@ class AttemptWorkflowTest extends TestCase
             'attempt_id' => $attempt->id,
             'event_type' => 'tab_hidden',
         ]);
+    }
+
+    public function test_attempt_uses_frozen_question_snapshot_for_display_and_scoring(): void
+    {
+        config()->set('queue.default', 'sync');
+        [$student, $assessment, $informationQuestion] = $this->scenario();
+        $originalCorrect = $informationQuestion->options()->where('is_correct', true)->firstOrFail();
+        $originalWrong = $informationQuestion->options()->where('is_correct', false)->firstOrFail();
+
+        $this->actingAs($student)
+            ->post(route('attempts.start', $assessment))
+            ->assertRedirect();
+
+        $snapshot = json_decode(
+            $assessment->questions()->whereKey($informationQuestion->id)->firstOrFail()->pivot->snapshot,
+            true,
+        );
+        $this->assertSame('Pilih jawaban yang tepat.', $snapshot['prompt']);
+        $this->assertTrue(collect($snapshot['options'])->firstWhere('id', $originalCorrect->id)['is_correct']);
+
+        $informationQuestion->update(['prompt' => 'Pertanyaan hidup sudah berubah.']);
+        $originalCorrect->update(['content' => 'Sekarang dianggap salah', 'is_correct' => false]);
+        $originalWrong->update(['content' => 'Sekarang dianggap benar', 'is_correct' => true]);
+        $attempt = Attempt::firstOrFail();
+
+        $this->actingAs($student)
+            ->get(route('attempts.show', $attempt->public_id))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('attempt.questions.0.prompt', 'Pilih jawaban yang tepat.')
+                ->where('attempt.questions.0.options.0.content', 'Jawaban benar'));
+
+        $this->actingAs($student)->putJson(
+            route('attempts.answers.update', [$attempt->public_id, $informationQuestion]),
+            ['option_ids' => [$originalCorrect->id]],
+        )->assertOk();
+        $this->actingAs($student)
+            ->post(route('attempts.submit', $attempt->public_id))
+            ->assertRedirect(route('attempts.result', $attempt->public_id));
+
+        $this->assertTrue($attempt->answers()->where('question_id', $informationQuestion->id)->firstOrFail()->is_correct);
     }
 
     public function test_matching_answer_is_autosaved_and_scored_without_exposing_answer_key(): void
@@ -292,6 +398,89 @@ class AttemptWorkflowTest extends TestCase
         $this->assertTrue($assessment->settings['shuffle_options']);
         $this->assertFalse($assessment->settings['show_navigation']);
         $this->assertTrue($assessment->settings['require_all_answers']);
+    }
+
+    public function test_teacher_can_create_assessment_from_exact_blueprint_composition(): void
+    {
+        [, , $informationQuestion, $inferenceQuestion, $inferencePractice, $teacher] = $this->scenario();
+
+        $this->actingAs($teacher)
+            ->post(route('assessments.store'), [
+                'title' => 'Blueprint Literasi',
+                'description' => 'Komposisi kompetensi terstruktur.',
+                'grade_level' => 5,
+                'duration_minutes' => 45,
+                'assessment_type' => 'tryout',
+                'selection_mode' => 'blueprint',
+                'question_count' => 3,
+                'blueprint_rows' => [
+                    [
+                        'competency_id' => $informationQuestion->competency_id,
+                        'type' => 'single_choice',
+                        'difficulty' => 1,
+                        'count' => 1,
+                    ],
+                    [
+                        'competency_id' => $inferenceQuestion->competency_id,
+                        'type' => 'single_choice',
+                        'difficulty' => 1,
+                        'count' => 2,
+                    ],
+                ],
+                'shuffle_questions' => true,
+                'shuffle_options' => true,
+                'show_navigation' => true,
+                'require_all_answers' => false,
+            ])
+            ->assertRedirect(route('assessments.index'));
+
+        $assessment = Assessment::query()->where('title', 'Blueprint Literasi')->firstOrFail();
+        $this->assertSame('blueprint', $assessment->settings['selection_mode']);
+        $this->assertSame(3, $assessment->settings['question_count']);
+        $this->assertCount(2, $assessment->settings['blueprint_rows']);
+        $this->assertEqualsCanonicalizing(
+            [$informationQuestion->id, $inferenceQuestion->id, $inferencePractice->id],
+            $assessment->questions->pluck('id')->all(),
+        );
+    }
+
+    public function test_teacher_can_create_assessment_with_question_count_per_competency(): void
+    {
+        [, , $informationQuestion, $inferenceQuestion, $inferencePractice, $teacher] = $this->scenario();
+
+        $this->actingAs($teacher)
+            ->post(route('assessments.store'), [
+                'title' => 'Komposisi Kompetensi Literasi',
+                'description' => 'Kuota sederhana per kompetensi.',
+                'grade_level' => 5,
+                'duration_minutes' => 45,
+                'assessment_type' => 'tryout',
+                'selection_mode' => 'competency',
+                'question_count' => 3,
+                'competency_rows' => [
+                    [
+                        'competency_id' => $informationQuestion->competency_id,
+                        'count' => 1,
+                    ],
+                    [
+                        'competency_id' => $inferenceQuestion->competency_id,
+                        'count' => 2,
+                    ],
+                ],
+                'shuffle_questions' => true,
+                'shuffle_options' => true,
+                'show_navigation' => true,
+                'require_all_answers' => false,
+            ])
+            ->assertRedirect(route('assessments.index'));
+
+        $assessment = Assessment::query()->where('title', 'Komposisi Kompetensi Literasi')->firstOrFail();
+        $this->assertSame('competency', $assessment->settings['selection_mode']);
+        $this->assertCount(2, $assessment->settings['competency_rows']);
+        $this->assertEqualsCanonicalizing(
+            [$informationQuestion->id, $inferenceQuestion->id, $inferencePractice->id],
+            $assessment->questions->pluck('id')->all(),
+        );
     }
 
     public function test_manual_assessment_requires_the_selected_question_count_to_match(): void

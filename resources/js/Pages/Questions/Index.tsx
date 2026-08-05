@@ -4,6 +4,7 @@ import { FormEvent, useState } from 'react';
 
 type Question = {
     id: number;
+    version: number;
     title?: string;
     prompt: string;
     type: string;
@@ -113,6 +114,7 @@ export default function Index({ questions, filters }: Props) {
                                                     )}
                                                     <span className="text-xs text-slate-500">Kelas {question.grade_level}</span>
                                                     {!bundled && <span className="text-xs text-slate-500">Kesulitan {question.difficulty}</span>}
+                                                    {!bundled && question.version > 1 && <span className="text-xs font-semibold text-indigo-600">Versi {question.version}</span>}
                                                 </div>
                                                 <h2 className="mt-2 font-semibold text-slate-900">
                                                     {bundled

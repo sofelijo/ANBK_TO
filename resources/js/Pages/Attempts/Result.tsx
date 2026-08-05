@@ -1,18 +1,42 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
-import { Head, Link } from '@inertiajs/react';
+import { Head, Link, router } from '@inertiajs/react';
+import { useState } from 'react';
 
 type Result = { id: number; percentage: number; correct_count: number; question_count: number; competency: { code: string; domain: string; name: string } };
 type Recommendation = { id: number; reason: string; competency: { code: string; name: string }; question: { id: number; prompt: string; stimulus?: string } };
-type Attempt = { score: number; max_score: number; summary: string; assessment: { title: string }; competency_results: Result[]; recommendations: Recommendation[] };
+type Attempt = { public_id: string; score: number; max_score: number; summary: string; assessment: { title: string }; competency_results: Result[]; recommendations: Recommendation[] };
 
 export default function ResultPage({ attempt }: { attempt: Attempt }) {
+    const [openingChat, setOpeningChat] = useState(false);
     const percentage = attempt.max_score > 0 ? Math.round((attempt.score / attempt.max_score) * 100) : 0;
+    const openPracticeChat = () => {
+        router.post(route('attempts.practice-chat', attempt.public_id), {}, {
+            onStart: () => setOpeningChat(true),
+            onFinish: () => setOpeningChat(false),
+        });
+    };
+
     return (
         <AuthenticatedLayout header={<div><p className="text-sm font-medium text-emerald-600">Hasil Try Out</p><h1 className="mt-1 text-2xl font-bold text-slate-900">{attempt.assessment.title}</h1></div>}>
             <Head title="Hasil Try Out" />
             <div className="mx-auto max-w-5xl space-y-6 px-4 py-8 sm:px-6">
                 <section className="grid gap-5 rounded-2xl bg-slate-900 p-8 text-white md:grid-cols-[180px_1fr] md:items-center">
-                    <div><p className="text-sm text-slate-300">Capaian</p><p className="mt-1 text-5xl font-bold text-emerald-400">{percentage}%</p><p className="mt-2 text-sm text-slate-400">{attempt.score} dari {attempt.max_score} poin</p></div>
+                    <div>
+                        <p className="text-sm text-slate-300">Capaian</p>
+                        <p className="mt-1 text-5xl font-bold text-emerald-400">{percentage}%</p>
+                        <p className="mt-2 text-sm text-slate-400">{attempt.score} dari {attempt.max_score} poin</p>
+                        <button
+                            type="button"
+                            disabled={openingChat}
+                            onClick={openPracticeChat}
+                            className="mt-5 w-full rounded-xl bg-emerald-500 px-4 py-3 text-sm font-bold text-white transition hover:bg-emerald-400 disabled:cursor-wait disabled:opacity-60"
+                        >
+                            {openingChat ? 'Membuka chat…' : 'Latihan dengan AI →'}
+                        </button>
+                        <p className="mt-2 text-xs leading-5 text-slate-400">
+                            AI membuat contoh soal dari materi yang paling banyak salah.
+                        </p>
+                    </div>
                     <div><h2 className="font-semibold">Ringkasan belajar</h2><p className="mt-2 leading-7 text-slate-300">{attempt.summary}</p></div>
                 </section>
 

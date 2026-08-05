@@ -5,19 +5,24 @@ Platform try out ANBK berbasis Laravel 13, React/Inertia, PostgreSQL, Redis, dan
 ## Fitur MVP
 
 - Bank soal multi-sekolah dengan kompetensi, tingkat kesulitan, status review, dan lineage variasi.
+- Soal terbit bersifat immutable: edit membuat versi draft baru, sementara paket menyimpan snapshot soal dan kunci jawaban.
 - Pembuatan tiga variasi soal melalui queue dengan kuota harian dan audit token/biaya.
 - Pembuatan satu cerita dan 2–4 soal draft hanya dari tema yang dimasukkan guru.
 - Paket try out berdasarkan jenjang dengan soal yang sudah disetujui guru.
 - Paket ujian fleksibel: jenis reguler/custom, durasi, jumlah soal, pilihan manual/otomatis, jadwal, pengacakan, navigasi, dan wajib jawab.
+- Blueprint paket terstruktur berdasarkan kuota kompetensi, bentuk soal, dan tingkat kesulitan.
 - Paket dapat diedit dan diterbitkan ulang selama belum ada peserta yang memulai pengerjaan.
 - Timer, autosave server, cadangan jawaban di `localStorage`, dan sinkronisasi ulang saat online.
 - Scoring pilihan tunggal, pilihan kompleks, isian singkat, menjodohkan, serta tabel pilihan kategori dengan autosave.
 - Peta capaian per kompetensi dan 2–3 rekomendasi dari bank soal.
 - Ringkasan AI tanpa mengirim nama atau identitas siswa.
+- Room privat siswa–AI untuk pendampingan belajar, ringkasan otomatis pascates, kuota harian, guard ujian aktif, dan pengawasan read-only guru.
 - Driver AI `fake` untuk pengembangan dan Gemini untuk produksi.
 - Registrasi guru dengan persetujuan admin sekolah, manajemen status akun, dan audit aktivitas penting.
 - Edit, duplikasi, arsip, serta impor soal dari CSV/XLSX.
-- Laporan nilai, kompetensi, kualitas butir, event integritas, dan ekspor CSV/cetak PDF.
+- Laporan nilai, kompetensi, analisis butir lanjutan, event integritas, dan ekspor CSV/cetak PDF.
+
+Analisis butir menghitung tingkat kesukaran, daya pembeda kelompok atas–bawah 27%, efektivitas pengecoh, serta reliabilitas KR-20. Penandaan otomatis baru aktif setelah minimal 30 peserta menyelesaikan paket agar hasil tidak menyesatkan. Ambang tersebut dapat diubah melalui `ITEM_ANALYSIS_MIN_RESPONSES`.
 
 ## Menjalankan Lokal
 

@@ -8,11 +8,15 @@ use App\Http\Controllers\AiStoryQuestionController;
 use App\Http\Controllers\AssessmentController;
 use App\Http\Controllers\AttemptController;
 use App\Http\Controllers\AttemptEventController;
+use App\Http\Controllers\ChatMessageController;
+use App\Http\Controllers\CompetencyController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\QuestionController;
 use App\Http\Controllers\QuestionImportController;
 use App\Http\Controllers\ReportController;
+use App\Http\Controllers\StudentChatController;
+use App\Http\Controllers\TeacherChatController;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -34,6 +38,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/assessments', [AssessmentController::class, 'index'])->name('assessments.index');
 
     Route::middleware('role:admin,teacher')->group(function () {
+        Route::get('/student-chats', [TeacherChatController::class, 'index'])->name('teacher-chat.index');
+        Route::get('/student-chats/{student}', [TeacherChatController::class, 'show'])->name('teacher-chat.show');
         Route::get('/reports', [ReportController::class, 'index'])->name('reports.index');
         Route::get('/reports/export', [ReportController::class, 'export'])->name('reports.export');
         Route::get('/questions/import', [QuestionImportController::class, 'create'])->name('questions.import.create');
@@ -43,8 +49,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/story-questions', [AiStoryQuestionController::class, 'store'])->name('story-questions.store');
         Route::get('/story-questions/{generation}', [AiStoryQuestionController::class, 'show'])->name('story-questions.show');
         Route::post('/story-questions/{generation}/retry', [AiStoryQuestionController::class, 'retry'])->name('story-questions.retry');
+        Route::post('/story-questions/{generation}/publish', [AiStoryQuestionController::class, 'publishBundle'])->name('story-questions.publish');
         Route::post('/story-questions/{generation}/illustration', [AiStoryIllustrationController::class, 'store'])->name('story-questions.illustration.store');
         Route::resource('questions', QuestionController::class)->only(['index', 'create', 'store', 'show', 'edit', 'update']);
+        Route::resource('competencies', CompetencyController::class)->except('show');
         Route::post('/questions/{question}/approve', [QuestionController::class, 'approve'])->name('questions.approve');
         Route::post('/questions/{question}/duplicate', [QuestionController::class, 'duplicate'])->name('questions.duplicate');
         Route::post('/questions/{question}/archive', [QuestionController::class, 'archive'])->name('questions.archive');
@@ -66,13 +74,20 @@ Route::middleware(['auth', 'verified'])->group(function () {
     });
 
     Route::middleware('role:student')->group(function () {
+        Route::get('/chat', [StudentChatController::class, 'show'])->name('student-chat.show');
+        Route::post('/chat/messages', [StudentChatController::class, 'store'])->middleware('throttle:20,1')->name('student-chat.messages.store');
         Route::post('/assessments/{assessment}/start', [AttemptController::class, 'start'])->name('attempts.start');
         Route::get('/attempts/{attempt:public_id}', [AttemptController::class, 'show'])->name('attempts.show');
         Route::put('/attempts/{attempt:public_id}/answers/{question}', [AttemptController::class, 'saveAnswer'])->middleware('throttle:120,1')->name('attempts.answers.update');
         Route::post('/attempts/{attempt:public_id}/events', [AttemptEventController::class, 'store'])->middleware('throttle:30,1')->name('attempts.events.store');
         Route::post('/attempts/{attempt:public_id}/submit', [AttemptController::class, 'submit'])->name('attempts.submit');
         Route::get('/attempts/{attempt:public_id}/result', [AttemptController::class, 'result'])->name('attempts.result');
+        Route::post('/attempts/{attempt:public_id}/practice-chat', [AttemptController::class, 'practiceChat'])->name('attempts.practice-chat');
     });
+
+    Route::get('/chat-rooms/{room}/messages', [ChatMessageController::class, 'index'])
+        ->middleware('throttle:120,1')
+        ->name('chat.messages.index');
 
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');

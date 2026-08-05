@@ -11,7 +11,11 @@ use Illuminate\Support\Facades\DB;
 
 class AttemptSubmissionService
 {
-    public function __construct(private readonly QuestionScorer $scorer) {}
+    public function __construct(
+        private readonly QuestionScorer $scorer,
+        private readonly QuestionSnapshotService $snapshotService,
+        private readonly StudentChatService $chatService,
+    ) {}
 
     public function submit(Attempt $attempt): Attempt
     {
@@ -29,9 +33,10 @@ class AttemptSubmissionService
             $competencies = [];
 
             foreach ($attempt->assessment->questions as $question) {
+                $snapshot = $this->snapshotService->forQuestion($question);
                 $points = (float) $question->pivot->points;
                 $answer = $answers->get($question->id);
-                $isCorrect = $this->scorer->isCorrect($question, $answer?->response);
+                $isCorrect = $this->scorer->isCorrect($question, $answer?->response, $snapshot);
                 $awarded = $isCorrect ? $points : 0.0;
 
                 $attempt->answers()->updateOrCreate(
@@ -45,9 +50,10 @@ class AttemptSubmissionService
 
                 $score += $awarded;
                 $maxScore += $points;
-                $competencies[$question->competency_id] ??= ['correct' => 0, 'total' => 0];
-                $competencies[$question->competency_id]['correct'] += $isCorrect ? 1 : 0;
-                $competencies[$question->competency_id]['total']++;
+                $competencyId = (int) $snapshot['competency_id'];
+                $competencies[$competencyId] ??= ['correct' => 0, 'total' => 0];
+                $competencies[$competencyId]['correct'] += $isCorrect ? 1 : 0;
+                $competencies[$competencyId]['total']++;
             }
 
             $attempt->competencyResults()->delete();
@@ -77,6 +83,7 @@ class AttemptSubmissionService
             ]);
 
             $this->buildRecommendations($attempt);
+            $this->chatService->postAttemptSummary($attempt->fresh());
             GenerateAttemptSummary::dispatch($attempt->id)->afterCommit();
 
             return $attempt->fresh(['competencyResults.competency', 'recommendations.question']);

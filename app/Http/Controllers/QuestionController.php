@@ -24,12 +24,14 @@ class QuestionController extends Controller
     {
         $questions = Question::query()
             ->where('school_id', $request->user()->school_id)
+            ->whereNull('superseded_by_id')
             ->where(function ($query) {
                 $query->whereNull('questions.story_generation_id')
                     ->orWhereNotExists(function ($subquery) {
                         $subquery->selectRaw('1')
                             ->from('questions as earlier_bundle_questions')
                             ->whereColumn('earlier_bundle_questions.story_generation_id', 'questions.story_generation_id')
+                            ->whereNull('earlier_bundle_questions.superseded_by_id')
                             ->whereColumn('earlier_bundle_questions.id', '<', 'questions.id');
                     });
             })
@@ -107,6 +109,8 @@ class QuestionController extends Controller
             'options',
             'reviews.reviewer:id,name',
             'variants' => fn ($query) => $query->with('competency:id,code,name')->latest(),
+            'revisionOf:id,title,version,status',
+            'supersededBy:id,title,version,status',
         ]);
 
         return Inertia::render('Questions/Show', [
@@ -122,6 +126,7 @@ class QuestionController extends Controller
     public function edit(Request $request, Question $question): Response
     {
         $this->ensureSameSchool($request, $question);
+        abort_if($question->superseded_by_id !== null, 409, 'Versi soal ini sudah digantikan oleh revisi yang lebih baru.');
         $question->load('options');
 
         return Inertia::render('Questions/Create', [
@@ -133,9 +138,28 @@ class QuestionController extends Controller
     public function update(Request $request, Question $question, AuditLogger $auditLogger): RedirectResponse
     {
         $this->ensureSameSchool($request, $question);
+        abort_if($question->superseded_by_id !== null, 409, 'Versi soal ini sudah digantikan oleh revisi yang lebih baru.');
         $data = $this->validatedData($request);
+        $createRevision = $question->status === QuestionStatus::Published
+            || $question->assessments()->exists();
 
-        DB::transaction(function () use ($question, $data): void {
+        $savedQuestion = DB::transaction(function () use ($question, $data, $request, $createRevision): Question {
+            if ($createRevision) {
+                $revision = Question::create([
+                    ...$this->attributes($data, $question->metadata ?? []),
+                    'school_id' => $question->school_id,
+                    'author_id' => $request->user()->id,
+                    'parent_id' => $question->parent_id,
+                    'revision_of_id' => $question->id,
+                    'version' => $question->version + 1,
+                    'story_generation_id' => $question->story_generation_id,
+                    'status' => QuestionStatus::Draft,
+                ]);
+                $this->syncOptions($revision, $data['options'] ?? []);
+
+                return $revision;
+            }
+
             $question->update([
                 ...$this->attributes($data, $question->metadata ?? []),
                 'status' => QuestionStatus::Draft,
@@ -143,10 +167,19 @@ class QuestionController extends Controller
                 'approved_at' => null,
             ]);
             $this->syncOptions($question, $data['options'] ?? []);
-        });
-        $auditLogger->log($request, 'question.updated', $question);
 
-        return to_route('questions.show', $question)->with('success', 'Perubahan disimpan sebagai draft dan perlu diterbitkan ulang.');
+            return $question;
+        });
+        $auditLogger->log($request, $createRevision ? 'question.revision_created' : 'question.updated', $savedQuestion, [
+            'revision_of_id' => $createRevision ? $question->id : null,
+        ]);
+
+        return to_route('questions.show', $savedQuestion)->with(
+            'success',
+            $createRevision
+                ? "Revisi versi {$savedQuestion->version} disimpan sebagai draft. Versi lama tetap aman untuk paket yang sudah terbit."
+                : 'Perubahan disimpan sebagai draft dan perlu diterbitkan ulang.',
+        );
     }
 
     public function duplicate(Request $request, Question $question, AuditLogger $auditLogger): RedirectResponse
@@ -156,11 +189,14 @@ class QuestionController extends Controller
 
         $duplicate = DB::transaction(function () use ($question, $request): Question {
             $duplicate = $question->replicate([
-                'status', 'approved_by', 'approved_at', 'created_at', 'updated_at',
+                'revision_of_id', 'version', 'superseded_by_id', 'status', 'approved_by', 'approved_at', 'created_at', 'updated_at',
             ]);
             $duplicate->parent_id = $question->id;
             $duplicate->story_generation_id = null;
             $duplicate->author_id = $request->user()->id;
+            $duplicate->revision_of_id = null;
+            $duplicate->version = 1;
+            $duplicate->superseded_by_id = null;
             $duplicate->status = QuestionStatus::Draft;
             $duplicate->title = trim(($question->title ?: 'Salinan soal').' - salinan');
             $duplicate->metadata = [
@@ -192,11 +228,28 @@ class QuestionController extends Controller
     public function approve(Request $request, Question $question, AuditLogger $auditLogger): RedirectResponse
     {
         $this->ensureSameSchool($request, $question);
-        $question->update([
-            'status' => QuestionStatus::Published,
-            'approved_by' => $request->user()->id,
-            'approved_at' => now(),
-        ]);
+        abort_if($question->superseded_by_id !== null, 409, 'Versi soal ini sudah digantikan.');
+
+        DB::transaction(function () use ($question, $request): void {
+            if ($question->revision_of_id) {
+                $source = Question::query()->lockForUpdate()->findOrFail($question->revision_of_id);
+                abort_if(
+                    $source->superseded_by_id !== null && $source->superseded_by_id !== $question->id,
+                    409,
+                    'Sudah ada revisi lain yang diterbitkan untuk soal ini.',
+                );
+                $source->update([
+                    'status' => QuestionStatus::Archived,
+                    'superseded_by_id' => $question->id,
+                ]);
+            }
+
+            $question->update([
+                'status' => QuestionStatus::Published,
+                'approved_by' => $request->user()->id,
+                'approved_at' => now(),
+            ]);
+        });
         $auditLogger->log($request, 'question.published', $question);
 
         return back()->with('success', 'Soal sudah diterbitkan dan siap masuk paket ujian.');

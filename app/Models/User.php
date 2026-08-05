@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
@@ -51,6 +52,11 @@ class User extends Authenticatable
     public function attempts(): HasMany
     {
         return $this->hasMany(Attempt::class);
+    }
+
+    public function chatRoom(): HasOne
+    {
+        return $this->hasOne(ChatRoom::class, 'student_id');
     }
 
     public function approver(): BelongsTo

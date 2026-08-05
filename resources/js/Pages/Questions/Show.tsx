@@ -6,6 +6,9 @@ type MatchingPair = { left_id: string; left: string; right_id: string; right: st
 type MatchingDistractor = { id: string; content: string };
 type Question = {
     id: number;
+    version: number;
+    revision_of_id?: number;
+    superseded_by_id?: number;
     title?: string;
     stimulus?: string;
     prompt: string;
@@ -28,6 +31,8 @@ type Question = {
     author: { name: string };
     variants: Question[];
     reviews: { id: number; source: string; status: string; score?: number; issues?: { severity: string; field: string; message: string }[]; suggestions?: string[]; reviewed_at: string }[];
+    revision_of?: { id: number; title?: string; version: number; status: string };
+    superseded_by?: { id: number; title?: string; version: number; status: string };
 };
 
 export default function Show({ question, latestGeneration }: { question: Question; latestGeneration?: { status: string; error?: string } }) {
@@ -58,9 +63,20 @@ export default function Show({ question, latestGeneration }: { question: Questio
                     <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                         <div className="flex flex-wrap gap-2 text-xs font-semibold">
                             <span className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-700">{question.status}</span>
+                            <span className="rounded-full bg-indigo-50 px-3 py-1 text-indigo-700">Versi {question.version}</span>
                             <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">Kelas {question.grade_level}</span>
                             <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">Kesulitan {question.difficulty}</span>
                         </div>
+                        {question.revision_of && (
+                            <p className="mt-4 rounded-xl border border-indigo-100 bg-indigo-50 p-3 text-sm text-indigo-800">
+                                Revisi dari <Link href={route('questions.show', question.revision_of.id)} className="font-semibold underline">versi {question.revision_of.version}</Link>. Versi lama tetap digunakan oleh paket yang sudah diterbitkan.
+                            </p>
+                        )}
+                        {question.superseded_by && (
+                            <p className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                                Versi ini sudah digantikan oleh <Link href={route('questions.show', question.superseded_by.id)} className="font-semibold underline">versi {question.superseded_by.version}</Link>.
+                            </p>
+                        )}
                         {question.illustration_url && (
                             <img
                                 src={question.illustration_url}

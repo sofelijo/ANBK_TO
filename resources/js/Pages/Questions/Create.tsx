@@ -36,6 +36,8 @@ type QuestionForm = {
 
 type ExistingQuestion = {
     id: number;
+    status: string;
+    version: number;
     competency_id: number;
     type: QuestionForm['type'];
     title?: string;
@@ -127,6 +129,11 @@ export default function Create({ competencies, question }: { competencies: Compe
         >
             <Head title={question ? 'Edit Soal' : 'Buat Soal'} />
             <form onSubmit={submit} className="mx-auto max-w-4xl space-y-6 px-4 py-8 sm:px-6">
+                {question?.status === 'published' && (
+                    <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-sm leading-6 text-indigo-900">
+                        Anda sedang mengedit soal terbit versi {question.version}. Saat disimpan, sistem membuat revisi draft baru dan tidak mengubah soal pada paket yang sudah terbit.
+                    </div>
+                )}
                 <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                     <h2 className="font-semibold text-slate-900">Klasifikasi</h2>
                     <div className="mt-4 grid gap-4 sm:grid-cols-2">
