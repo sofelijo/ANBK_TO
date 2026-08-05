@@ -10,6 +10,7 @@ use App\Models\Assessment;
 use App\Models\Competency;
 use App\Models\Question;
 use App\Services\QuestionSnapshotService;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -51,12 +52,13 @@ class AssessmentController extends Controller
     {
         $data = $this->validatedData($request);
         $questions = $this->resolveQuestions($request, $data);
+        $candidateQuestionIds = $this->candidateQuestionIds($request, $data);
 
-        $assessment = DB::transaction(function () use ($data, $questions, $request): Assessment {
+        $assessment = DB::transaction(function () use ($data, $questions, $candidateQuestionIds, $request): Assessment {
             $assessment = Assessment::create([
                 'school_id' => $request->user()->school_id,
                 'created_by' => $request->user()->id,
-                ...$this->attributes($data),
+                ...$this->attributes($data, candidateQuestionIds: $candidateQuestionIds),
                 'status' => AssessmentStatus::Draft,
             ]);
             $this->syncQuestions($assessment, $questions);
@@ -105,10 +107,11 @@ class AssessmentController extends Controller
         $this->ensureEditable($request, $assessment);
         $data = $this->validatedData($request);
         $questions = $this->resolveQuestions($request, $data, $assessment);
+        $candidateQuestionIds = $this->candidateQuestionIds($request, $data, $assessment);
 
-        DB::transaction(function () use ($assessment, $data, $questions): void {
+        DB::transaction(function () use ($assessment, $data, $questions, $candidateQuestionIds): void {
             $assessment->update([
-                ...$this->attributes($data, $assessment->settings ?? []),
+                ...$this->attributes($data, $assessment->settings ?? [], $candidateQuestionIds),
                 'status' => AssessmentStatus::Draft,
             ]);
             $this->syncQuestions($assessment, $questions);
@@ -239,11 +242,13 @@ class AssessmentController extends Controller
 
             $questions = new Collection;
             foreach ($data['competency_rows'] as $index => $row) {
-                $selected = (clone $questionQuery)
-                    ->where('status', QuestionStatus::Published)
-                    ->where('competency_id', $row['competency_id'])
-                    ->whereNotIn('id', $questions->pluck('id'))
-                    ->inRandomOrder()
+                $selected = $this->prioritizeLeastUsed(
+                    (clone $questionQuery)
+                        ->where('status', QuestionStatus::Published)
+                        ->where('competency_id', $row['competency_id'])
+                        ->whereNotIn('id', $questions->pluck('id')),
+                    $request->user()->school_id,
+                )
                     ->limit($row['count'])
                     ->get();
 
@@ -266,13 +271,15 @@ class AssessmentController extends Controller
 
             $questions = new Collection;
             foreach ($data['blueprint_rows'] as $index => $row) {
-                $selected = (clone $questionQuery)
-                    ->where('status', QuestionStatus::Published)
-                    ->where('competency_id', $row['competency_id'])
-                    ->where('type', $row['type'])
-                    ->where('difficulty', $row['difficulty'])
-                    ->whereNotIn('id', $questions->pluck('id'))
-                    ->inRandomOrder()
+                $selected = $this->prioritizeLeastUsed(
+                    (clone $questionQuery)
+                        ->where('status', QuestionStatus::Published)
+                        ->where('competency_id', $row['competency_id'])
+                        ->where('type', $row['type'])
+                        ->where('difficulty', $row['difficulty'])
+                        ->whereNotIn('id', $questions->pluck('id')),
+                    $request->user()->school_id,
+                )
                     ->limit($row['count'])
                     ->get();
 
@@ -289,9 +296,10 @@ class AssessmentController extends Controller
             && $assessment->questions()->count() === (int) $data['question_count']) {
             $questions = $assessment->questions()->get();
         } else {
-            $questions = $questionQuery
-                ->where('status', QuestionStatus::Published)
-                ->inRandomOrder()
+            $questions = $this->prioritizeLeastUsed(
+                $questionQuery->where('status', QuestionStatus::Published),
+                $request->user()->school_id,
+            )
                 ->limit($data['question_count'])
                 ->get();
         }
@@ -307,7 +315,21 @@ class AssessmentController extends Controller
         return $questions;
     }
 
-    private function attributes(array $data, array $existingSettings = []): array
+    private function prioritizeLeastUsed(Builder $query, int $schoolId): Builder
+    {
+        $schoolUsage = DB::table('assessment_question')
+            ->join('attempts', 'attempts.assessment_id', '=', 'assessment_question.assessment_id')
+            ->join('users', 'users.id', '=', 'attempts.user_id')
+            ->whereColumn('assessment_question.question_id', 'questions.id')
+            ->where('users.school_id', $schoolId)
+            ->selectRaw('COUNT(attempts.id)');
+
+        return $query
+            ->orderBy($schoolUsage)
+            ->inRandomOrder();
+    }
+
+    private function attributes(array $data, array $existingSettings = [], array $candidateQuestionIds = []): array
     {
         $typeLabel = $data['assessment_type'] === 'custom'
             ? trim($data['custom_type_name'])
@@ -326,6 +348,7 @@ class AssessmentController extends Controller
                 'type_label' => $typeLabel,
                 'selection_mode' => $data['selection_mode'],
                 'question_count' => (int) $data['question_count'],
+                'candidate_question_ids' => $candidateQuestionIds,
                 'competency_rows' => $data['selection_mode'] === 'competency'
                     ? array_values($data['competency_rows'])
                     : [],
@@ -338,6 +361,37 @@ class AssessmentController extends Controller
                 'require_all_answers' => (bool) $data['require_all_answers'],
             ],
         ];
+    }
+
+    private function candidateQuestionIds(Request $request, array $data, ?Assessment $assessment = null): array
+    {
+        if ($data['selection_mode'] === 'manual') {
+            return array_values(array_map('intval', $data['question_ids']));
+        }
+
+        $query = Question::query()
+            ->where('school_id', $request->user()->school_id)
+            ->where('grade_level', $data['grade_level'])
+            ->where(fn ($questions) => $questions
+                ->where('status', QuestionStatus::Published)
+                ->when($assessment, fn ($existing) => $existing->orWhereIn('id',
+                    $assessment->questions()->pluck('questions.id')
+                )));
+
+        if ($data['selection_mode'] === 'competency') {
+            $query->whereIn('competency_id', collect($data['competency_rows'])->pluck('competency_id'));
+        } elseif ($data['selection_mode'] === 'blueprint') {
+            $query->where(function ($combinations) use ($data): void {
+                foreach ($data['blueprint_rows'] as $row) {
+                    $combinations->orWhere(fn ($combination) => $combination
+                        ->where('competency_id', $row['competency_id'])
+                        ->where('type', $row['type'])
+                        ->where('difficulty', $row['difficulty']));
+                }
+            });
+        }
+
+        return $query->pluck('id')->map(fn ($id): int => (int) $id)->all();
     }
 
     private function syncQuestions(Assessment $assessment, Collection $questions): void

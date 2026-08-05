@@ -26,13 +26,13 @@ class AttemptSubmissionService
                 return $attempt;
             }
 
-            $attempt->load(['assessment.questions.options', 'answers']);
+            $attempt->load(['assessment', 'questions.options', 'answers']);
             $answers = $attempt->answers->keyBy('question_id');
             $score = 0.0;
             $maxScore = 0.0;
             $competencies = [];
 
-            foreach ($attempt->assessment->questions as $question) {
+            foreach ($attempt->questions as $question) {
                 $snapshot = $this->snapshotService->forQuestion($question);
                 $points = (float) $question->pivot->points;
                 $answer = $answers->get($question->id);
@@ -94,7 +94,7 @@ class AttemptSubmissionService
     {
         $attempt->recommendations()->delete();
         $results = $attempt->competencyResults()->orderBy('percentage')->get();
-        $usedQuestionIds = $attempt->assessment->questions->pluck('id');
+        $usedQuestionIds = $attempt->questions->pluck('id');
         $position = 1;
 
         foreach ($results as $result) {
@@ -108,7 +108,7 @@ class AttemptSubmissionService
                 ->first();
 
             if (! $question) {
-                $question = $attempt->assessment->questions
+                $question = $attempt->questions
                     ->first(fn (Question $candidate): bool => $candidate->competency_id === $result->competency_id
                         && ! $attempt->answers->firstWhere('question_id', $candidate->id)?->is_correct
                     );

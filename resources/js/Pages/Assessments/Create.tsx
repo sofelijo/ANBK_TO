@@ -199,12 +199,12 @@ export default function Create({ questions, competencies, assessmentTypes, quest
 
                     {data.selection_mode === 'automatic' ? (
                         <div className="mt-5 rounded-xl border border-indigo-200 bg-indigo-50 p-5 text-sm text-indigo-900">
-                            Sistem akan mengambil acak <strong>{data.question_count} soal</strong> dari {availableQuestions.length} soal terbit untuk kelas {data.grade_level} saat paket disimpan.
+                            Saat siswa mulai, sistem mengambil <strong>{data.question_count} soal</strong> dari pool {availableQuestions.length} soal terbit kelas {data.grade_level}. Setiap siswa dapat memperoleh soal berbeda; soal yang paling jarang pernah ia kerjakan akan diprioritaskan.
                         </div>
                     ) : data.selection_mode === 'competency' ? (
                         <div className="mt-6 space-y-4">
                             <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-                                Tentukan jumlah soal untuk setiap kompetensi. Sistem akan mengambil soal terbit secara acak sesuai komposisi ini.
+                                Tentukan jumlah soal untuk setiap kompetensi. Set soal dipilih khusus saat masing-masing siswa mulai, dengan prioritas soal yang paling jarang pernah dikerjakan siswa tersebut.
                             </div>
                             <InputError message={errors.competency_rows} />
                             {data.competency_rows.map((row, index) => {
@@ -244,7 +244,7 @@ export default function Create({ questions, competencies, assessmentTypes, quest
                     ) : data.selection_mode === 'blueprint' ? (
                         <div className="mt-6 space-y-4">
                             <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-900">
-                                Setiap baris menentukan kuota berdasarkan kompetensi, bentuk soal, dan tingkat kesulitan. Sistem mengambil soal terbit secara acak sesuai komposisi tersebut.
+                                Setiap baris menentukan kuota berdasarkan kompetensi, bentuk soal, dan tingkat kesulitan. Setiap siswa mendapat set khusus dengan prioritas soal yang paling jarang pernah ia kerjakan.
                             </div>
                             <InputError message={errors.blueprint_rows} />
                             {data.blueprint_rows.map((row, index) => {

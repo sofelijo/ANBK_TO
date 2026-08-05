@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable([
@@ -41,6 +42,13 @@ class Attempt extends Model
     public function answers(): HasMany
     {
         return $this->hasMany(AttemptAnswer::class);
+    }
+
+    public function questions(): BelongsToMany
+    {
+        return $this->belongsToMany(Question::class, 'attempt_question')
+            ->withPivot(['position', 'points', 'snapshot'])
+            ->orderByPivot('position');
     }
 
     public function competencyResults(): HasMany

@@ -9,12 +9,14 @@ use App\Models\Assessment;
 use App\Models\Attempt;
 use App\Models\Question;
 use App\Services\AI\AiManager;
+use App\Services\AttemptQuestionSelector;
 use App\Services\AttemptSubmissionService;
 use App\Services\QuestionSnapshotService;
 use App\Services\StudentChatService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -25,6 +27,7 @@ class AttemptController extends Controller
     public function start(
         Request $request,
         Assessment $assessment,
+        AttemptQuestionSelector $questionSelector,
         QuestionSnapshotService $snapshotService,
     ): RedirectResponse {
         $user = $request->user();
@@ -38,14 +41,31 @@ class AttemptController extends Controller
         abort_if($assessment->ends_at?->isPast(), 403, 'Try out telah ditutup.');
         $snapshotService->snapshotAssessment($assessment);
 
-        $attempt = Attempt::firstOrCreate(
-            ['assessment_id' => $assessment->id, 'user_id' => $user->id],
-            [
-                'public_id' => (string) Str::uuid(),
-                'status' => AttemptStatus::InProgress,
-                'started_at' => now(),
-            ],
-        );
+        $attempt = DB::transaction(function () use ($assessment, $user, $questionSelector, $snapshotService): Attempt {
+            $attempt = Attempt::firstOrCreate(
+                ['assessment_id' => $assessment->id, 'user_id' => $user->id],
+                [
+                    'public_id' => (string) Str::uuid(),
+                    'status' => AttemptStatus::InProgress,
+                    'started_at' => now(),
+                ],
+            );
+
+            if ($attempt->questions()->doesntExist()) {
+                $questions = $questionSelector->select($assessment, $user);
+                $attempt->questions()->attach(
+                    $questions->values()->mapWithKeys(fn (Question $question, int $index): array => [
+                        $question->id => [
+                            'position' => $index + 1,
+                            'points' => (float) ($question->pivot?->points ?? 1),
+                            'snapshot' => json_encode($snapshotService->forQuestion($question), JSON_THROW_ON_ERROR),
+                        ],
+                    ])->all(),
+                );
+            }
+
+            return $attempt;
+        });
 
         return $attempt->status === AttemptStatus::Submitted
             ? to_route('attempts.result', $attempt->public_id)
@@ -70,12 +90,12 @@ class AttemptController extends Controller
             return to_route('attempts.result', $attempt->public_id);
         }
 
-        $attempt->load(['assessment.questions.options', 'answers']);
+        $attempt->load(['assessment', 'questions.options', 'answers']);
         $answers = $attempt->answers->keyBy('question_id');
         $settings = $attempt->assessment->settings ?? [];
         $shuffleQuestions = (bool) data_get($settings, 'shuffle_questions', false);
         $shuffleOptions = (bool) data_get($settings, 'shuffle_options', false);
-        $questions = $attempt->assessment->questions;
+        $questions = $attempt->questions;
 
         if ($shuffleQuestions) {
             $questions = $questions->sortBy(
@@ -189,7 +209,7 @@ class AttemptController extends Controller
         abort_unless($attempt->status === AttemptStatus::InProgress, 409);
         abort_if($attempt->isExpired(), 409, 'Waktu pengerjaan telah habis.');
 
-        $assessmentQuestion = $attempt->assessment
+        $assessmentQuestion = $attempt
             ->questions()
             ->whereKey($question->id)
             ->first();
@@ -279,16 +299,16 @@ class AttemptController extends Controller
         $this->authorizeStudent($request, $attempt);
 
         if ((bool) data_get($attempt->assessment->settings, 'require_all_answers', false) && ! $attempt->isExpired()) {
-            $attempt->loadMissing(['assessment.questions', 'answers']);
+            $attempt->loadMissing(['questions', 'answers']);
             $answers = $attempt->answers->keyBy('question_id');
-            $answeredCount = $attempt->assessment->questions->filter(
+            $answeredCount = $attempt->questions->filter(
                 fn (Question $question): bool => $this->hasCompleteResponse(
                     $snapshotService->forQuestion($question),
                     $answers->get($question->id)?->response,
                 ),
             )->count();
 
-            if ($answeredCount < $attempt->assessment->questions->count()) {
+            if ($answeredCount < $attempt->questions->count()) {
                 throw ValidationException::withMessages([
                     'attempt' => 'Semua soal wajib dijawab sebelum try out dikirim.',
                 ]);

@@ -19,8 +19,12 @@ class ItemAnalysisService
         $attempts = Attempt::query()
             ->where('assessment_id', $assessment->id)
             ->where('status', AttemptStatus::Submitted)
-            ->with('answers')
+            ->with(['answers', 'questions.options'])
             ->get();
+        $usesAttemptQuestions = $attempts->contains(fn (Attempt $attempt): bool => $attempt->questions->isNotEmpty());
+        $questions = $usesAttemptQuestions
+            ? $attempts->flatMap->questions->unique('id')->values()
+            : $assessment->questions;
         $minimumResponses = max(1, (int) config('assessment.item_analysis.minimum_responses', 30));
         $rankedAttempts = $attempts->sortByDesc(fn (Attempt $attempt): float => $this->percentage($attempt))->values();
         $groupSize = $attempts->count() >= $minimumResponses
@@ -29,15 +33,18 @@ class ItemAnalysisService
         $upperIds = $groupSize > 0 ? $rankedAttempts->take($groupSize)->pluck('id') : collect();
         $lowerIds = $groupSize > 0 ? $rankedAttempts->take(-$groupSize)->pluck('id') : collect();
 
-        $items = $assessment->questions->map(function (Question $question) use ($attempts, $minimumResponses, $upperIds, $lowerIds): array {
+        $items = $questions->map(function (Question $question) use ($attempts, $usesAttemptQuestions, $minimumResponses, $upperIds, $lowerIds): array {
             $snapshot = $this->snapshotService->forQuestion($question);
-            $answers = $attempts->map(fn (Attempt $attempt) => $attempt->answers->firstWhere('question_id', $question->id));
-            $responseCount = $attempts->count();
+            $itemAttempts = $usesAttemptQuestions
+                ? $attempts->filter(fn (Attempt $attempt): bool => $attempt->questions->contains('id', $question->id))
+                : $attempts;
+            $answers = $itemAttempts->map(fn (Attempt $attempt) => $attempt->answers->firstWhere('question_id', $question->id));
+            $responseCount = $itemAttempts->count();
             $answeredCount = $answers->filter(fn ($answer): bool => $answer?->response !== null)->count();
             $correctCount = $answers->where('is_correct', true)->count();
             $difficultyIndex = $responseCount > 0 ? $correctCount / $responseCount : null;
             $discriminationIndex = $responseCount >= $minimumResponses
-                ? $this->discrimination($attempts, $question->id, $upperIds, $lowerIds)
+                ? $this->discrimination($itemAttempts, $question->id, $upperIds, $lowerIds)
                 : null;
             $distractors = $this->distractorStats($snapshot, $answers, $responseCount);
             $flags = $this->flags(
@@ -78,7 +85,7 @@ class ItemAnalysisService
         return [
             'minimum_responses' => $minimumResponses,
             'sample_size' => $attempts->count(),
-            'reliability' => $this->reliability($assessment->questions, $attempts, $minimumResponses),
+            'reliability' => $this->reliability($questions, $attempts, $minimumResponses),
             'items' => $items,
             'flagged_count' => $items->where('status', 'review')->count(),
         ];

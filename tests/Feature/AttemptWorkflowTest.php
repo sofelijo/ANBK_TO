@@ -400,6 +400,108 @@ class AttemptWorkflowTest extends TestCase
         $this->assertTrue($assessment->settings['require_all_answers']);
     }
 
+    public function test_automatic_assessment_prioritizes_questions_least_shown_to_the_school(): void
+    {
+        [$student, $existingAssessment, , , $neverShownQuestion, $teacher] = $this->scenario();
+
+        $this->actingAs($student)
+            ->post(route('attempts.start', $existingAssessment))
+            ->assertRedirect();
+
+        $this->actingAs($teacher)
+            ->post(route('assessments.store'), [
+                'title' => 'Paket Minim Pengulangan',
+                'grade_level' => 5,
+                'duration_minutes' => 30,
+                'assessment_type' => 'tryout',
+                'selection_mode' => 'automatic',
+                'question_count' => 1,
+                'shuffle_questions' => false,
+                'shuffle_options' => false,
+                'show_navigation' => true,
+                'require_all_answers' => false,
+            ])
+            ->assertRedirect(route('assessments.index'));
+
+        $assessment = Assessment::query()->where('title', 'Paket Minim Pengulangan')->firstOrFail();
+        $this->assertSame([$neverShownQuestion->id], $assessment->questions->pluck('id')->all());
+    }
+
+    public function test_each_student_receives_questions_based_on_their_own_usage_history(): void
+    {
+        [$firstStudent, $existingAssessment, $informationQuestion, $inferenceQuestion, $neverShownQuestion, $teacher] = $this->scenario();
+
+        $this->actingAs($firstStudent)
+            ->post(route('attempts.start', $existingAssessment))
+            ->assertRedirect();
+
+        $this->actingAs($teacher)->post(route('assessments.store'), [
+            'title' => 'Paket Personal Siswa',
+            'grade_level' => 5,
+            'duration_minutes' => 30,
+            'assessment_type' => 'tryout',
+            'selection_mode' => 'automatic',
+            'question_count' => 1,
+            'shuffle_questions' => false,
+            'shuffle_options' => false,
+            'show_navigation' => true,
+            'require_all_answers' => false,
+        ]);
+        $personalAssessment = Assessment::query()->where('title', 'Paket Personal Siswa')->firstOrFail();
+        $personalAssessment->update(['status' => AssessmentStatus::Published]);
+
+        $secondStudent = User::create([
+            'school_id' => $firstStudent->school_id,
+            'name' => 'Murid Kedua',
+            'email' => 'murid-kedua@example.com',
+            'password' => 'password',
+            'role' => UserRole::Student,
+            'grade_level' => 5,
+            'email_verified_at' => now(),
+        ]);
+        $secondStudentHistory = Assessment::create([
+            'school_id' => $teacher->school_id,
+            'created_by' => $teacher->id,
+            'title' => 'Riwayat Murid Kedua',
+            'grade_level' => 5,
+            'duration_minutes' => 30,
+            'status' => AssessmentStatus::Published,
+        ]);
+        $secondStudentHistory->questions()->attach([
+            $neverShownQuestion->id => ['position' => 1, 'points' => 1],
+        ]);
+        $this->actingAs($secondStudent)
+            ->post(route('attempts.start', $secondStudentHistory))
+            ->assertRedirect();
+
+        $this->actingAs($firstStudent)
+            ->post(route('attempts.start', $personalAssessment))
+            ->assertRedirect();
+        $this->actingAs($secondStudent)
+            ->post(route('attempts.start', $personalAssessment))
+            ->assertRedirect();
+
+        $firstQuestionIds = Attempt::query()
+            ->where('assessment_id', $personalAssessment->id)
+            ->where('user_id', $firstStudent->id)
+            ->firstOrFail()
+            ->questions()
+            ->pluck('questions.id')
+            ->all();
+        $secondQuestionIds = Attempt::query()
+            ->where('assessment_id', $personalAssessment->id)
+            ->where('user_id', $secondStudent->id)
+            ->firstOrFail()
+            ->questions()
+            ->pluck('questions.id')
+            ->all();
+
+        $this->assertSame([$neverShownQuestion->id], $firstQuestionIds);
+        $this->assertNotContains($neverShownQuestion->id, $secondQuestionIds);
+        $this->assertContains($secondQuestionIds[0], [$informationQuestion->id, $inferenceQuestion->id]);
+        $this->assertNotSame($firstQuestionIds, $secondQuestionIds);
+    }
+
     public function test_teacher_can_create_assessment_from_exact_blueprint_composition(): void
     {
         [, , $informationQuestion, $inferenceQuestion, $inferencePractice, $teacher] = $this->scenario();
