@@ -17,7 +17,7 @@ COPY public ./public
 COPY tsconfig.json vite.config.js tailwind.config.js postcss.config.js ./
 RUN npm run build
 
-FROM php:8.5-apache
+FROM php:8.4-apache
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl libfreetype6-dev libicu-dev libjpeg62-turbo-dev libonig-dev libpng-dev libpq-dev libzip-dev \
