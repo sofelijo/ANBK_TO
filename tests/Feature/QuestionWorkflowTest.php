@@ -287,6 +287,11 @@ class QuestionWorkflowTest extends TestCase
                 && $question->approved_by === $teacher->id
                 && $question->approved_at !== null,
         ));
+        $this->actingAs($teacher)
+            ->get(route('story-questions.show', $generation))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('questions.0.author.name', 'Guru')
+                ->where('questions.0.approver.name', 'Guru'));
         $this->assertDatabaseHas('audit_logs', [
             'action' => 'story_bundle.published',
             'auditable_type' => (new AiGeneration)->getMorphClass(),

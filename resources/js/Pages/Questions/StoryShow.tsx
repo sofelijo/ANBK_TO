@@ -33,6 +33,9 @@ type Question = {
         matrix_rows?: { id: string; statement: string; correct_column_id: string }[];
     };
     competency: { code: string; name: string; grade_level: number };
+    author: { name: string };
+    approver?: { name: string };
+    approved_at?: string;
     options: { id: number; label: string; content: string; is_correct: boolean }[];
 };
 
@@ -135,19 +138,6 @@ export default function StoryShow({ generation, questions, illustration }: { gen
                             <p className="mt-4 text-xs text-slate-500">Model {generation.model} · {generation.input_tokens + generation.output_tokens} token · estimasi US${(generation.cost_microusd / 1_000_000).toFixed(6)}</p>
                         </article>
 
-                        <section className="rounded-2xl border border-violet-200 bg-violet-50 p-5">
-                            <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-                                <div>
-                                    <h2 className="font-semibold text-violet-950">Ilustrasi AI untuk paket cerita</h2>
-                                    <p className="mt-1 text-sm text-violet-800">Satu gambar 16:9 dipakai bersama oleh seluruh soal. Batch Gemini termurah sekitar Rp300 per gambar.</p>
-                                    {illustrationWaiting && <p className="mt-2 text-sm font-medium text-amber-700">Sedang diproses oleh Gemini. Halaman diperiksa otomatis setiap 15 detik dan proses dapat memerlukan beberapa menit.</p>}
-                                    {illustration?.status === 'completed' && <p className="mt-2 text-sm font-medium text-emerald-700">Ilustrasi selesai · {illustration.model} · estimasi US${(illustration.cost_microusd / 1_000_000).toFixed(4)}</p>}
-                                    {illustration?.status === 'failed' && <p className="mt-2 text-sm font-medium text-rose-700">{illustration.error || 'Pembuatan ilustrasi gagal. Periksa billing Gemini lalu coba lagi.'}</p>}
-                                </div>
-                                {illustrationWaiting && <div className="h-7 w-7 shrink-0 animate-spin rounded-full border-4 border-violet-200 border-t-violet-700" />}
-                            </div>
-                        </section>
-
                         <div className="flex flex-col justify-between gap-4 rounded-xl border border-indigo-200 bg-indigo-50 p-4 sm:flex-row sm:items-center">
                             <p className="text-sm text-indigo-900">
                                 AI sudah memilih kompetensi dan jenjang dari data sekolah. Periksa cerita, kunci, dan pembahasan setiap soal sebelum menerbitkannya.
@@ -209,6 +199,10 @@ export default function StoryShow({ generation, questions, illustration }: { gen
                                     )}
 
                                     {question.explanation && <p className="mt-4 border-t border-slate-100 pt-4 text-sm leading-6 text-slate-600"><span className="font-semibold text-slate-800">Pembahasan:</span> {question.explanation}</p>}
+                                    <dl className="mt-4 grid gap-3 border-t border-slate-100 pt-4 text-sm sm:grid-cols-2">
+                                        <div><dt className="text-slate-500">Pembuat</dt><dd className="mt-1 font-medium text-slate-800">{question.author.name}</dd></div>
+                                        <div><dt className="text-slate-500">Verifikator</dt><dd className="mt-1 font-medium text-slate-800">{question.approver?.name || 'Belum diverifikasi'}</dd></div>
+                                    </dl>
                                 </article>
                             ))}
                         </section>

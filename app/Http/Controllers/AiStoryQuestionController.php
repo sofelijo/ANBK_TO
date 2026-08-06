@@ -111,7 +111,12 @@ class AiStoryQuestionController extends Controller
         $questions = Question::query()
             ->where('school_id', $request->user()->school_id)
             ->whereIn('id', $questionIds)
-            ->with(['competency:id,code,name,grade_level', 'options'])
+            ->with([
+                'competency:id,code,name,grade_level',
+                'author:id,name',
+                'approver:id,name',
+                'options',
+            ])
             ->get()
             ->sortBy(fn (Question $question) => array_search($question->id, $questionIds, true))
             ->values();
