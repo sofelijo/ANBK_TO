@@ -9,14 +9,17 @@ use App\Models\AiGeneration;
 use App\Models\Competency;
 use App\Models\Question;
 use App\Services\AuditLogger;
+use App\Services\StimulusImageService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
+use Throwable;
 
 class QuestionController extends Controller
 {
@@ -81,20 +84,28 @@ class QuestionController extends Controller
         ]);
     }
 
-    public function store(Request $request, AuditLogger $auditLogger): RedirectResponse
+    public function store(Request $request, AuditLogger $auditLogger, StimulusImageService $imageService): RedirectResponse
     {
         $data = $this->validatedData($request);
-        $question = DB::transaction(function () use ($data, $request): Question {
-            $question = Question::create([
-                ...$this->attributes($data),
-                'school_id' => $request->user()->school_id,
-                'author_id' => $request->user()->id,
-                'status' => QuestionStatus::Draft,
-            ]);
-            $this->syncOptions($question, $data['options'] ?? []);
+        $illustration = $this->storeStimulusImage($request, $data, $imageService);
 
-            return $question;
-        });
+        try {
+            $question = DB::transaction(function () use ($data, $request, $illustration): Question {
+                $question = Question::create([
+                    ...$this->attributes($data, $this->withStimulusImage([], $data, $illustration)),
+                    'school_id' => $request->user()->school_id,
+                    'author_id' => $request->user()->id,
+                    'status' => QuestionStatus::Draft,
+                ]);
+                $this->syncOptions($question, $data['options'] ?? []);
+
+                return $question;
+            });
+        } catch (Throwable $exception) {
+            $this->deleteStoredIllustration($illustration);
+
+            throw $exception;
+        }
         $auditLogger->log($request, 'question.created', $question);
 
         return to_route('questions.show', $question)->with('success', 'Soal berhasil disimpan sebagai draft.');
@@ -106,6 +117,7 @@ class QuestionController extends Controller
         $question->load([
             'competency:id,code,domain,name',
             'author:id,name',
+            'approver:id,name',
             'options',
             'reviews.reviewer:id,name',
             'variants' => fn ($query) => $query->with('competency:id,code,name')->latest(),
@@ -135,41 +147,49 @@ class QuestionController extends Controller
         ]);
     }
 
-    public function update(Request $request, Question $question, AuditLogger $auditLogger): RedirectResponse
+    public function update(Request $request, Question $question, AuditLogger $auditLogger, StimulusImageService $imageService): RedirectResponse
     {
         $this->ensureSameSchool($request, $question);
         abort_if($question->superseded_by_id !== null, 409, 'Versi soal ini sudah digantikan oleh revisi yang lebih baru.');
         $data = $this->validatedData($request);
+        $illustration = $this->storeStimulusImage($request, $data, $imageService);
+        $metadata = $this->withStimulusImage($question->metadata ?? [], $data, $illustration);
         $createRevision = $question->status === QuestionStatus::Published
             || $question->assessments()->exists();
 
-        $savedQuestion = DB::transaction(function () use ($question, $data, $request, $createRevision): Question {
-            if ($createRevision) {
-                $revision = Question::create([
-                    ...$this->attributes($data, $question->metadata ?? []),
-                    'school_id' => $question->school_id,
-                    'author_id' => $request->user()->id,
-                    'parent_id' => $question->parent_id,
-                    'revision_of_id' => $question->id,
-                    'version' => $question->version + 1,
-                    'story_generation_id' => $question->story_generation_id,
+        try {
+            $savedQuestion = DB::transaction(function () use ($question, $data, $request, $createRevision, $metadata): Question {
+                if ($createRevision) {
+                    $revision = Question::create([
+                        ...$this->attributes($data, $metadata),
+                        'school_id' => $question->school_id,
+                        'author_id' => $request->user()->id,
+                        'parent_id' => $question->parent_id,
+                        'revision_of_id' => $question->id,
+                        'version' => $question->version + 1,
+                        'story_generation_id' => $question->story_generation_id,
+                        'status' => QuestionStatus::Draft,
+                    ]);
+                    $this->syncOptions($revision, $data['options'] ?? []);
+
+                    return $revision;
+                }
+
+                $question->update([
+                    ...$this->attributes($data, $metadata),
                     'status' => QuestionStatus::Draft,
+                    'approved_by' => null,
+                    'approved_at' => null,
                 ]);
-                $this->syncOptions($revision, $data['options'] ?? []);
+                $this->syncOptions($question, $data['options'] ?? []);
 
-                return $revision;
-            }
+                return $question;
+            });
+        } catch (Throwable $exception) {
+            $this->deleteStoredIllustration($illustration);
 
-            $question->update([
-                ...$this->attributes($data, $question->metadata ?? []),
-                'status' => QuestionStatus::Draft,
-                'approved_by' => null,
-                'approved_at' => null,
-            ]);
-            $this->syncOptions($question, $data['options'] ?? []);
-
-            return $question;
-        });
+            throw $exception;
+        }
         $auditLogger->log($request, $createRevision ? 'question.revision_created' : 'question.updated', $savedQuestion, [
             'revision_of_id' => $createRevision ? $question->id : null,
         ]);
@@ -262,6 +282,9 @@ class QuestionController extends Controller
             'type' => ['required', Rule::enum(QuestionType::class)],
             'title' => ['nullable', 'string', 'max:255'],
             'stimulus' => ['nullable', 'string', 'max:20000'],
+            'stimulus_image' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:10240', 'dimensions:max_width=5000,max_height=5000'],
+            'stimulus_image_alt' => ['nullable', 'string', 'max:255'],
+            'remove_stimulus_image' => ['nullable', 'boolean'],
             'prompt' => ['required', 'string', 'max:10000'],
             'explanation' => ['nullable', 'string', 'max:10000'],
             'difficulty' => ['required', 'integer', 'between:1,3'],
@@ -413,6 +436,41 @@ class QuestionController extends Controller
             'cognitive_level' => $data['cognitive_level'] ?? null,
             'metadata' => $metadata ?: null,
         ];
+    }
+
+    private function storeStimulusImage(Request $request, array $data, StimulusImageService $imageService): ?array
+    {
+        $file = $request->file('stimulus_image');
+
+        if ($file === null) {
+            return null;
+        }
+
+        return $imageService->store(
+            $file,
+            $request->user()->school_id,
+            trim($data['stimulus_image_alt'] ?? '') ?: trim($data['title'] ?? '') ?: 'Gambar stimulus soal',
+        );
+    }
+
+    private function withStimulusImage(array $metadata, array $data, ?array $illustration): array
+    {
+        if ($illustration !== null) {
+            $metadata['illustration'] = $illustration;
+        } elseif ($data['remove_stimulus_image'] ?? false) {
+            unset($metadata['illustration']);
+        } elseif (isset($metadata['illustration']) && trim($data['stimulus_image_alt'] ?? '') !== '') {
+            $metadata['illustration']['alt'] = trim($data['stimulus_image_alt']);
+        }
+
+        return $metadata;
+    }
+
+    private function deleteStoredIllustration(?array $illustration): void
+    {
+        if ($illustration !== null) {
+            Storage::disk($illustration['disk'])->delete($illustration['path']);
+        }
     }
 
     private function syncOptions(Question $question, array $options): void

@@ -21,6 +21,9 @@ type QuestionForm = {
     type: 'single_choice' | 'multiple_choice' | 'short_answer' | 'matching' | 'category_matrix';
     title: string;
     stimulus: string;
+    stimulus_image: File | null;
+    stimulus_image_alt: string;
+    remove_stimulus_image: boolean;
     prompt: string;
     explanation: string;
     difficulty: number;
@@ -47,9 +50,11 @@ type ExistingQuestion = {
     difficulty: number;
     grade_level: number;
     cognitive_level?: string;
+    illustration_url?: string;
     options: { content: string; is_correct: boolean }[];
     metadata?: {
         accepted_answers?: string[];
+        illustration?: { alt?: string };
         matching_pairs?: MatchingPair[];
         matching_distractors?: MatchingDistractor[];
         matrix_columns?: MatrixColumn[];
@@ -76,11 +81,14 @@ export default function Create({ competencies, question }: { competencies: Compe
         { statement: '', correct_column_index: 0 },
         { statement: '', correct_column_index: 1 },
     ];
-    const { data, setData, post, put, processing, errors } = useForm<QuestionForm>({
+    const { data, setData, post, transform, processing, errors } = useForm<QuestionForm>({
         competency_id: question ? String(question.competency_id) : '',
         type: question?.type || 'single_choice',
         title: question?.title || '',
         stimulus: question?.stimulus || '',
+        stimulus_image: null,
+        stimulus_image_alt: question?.metadata?.illustration?.alt || '',
+        remove_stimulus_image: false,
         prompt: question?.prompt || '',
         explanation: question?.explanation || '',
         difficulty: question?.difficulty || 1,
@@ -101,9 +109,10 @@ export default function Create({ competencies, question }: { competencies: Compe
     const submit = (event: FormEvent) => {
         event.preventDefault();
         if (question) {
-            put(route('questions.update', question.id));
+            transform((formData) => ({ ...formData, _method: 'put' }));
+            post(route('questions.update', question.id), { forceFormData: true });
         } else {
-            post(route('questions.store'));
+            post(route('questions.store'), { forceFormData: true });
         }
     };
 
@@ -206,6 +215,37 @@ export default function Create({ competencies, question }: { competencies: Compe
                             <textarea value={data.stimulus} onChange={(event) => setData('stimulus', event.target.value)} rows={5} className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500" />
                             <span className="mt-1 block text-xs font-normal text-slate-500">Kosongkan jika soal dapat dijawab tanpa teks, gambar, tabel, atau cerita pendamping.</span>
                         </label>
+                        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4">
+                            <label className="block text-sm font-medium text-slate-700">
+                                Gambar stimulus <span className="font-normal text-slate-500">(opsional)</span>
+                                <input
+                                    type="file"
+                                    accept="image/jpeg,image/png,image/webp"
+                                    onChange={(event) => {
+                                        setData('stimulus_image', event.target.files?.[0] || null);
+                                        setData('remove_stimulus_image', false);
+                                    }}
+                                    className="mt-2 block w-full text-sm text-slate-600 file:mr-4 file:rounded-lg file:border-0 file:bg-emerald-100 file:px-4 file:py-2 file:font-semibold file:text-emerald-700 hover:file:bg-emerald-200"
+                                />
+                            </label>
+                            <p className="mt-2 text-xs text-slate-500">Format JPG, PNG, atau WebP. File awal maksimal 10 MB dan otomatis dikompresi menjadi maksimal 200 KB.</p>
+                            {data.stimulus_image && <p className="mt-2 text-sm font-medium text-emerald-700">Dipilih: {data.stimulus_image.name}</p>}
+                            {!data.stimulus_image && question?.illustration_url && !data.remove_stimulus_image && (
+                                <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center">
+                                    <img src={question.illustration_url} alt={question.metadata?.illustration?.alt || 'Gambar stimulus saat ini'} className="h-28 w-48 rounded-lg border border-slate-200 object-cover" />
+                                    <button type="button" onClick={() => setData('remove_stimulus_image', true)} className="text-left text-sm font-semibold text-rose-700">Hapus gambar saat disimpan</button>
+                                </div>
+                            )}
+                            {data.remove_stimulus_image && <button type="button" onClick={() => setData('remove_stimulus_image', false)} className="mt-3 text-sm font-semibold text-indigo-700">Batalkan penghapusan gambar</button>}
+                            <InputError message={errors.stimulus_image} className="mt-2" />
+                        </div>
+                        {(data.stimulus_image || (question?.illustration_url && !data.remove_stimulus_image)) && (
+                            <label className="block text-sm font-medium text-slate-700">
+                                Teks alternatif gambar <span className="font-normal text-slate-500">(untuk aksesibilitas)</span>
+                                <input value={data.stimulus_image_alt} onChange={(event) => setData('stimulus_image_alt', event.target.value)} placeholder="Contoh: Diagram jumlah buku yang dibaca siswa" className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500" />
+                                <InputError message={errors.stimulus_image_alt} className="mt-1" />
+                            </label>
+                        )}
                         <label className="block text-sm font-medium text-slate-700">
                             Pertanyaan
                             <textarea value={data.prompt} onChange={(event) => setData('prompt', event.target.value)} rows={3} className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500" />

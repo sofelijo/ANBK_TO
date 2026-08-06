@@ -59,6 +59,11 @@ class Question extends Model
         return $this->belongsTo(User::class, 'author_id');
     }
 
+    public function approver(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'approved_by');
+    }
+
     public function parent(): BelongsTo
     {
         return $this->belongsTo(self::class, 'parent_id');

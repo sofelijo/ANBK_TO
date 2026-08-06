@@ -29,6 +29,8 @@ type Question = {
     options: Option[];
     competency: { code: string; domain: string; name: string };
     author: { name: string };
+    approver?: { name: string };
+    approved_at?: string;
     variants: Question[];
     reviews: { id: number; source: string; status: string; score?: number; issues?: { severity: string; field: string; message: string }[]; suggestions?: string[]; reviewed_at: string }[];
     revision_of?: { id: number; title?: string; version: number; status: string };
@@ -158,6 +160,7 @@ export default function Show({ question, latestGeneration }: { question: Questio
                         <div><dt className="text-slate-500">Domain</dt><dd className="mt-1 text-slate-900">{question.competency.domain}</dd></div>
                         <div><dt className="text-slate-500">Bentuk</dt><dd className="mt-1 text-slate-900">{question.type}</dd></div>
                         <div><dt className="text-slate-500">Pembuat</dt><dd className="mt-1 text-slate-900">{question.author.name}</dd></div>
+                        <div><dt className="text-slate-500">Verifikator</dt><dd className="mt-1 text-slate-900">{question.approver?.name || 'Belum diverifikasi'}</dd></div>
                     </dl>
                 </aside>
             </div>

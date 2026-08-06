@@ -13,6 +13,7 @@ use App\Models\Question;
 use App\Models\School;
 use App\Models\User;
 use App\Services\AI\StoryIllustrationService;
+use App\Services\StimulusImageService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
@@ -54,6 +55,45 @@ class QuestionWorkflowTest extends TestCase
             ->assertRedirect();
 
         $this->assertSame(QuestionStatus::Published, $question->fresh()->status);
+    }
+
+    public function test_teacher_can_upload_a_stimulus_image_and_see_the_verifier(): void
+    {
+        Storage::fake('public');
+        [$teacher, $competency] = $this->teacherAndCompetency();
+        $image = UploadedFile::fake()->image('diagram.png', 1200, 675);
+        file_put_contents($image->getPathname(), random_bytes(300 * 1024), FILE_APPEND);
+
+        $this->assertGreaterThan(StimulusImageService::MAX_BYTES, $image->getSize());
+
+        $this->actingAs($teacher)->post(route('questions.store'), [
+            ...$this->payload($competency, 'Apa informasi yang ditunjukkan gambar?'),
+            'stimulus_image' => $image,
+            'stimulus_image_alt' => 'Diagram jumlah buku yang dibaca siswa',
+        ])->assertRedirect();
+
+        $question = Question::firstOrFail();
+        $imagePath = data_get($question->metadata, 'illustration.path');
+
+        Storage::disk('public')->assertExists($imagePath);
+        $this->assertLessThanOrEqual(StimulusImageService::MAX_BYTES, Storage::disk('public')->size($imagePath));
+        $this->assertSame('public', data_get($question->metadata, 'illustration.disk'));
+        $this->assertSame('image/jpeg', data_get($question->metadata, 'illustration.mime_type'));
+        $this->assertLessThanOrEqual(StimulusImageService::MAX_BYTES, data_get($question->metadata, 'illustration.size_bytes'));
+        $this->assertSame('upload', data_get($question->metadata, 'illustration.source'));
+        $this->assertSame('Diagram jumlah buku yang dibaca siswa', data_get($question->metadata, 'illustration.alt'));
+
+        $this->actingAs($teacher)
+            ->post(route('questions.approve', $question))
+            ->assertRedirect();
+
+        $this->actingAs($teacher)
+            ->get(route('questions.show', $question))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Questions/Show')
+                ->where('question.author.name', 'Guru')
+                ->where('question.approver.name', 'Guru')
+                ->where('question.illustration_url', fn ($url): bool => is_string($url) && str_contains($url, $imagePath)));
     }
 
     public function test_teacher_can_create_a_matching_question_with_distractor(): void

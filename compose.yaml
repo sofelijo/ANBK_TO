@@ -12,6 +12,8 @@ x-app: &app
       condition: service_healthy
     redis:
       condition: service_healthy
+  volumes:
+    - app_storage:/var/www/html/storage
 
 services:
   caddy:
@@ -33,7 +35,7 @@ services:
 
   app:
     <<: *app
-    command: ["sh", "-c", "php artisan migrate --force && apache2-foreground"]
+    command: ["sh", "-c", "php artisan storage:link --force && php artisan migrate --force && apache2-foreground"]
     expose:
       - "80"
     healthcheck:
@@ -83,6 +85,7 @@ services:
       retries: 10
 
 volumes:
+  app_storage:
   caddy_data:
   caddy_config:
   postgres_data:
