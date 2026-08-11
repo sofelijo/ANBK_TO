@@ -44,7 +44,7 @@ class StudentAccessController extends Controller
             $request->recordFailedAttempt();
 
             throw ValidationException::withMessages([
-                'nisn' => 'Akun siswa sedang dinonaktifkan. Hubungi guru atau admin sekolah.',
+                'nisn' => 'Akun siswa sedang dinonaktifkan. Hubungi guru, operator, atau admin sekolah.',
             ]);
         }
 
@@ -67,7 +67,7 @@ class StudentAccessController extends Controller
             $student = User::create([
                 'school_id' => $school->id,
                 'name' => $name,
-                'email' => "student.{$school->id}.{$nisn}@anbk.local",
+                'email' => "student.{$school->id}.{$nisn}@tka.local",
                 'password' => Str::random(40),
                 'role' => UserRole::Student,
                 'student_identifier' => $nisn,

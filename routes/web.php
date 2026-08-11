@@ -6,6 +6,7 @@ use App\Http\Controllers\AiQuestionReviewController;
 use App\Http\Controllers\AiStoryIllustrationController;
 use App\Http\Controllers\AiStoryQuestionController;
 use App\Http\Controllers\AssessmentController;
+use App\Http\Controllers\AssessmentScheduleController;
 use App\Http\Controllers\AttemptController;
 use App\Http\Controllers\AttemptEventController;
 use App\Http\Controllers\ChatMessageController;
@@ -15,7 +16,10 @@ use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\QuestionController;
 use App\Http\Controllers\QuestionImportController;
 use App\Http\Controllers\ReportController;
+use App\Http\Controllers\SchoolProfileController;
+use App\Http\Controllers\SchoolStudentController;
 use App\Http\Controllers\StudentChatController;
+use App\Http\Controllers\SubjectController;
 use App\Http\Controllers\TeacherChatController;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Route;
@@ -52,6 +56,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/story-questions/{generation}/publish', [AiStoryQuestionController::class, 'publishBundle'])->name('story-questions.publish');
         Route::post('/story-questions/{generation}/illustration', [AiStoryIllustrationController::class, 'store'])->name('story-questions.illustration.store');
         Route::resource('questions', QuestionController::class)->only(['index', 'create', 'store', 'show', 'edit', 'update']);
+        Route::resource('subjects', SubjectController::class)->except('show');
         Route::resource('competencies', CompetencyController::class)->except('show');
         Route::post('/questions/{question}/approve', [QuestionController::class, 'approve'])->name('questions.approve');
         Route::post('/questions/{question}/duplicate', [QuestionController::class, 'duplicate'])->name('questions.duplicate');
@@ -64,6 +69,15 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('/assessments/{assessment}/edit', [AssessmentController::class, 'edit'])->name('assessments.edit');
         Route::put('/assessments/{assessment}', [AssessmentController::class, 'update'])->name('assessments.update');
         Route::post('/assessments/{assessment}/publish', [AssessmentController::class, 'publish'])->name('assessments.publish');
+    });
+
+    Route::middleware('role:admin,operator')->group(function () {
+        Route::get('/schedules', [AssessmentScheduleController::class, 'index'])->name('schedules.index');
+        Route::post('/schedules', [AssessmentScheduleController::class, 'store'])->name('schedules.store');
+        Route::delete('/schedules/{schedule}', [AssessmentScheduleController::class, 'destroy'])->name('schedules.destroy');
+        Route::get('/school/settings', [SchoolProfileController::class, 'edit'])->name('school.edit');
+        Route::patch('/school/settings', [SchoolProfileController::class, 'update'])->name('school.update');
+        Route::get('/school/students', SchoolStudentController::class)->name('school.students.index');
     });
 
     Route::middleware('role:admin')->group(function () {

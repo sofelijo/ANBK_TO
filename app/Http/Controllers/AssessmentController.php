@@ -7,6 +7,7 @@ use App\Enums\QuestionStatus;
 use App\Enums\QuestionType;
 use App\Enums\UserRole;
 use App\Models\Assessment;
+use App\Models\AssessmentSchedule;
 use App\Models\Competency;
 use App\Models\Question;
 use App\Services\QuestionSnapshotService;
@@ -22,24 +23,35 @@ use Inertia\Response;
 
 class AssessmentController extends Controller
 {
-    public function index(Request $request): Response
+    public function index(Request $request): Response|RedirectResponse
     {
         $user = $request->user();
+
+        if ($user->hasRole(UserRole::Operator)) {
+            return to_route('schedules.index');
+        }
+
+        $bookingRequired = AssessmentSchedule::bookingRequired();
         $query = Assessment::query()
             ->withCount(['questions', 'attempts'])
             ->latest();
 
         if ($user->hasRole(UserRole::Student)) {
+            $schoolNpsn = $user->school()->value('npsn');
             $query->where('status', AssessmentStatus::Published)
                 ->where('grade_level', $user->grade_level)
+                ->when($bookingRequired, fn ($assessments) => $assessments
+                    ->whereHas('schedules', fn ($schedules) => $schedules->where('school_npsn', $schoolNpsn))
+                    ->with(['schedules' => fn ($schedules) => $schedules->where('school_npsn', $schoolNpsn)]))
                 ->with(['attempts' => fn ($attempts) => $attempts->where('user_id', $user->id)]);
         } else {
-            $query->where('school_id', $user->school_id);
+            $query->where('school_id', $user->school_id)->withCount('schedules');
         }
 
         return Inertia::render('Assessments/Index', [
             'assessments' => $query->get(),
             'canManage' => $user->hasRole(UserRole::Admin, UserRole::Teacher),
+            'bookingRequired' => $bookingRequired,
         ]);
     }
 

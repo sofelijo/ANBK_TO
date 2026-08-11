@@ -34,7 +34,7 @@ RUN sed -ri 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-avail
 WORKDIR /var/www/html
 COPY --from=vendor /app ./
 COPY --from=frontend /app/public/build ./public/build
-COPY docker/php.ini /usr/local/etc/php/conf.d/anbk.ini
+COPY docker/php.ini /usr/local/etc/php/conf.d/tka.ini
 
 RUN chown -R www-data:www-data storage bootstrap/cache
 

@@ -2,7 +2,7 @@ import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, Link } from '@inertiajs/react';
 
 type DashboardProps = {
-    mode: 'teacher' | 'student';
+    mode: 'teacher' | 'operator' | 'student';
     stats: Record<string, number>;
 };
 
@@ -13,6 +13,12 @@ export default function Dashboard({ mode, stats }: DashboardProps) {
                   ['Try out tersedia', stats.availableAssessments],
                   ['Try out selesai', stats.completedAttempts],
               ]
+            : mode === 'operator'
+              ? [
+                    ['Jadwal mendatang', stats.upcomingSchedules],
+                    ['Total pengguna', stats.schoolUsers],
+                    ['Total siswa', stats.students],
+                ]
             : [
                   ['Total soal', stats.questions],
                   ['Soal terbit', stats.publishedQuestions],
@@ -28,7 +34,7 @@ export default function Dashboard({ mode, stats }: DashboardProps) {
                         Ringkasan platform
                     </p>
                     <h1 className="mt-1 text-2xl font-bold text-slate-900">
-                        Dashboard ANBK Cerdas
+                        Dashboard TKA Cerdas
                     </h1>
                 </div>
             }
@@ -53,22 +59,32 @@ export default function Dashboard({ mode, stats }: DashboardProps) {
                     <h2 className="text-xl font-semibold">
                         {mode === 'student'
                             ? 'Siap mengukur kemampuanmu?'
+                            : mode === 'operator'
+                              ? 'Pastikan data dan jadwal sekolah selalu siap'
                             : 'Bangun bank soal berkualitas secara bertahap'}
                     </h2>
                     <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
                         {mode === 'student'
                             ? 'Kerjakan try out, lihat peta kompetensi, lalu lanjutkan dengan soal latihan yang paling relevan.'
+                            : mode === 'operator'
+                              ? 'Lengkapi identitas sekolah dan ambil sesi try out sebelum jam operasional dimulai.'
                             : 'AI membantu membuat draft. Guru tetap menjadi peninjau dan penerbit akhir setiap soal.'}
                     </p>
                     <Link
                         href={
                             mode === 'student'
                                 ? route('assessments.index')
-                                : route('questions.create')
+                                : mode === 'operator'
+                                  ? route('schedules.index')
+                                  : route('questions.create')
                         }
                         className="mt-5 inline-flex rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-400"
                     >
-                        {mode === 'student' ? 'Lihat try out' : 'Buat soal pertama'}
+                        {mode === 'student'
+                            ? 'Lihat try out'
+                            : mode === 'operator'
+                              ? 'Atur jadwal sekolah'
+                              : 'Buat soal pertama'}
                     </Link>
                 </div>
             </div>

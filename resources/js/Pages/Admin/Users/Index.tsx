@@ -7,7 +7,7 @@ type User = {
     id: number;
     name: string;
     email: string;
-    role: 'admin' | 'teacher' | 'student';
+    role: 'admin' | 'operator' | 'teacher' | 'student';
     student_identifier?: string;
     grade_level?: number;
     is_active: boolean;
@@ -26,6 +26,7 @@ type Props = {
 };
 
 export default function Index({ users, filters, schoolNpsn, pendingCount }: Props) {
+    const roleLabels = { admin: 'Admin', operator: 'Operator', teacher: 'Guru', student: 'Murid' };
     const [search, setSearch] = useState(filters.search || '');
     const [roleFilter, setRoleFilter] = useState(filters.role || '');
     const [statusFilter, setStatusFilter] = useState(filters.status || '');
@@ -61,7 +62,7 @@ export default function Index({ users, filters, schoolNpsn, pendingCount }: Prop
                         <label className="block text-sm font-medium text-slate-700">Nama<input value={data.name} onChange={(event) => setData('name', event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300" /><InputError message={errors.name} /></label>
                         <label className="block text-sm font-medium text-slate-700">Email<input type="email" value={data.email} onChange={(event) => setData('email', event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300" /><InputError message={errors.email} /></label>
                         <label className="block text-sm font-medium text-slate-700">Kata sandi awal<input type="password" value={data.password} onChange={(event) => setData('password', event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300" /><InputError message={errors.password} /></label>
-                        <label className="block text-sm font-medium text-slate-700">Peran<select value={data.role} onChange={(event) => setData('role', event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300"><option value="student">Murid</option><option value="teacher">Guru</option></select></label>
+                        <label className="block text-sm font-medium text-slate-700">Peran<select value={data.role} onChange={(event) => setData('role', event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300"><option value="student">Murid</option><option value="teacher">Guru</option><option value="operator">Operator Sekolah</option></select></label>
                         {data.role === 'student' && <><label className="block text-sm font-medium text-slate-700">Nomor peserta / NIS<input value={data.student_identifier} onChange={(event) => setData('student_identifier', event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300" /><InputError message={errors.student_identifier} /></label><label className="block text-sm font-medium text-slate-700">Kelas<select value={data.grade_level} onChange={(event) => setData('grade_level', Number(event.target.value))} className="mt-1 block w-full rounded-lg border-slate-300"><option value={5}>Kelas 5</option><option value={8}>Kelas 8</option><option value={11}>Kelas 11</option></select></label></>}
                     </div>
                     <button disabled={processing} className="mt-5 w-full rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Tambah pengguna</button>
@@ -70,7 +71,7 @@ export default function Index({ users, filters, schoolNpsn, pendingCount }: Prop
                 <div>
                     <form onSubmit={applyFilter} className="mb-4 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:flex-row">
                         <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Cari nama, email, atau NIS" className="min-w-0 flex-1 rounded-lg border-slate-300 text-sm" />
-                        <select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)} className="rounded-lg border-slate-300 text-sm"><option value="">Semua peran</option><option value="admin">Admin</option><option value="teacher">Guru</option><option value="student">Murid</option></select>
+                        <select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)} className="rounded-lg border-slate-300 text-sm"><option value="">Semua peran</option><option value="admin">Admin</option><option value="operator">Operator</option><option value="teacher">Guru</option><option value="student">Murid</option></select>
                         <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="rounded-lg border-slate-300 text-sm"><option value="">Semua status</option><option value="pending">Menunggu persetujuan</option><option value="active">Aktif</option><option value="inactive">Nonaktif</option></select>
                         <button className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white">Cari</button>
                     </form>
@@ -79,7 +80,7 @@ export default function Index({ users, filters, schoolNpsn, pendingCount }: Prop
                             {users.data.map((user) => {
                                 const pending = user.role === 'teacher' && !user.is_active && !user.approved_at;
 
-                                return <div key={user.id} className={`flex flex-col justify-between gap-3 p-5 sm:flex-row sm:items-center ${pending ? 'bg-amber-50/60' : ''}`}><div><div className="flex flex-wrap items-center gap-2"><p className="font-semibold text-slate-900">{user.name}</p><span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${pending ? 'bg-amber-100 text-amber-800' : user.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{pending ? 'menunggu persetujuan' : user.is_active ? 'aktif' : 'nonaktif'}</span></div><p className="mt-1 text-sm text-slate-500">{user.email} · {user.role}{user.grade_level ? ` · kelas ${user.grade_level}` : ''}</p></div>{pending ? <button onClick={() => router.patch(route('admin.users.approve', user.id), {}, { preserveScroll: true })} className="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500">Setujui Guru</button> : <button onClick={() => router.patch(route('admin.users.toggle-active', user.id), {}, { preserveScroll: true })} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700">{user.is_active ? 'Nonaktifkan' : 'Aktifkan'}</button>}</div>;
+                                return <div key={user.id} className={`flex flex-col justify-between gap-3 p-5 sm:flex-row sm:items-center ${pending ? 'bg-amber-50/60' : ''}`}><div><div className="flex flex-wrap items-center gap-2"><p className="font-semibold text-slate-900">{user.name}</p><span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${pending ? 'bg-amber-100 text-amber-800' : user.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{pending ? 'menunggu persetujuan' : user.is_active ? 'aktif' : 'nonaktif'}</span></div><p className="mt-1 text-sm text-slate-500">{user.email} · {roleLabels[user.role]}{user.grade_level ? ` · kelas ${user.grade_level}` : ''}</p></div>{pending ? <button onClick={() => router.patch(route('admin.users.approve', user.id), {}, { preserveScroll: true })} className="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500">Setujui Guru</button> : <button onClick={() => router.patch(route('admin.users.toggle-active', user.id), {}, { preserveScroll: true })} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700">{user.is_active ? 'Nonaktifkan' : 'Aktifkan'}</button>}</div>;
                             })}
                         </div>
                     </div>

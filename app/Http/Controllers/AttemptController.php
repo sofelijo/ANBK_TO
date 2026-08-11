@@ -6,6 +6,7 @@ use App\Enums\AssessmentStatus;
 use App\Enums\AttemptStatus;
 use App\Enums\QuestionType;
 use App\Models\Assessment;
+use App\Models\AssessmentSchedule;
 use App\Models\Attempt;
 use App\Models\Question;
 use App\Services\AI\AiManager;
@@ -39,15 +40,29 @@ class AttemptController extends Controller
 
         abort_if($assessment->starts_at?->isFuture(), 403, 'Try out belum dimulai.');
         abort_if($assessment->ends_at?->isPast(), 403, 'Try out telah ditutup.');
+        $attemptStartedAt = now();
+
+        if (AssessmentSchedule::bookingRequired()) {
+            $schoolNpsn = $user->school()->value('npsn');
+            $schedule = $assessment->schedules()
+                ->where('school_npsn', $schoolNpsn)
+                ->where('starts_at', '<=', now())
+                ->where('ends_at', '>', now())
+                ->first();
+
+            abort_if($schedule === null, 403, 'Sekolah Anda belum memiliki jadwal aktif untuk try out ini. Minta guru mengambil jadwal terlebih dahulu.');
+            $attemptStartedAt = $schedule->starts_at;
+        }
+
         $snapshotService->snapshotAssessment($assessment);
 
-        $attempt = DB::transaction(function () use ($assessment, $user, $questionSelector, $snapshotService): Attempt {
+        $attempt = DB::transaction(function () use ($assessment, $user, $questionSelector, $snapshotService, $attemptStartedAt): Attempt {
             $attempt = Attempt::firstOrCreate(
                 ['assessment_id' => $assessment->id, 'user_id' => $user->id],
                 [
                     'public_id' => (string) Str::uuid(),
                     'status' => AttemptStatus::InProgress,
-                    'started_at' => now(),
+                    'started_at' => $attemptStartedAt,
                 ],
             );
 
@@ -115,7 +130,7 @@ class AttemptController extends Controller
                 'assessment' => [
                     'title' => $attempt->assessment->title,
                     'duration_minutes' => $attempt->assessment->duration_minutes,
-                    'type_label' => data_get($settings, 'type_label', 'Try Out ANBK'),
+                    'type_label' => data_get($settings, 'type_label', 'Try Out TKA'),
                     'show_navigation' => (bool) data_get($settings, 'show_navigation', true),
                     'require_all_answers' => (bool) data_get($settings, 'require_all_answers', false),
                 ],

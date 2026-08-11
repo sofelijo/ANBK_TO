@@ -7,6 +7,7 @@ import { FormEvent } from 'react';
 
 type ParentOption = {
     id: number;
+    subject_id: number;
     code: string;
     name: string;
     grade_level: number;
@@ -14,6 +15,7 @@ type ParentOption = {
 
 type Competency = {
     id: number;
+    subject_id: number;
     code: string;
     domain: string;
     name: string;
@@ -24,22 +26,29 @@ type Competency = {
 
 export default function Form({
     competency,
+    defaultParentId,
     parents,
+    subjects,
 }: {
     competency?: Competency;
+    defaultParentId?: number;
     parents: ParentOption[];
+    subjects: { id: number; code: string; name: string }[];
 }) {
     const editing = Boolean(competency);
+    const selectedParentId = competency?.parent_id || defaultParentId;
+    const initialParent = parents.find((parent) => parent.id === selectedParentId);
     const { data, setData, post, put, processing, errors } = useForm({
+        subject_id: competency?.subject_id ? String(competency.subject_id) : initialParent ? String(initialParent.subject_id) : '',
         code: competency?.code || '',
         domain: competency?.domain || '',
         name: competency?.name || '',
         description: competency?.description || '',
-        grade_level: competency?.grade_level || 5,
-        parent_id: competency?.parent_id ? String(competency.parent_id) : '',
+        grade_level: competency?.grade_level || initialParent?.grade_level || 5,
+        parent_id: selectedParentId ? String(selectedParentId) : '',
     });
     const availableParents = parents.filter(
-        (parent) => parent.grade_level === data.grade_level,
+        (parent) => parent.grade_level === data.grade_level && parent.subject_id === Number(data.subject_id),
     );
 
     const submit = (event: FormEvent) => {
@@ -60,7 +69,7 @@ export default function Form({
                         Klasifikasi Bank Soal
                     </p>
                     <h1 className="mt-1 text-2xl font-bold text-slate-900">
-                        {editing ? 'Edit Kompetensi' : 'Tambah Kompetensi'}
+                        {editing ? `Edit ${competency?.parent_id ? 'Subkompetensi' : 'Kompetensi'}` : `Tambah ${data.parent_id ? 'Subkompetensi' : 'Kompetensi'}`}
                     </h1>
                 </div>
             }
@@ -72,9 +81,18 @@ export default function Form({
                     onSubmit={submit}
                     className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8"
                 >
+                    <div>
+                        <InputLabel htmlFor="subject_id" value="Mata pelajaran" />
+                        <select id="subject_id" value={data.subject_id} onChange={(event) => setData((current) => ({ ...current, subject_id: event.target.value, parent_id: '' }))} className="mt-1 block w-full rounded-xl border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500">
+                            <option value="">Pilih mata pelajaran</option>
+                            {subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.code} · {subject.name}</option>)}
+                        </select>
+                        <InputError message={errors.subject_id} className="mt-2" />
+                    </div>
+
                     <div className="grid gap-5 sm:grid-cols-2">
                         <div>
-                            <InputLabel htmlFor="code" value="Kode kompetensi" />
+                            <InputLabel htmlFor="code" value={data.parent_id ? 'Kode subkompetensi' : 'Kode kompetensi'} />
                             <TextInput
                                 id="code"
                                 value={data.code}
@@ -113,7 +131,7 @@ export default function Form({
                     </div>
 
                     <div className="mt-5">
-                        <InputLabel htmlFor="name" value="Nama kompetensi" />
+                        <InputLabel htmlFor="name" value={data.parent_id ? 'Nama subkompetensi' : 'Nama kompetensi'} />
                         <TextInput
                             id="name"
                             value={data.name}
@@ -172,7 +190,7 @@ export default function Form({
                         <div>
                             <InputLabel
                                 htmlFor="parent_id"
-                                value="Kompetensi induk (opsional)"
+                                value="Jenis dan kompetensi induk"
                             />
                             <select
                                 id="parent_id"
@@ -182,7 +200,7 @@ export default function Form({
                                 }
                                 className="mt-1 block w-full rounded-xl border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500"
                             >
-                                <option value="">Tanpa kompetensi induk</option>
+                                <option value="">Kompetensi utama</option>
                                 {availableParents.map((parent) => (
                                     <option key={parent.id} value={parent.id}>
                                         {parent.code} · {parent.name}
@@ -212,7 +230,7 @@ export default function Form({
                                 ? 'Menyimpan…'
                                 : editing
                                   ? 'Simpan perubahan'
-                                  : 'Tambah kompetensi'}
+                                : `Tambah ${data.parent_id ? 'subkompetensi' : 'kompetensi'}`}
                         </button>
                     </div>
                 </form>

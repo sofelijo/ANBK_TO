@@ -9,7 +9,7 @@ return [
 
     'types' => [
         'tryout' => 'Try Out Reguler',
-        'simulation' => 'Simulasi ANBK',
+        'simulation' => 'Simulasi TKA',
         'diagnostic' => 'Tes Diagnostik',
         'practice' => 'Latihan Harian',
         'remedial' => 'Remedial',

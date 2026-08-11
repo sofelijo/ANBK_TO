@@ -11,6 +11,7 @@ use App\Models\AuditLog;
 use App\Models\Competency;
 use App\Models\Question;
 use App\Models\School;
+use App\Models\Subject;
 use App\Models\User;
 use App\Services\AI\StoryIllustrationService;
 use App\Services\StimulusImageService;
@@ -30,6 +31,7 @@ class QuestionWorkflowTest extends TestCase
         [$teacher, $competency] = $this->teacherAndCompetency();
 
         $response = $this->actingAs($teacher)->post(route('questions.store'), [
+            'subject_id' => $competency->subject_id,
             'competency_id' => $competency->id,
             'type' => 'single_choice',
             'title' => 'Soal informasi',
@@ -55,6 +57,32 @@ class QuestionWorkflowTest extends TestCase
             ->assertRedirect();
 
         $this->assertSame(QuestionStatus::Published, $question->fresh()->status);
+    }
+
+    public function test_question_form_requires_matching_subject_and_competency(): void
+    {
+        [$teacher, $competency] = $this->teacherAndCompetency();
+        $mathematics = Subject::create([
+            'school_id' => $teacher->school_id,
+            'code' => 'MAT',
+            'name' => 'Matematika',
+        ]);
+
+        $this->actingAs($teacher)
+            ->get(route('questions.create'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Questions/Create')
+                ->has('subjects', 2)
+                ->where('competencies.0.subject_id', $competency->subject_id));
+
+        $this->actingAs($teacher)
+            ->post(route('questions.store'), [
+                ...$this->payload($competency, 'Pertanyaan salah klasifikasi?'),
+                'subject_id' => $mathematics->id,
+            ])
+            ->assertSessionHasErrors('competency_id');
+
+        $this->assertDatabaseCount('questions', 0);
     }
 
     public function test_teacher_can_upload_a_stimulus_image_and_see_the_verifier(): void
@@ -101,6 +129,7 @@ class QuestionWorkflowTest extends TestCase
         [$teacher, $competency] = $this->teacherAndCompetency();
 
         $response = $this->actingAs($teacher)->post(route('questions.store'), [
+            'subject_id' => $competency->subject_id,
             'competency_id' => $competency->id,
             'type' => 'matching',
             'title' => 'Tokoh dalam cerita',
@@ -147,6 +176,7 @@ class QuestionWorkflowTest extends TestCase
         [$teacher, $competency] = $this->teacherAndCompetency();
 
         $response = $this->actingAs($teacher)->post(route('questions.store'), [
+            'subject_id' => $competency->subject_id,
             'competency_id' => $competency->id,
             'type' => 'category_matrix',
             'title' => 'Kebutuhan gambar pendukung',
@@ -214,9 +244,10 @@ class QuestionWorkflowTest extends TestCase
     {
         config()->set('ai.driver', 'fake');
         config()->set('queue.default', 'sync');
-        [$teacher] = $this->teacherAndCompetency();
+        [$teacher, $competency] = $this->teacherAndCompetency();
 
         $response = $this->actingAs($teacher)->post(route('story-questions.store'), [
+            'subject_id' => $competency->subject_id,
             'theme' => 'menjaga kebersihan sungai',
             'paragraph_count' => 4,
             'question_count' => 4,
@@ -250,10 +281,10 @@ class QuestionWorkflowTest extends TestCase
 
     public function test_story_question_request_requires_a_theme(): void
     {
-        [$teacher] = $this->teacherAndCompetency();
+        [$teacher, $competency] = $this->teacherAndCompetency();
 
         $this->actingAs($teacher)
-            ->post(route('story-questions.store'), ['theme' => ''])
+            ->post(route('story-questions.store'), ['subject_id' => $competency->subject_id, 'theme' => ''])
             ->assertSessionHasErrors('theme');
     }
 
@@ -261,9 +292,10 @@ class QuestionWorkflowTest extends TestCase
     {
         config()->set('ai.driver', 'fake');
         config()->set('queue.default', 'sync');
-        [$teacher] = $this->teacherAndCompetency();
+        [$teacher, $competency] = $this->teacherAndCompetency();
 
         $this->actingAs($teacher)->post(route('story-questions.store'), [
+            'subject_id' => $competency->subject_id,
             'theme' => 'hemat energi di sekolah',
             'paragraph_count' => 2,
             'question_count' => 3,
@@ -313,6 +345,7 @@ class QuestionWorkflowTest extends TestCase
         $this->question($teacher, $competency);
 
         $this->actingAs($teacher)->post(route('story-questions.store'), [
+            'subject_id' => $competency->subject_id,
             'theme' => 'kegiatan koperasi sekolah',
             'paragraph_count' => 2,
             'question_count' => 3,
@@ -361,9 +394,10 @@ class QuestionWorkflowTest extends TestCase
         config()->set('ai.image.disk', 'public');
         config()->set('queue.default', 'sync');
         Storage::fake('public');
-        [$teacher] = $this->teacherAndCompetency();
+        [$teacher, $competency] = $this->teacherAndCompetency();
 
         $this->actingAs($teacher)->post(route('story-questions.store'), [
+            'subject_id' => $competency->subject_id,
             'theme' => 'liburan keluarga di Bali',
             'paragraph_count' => 2,
             'question_count' => 3,
@@ -469,10 +503,11 @@ class QuestionWorkflowTest extends TestCase
 
     public function test_story_question_request_rejects_unsupported_counts(): void
     {
-        [$teacher] = $this->teacherAndCompetency();
+        [$teacher, $competency] = $this->teacherAndCompetency();
 
         $this->actingAs($teacher)
             ->post(route('story-questions.store'), [
+                'subject_id' => $competency->subject_id,
                 'theme' => 'kegiatan sekolah',
                 'paragraph_count' => 6,
                 'question_count' => 5,
@@ -618,6 +653,11 @@ class QuestionWorkflowTest extends TestCase
         ]);
         $competency = Competency::create([
             'school_id' => $school->id,
+            'subject_id' => Subject::create([
+                'school_id' => $school->id,
+                'code' => 'BIND',
+                'name' => 'Bahasa Indonesia',
+            ])->id,
             'code' => 'LIT5-INFO',
             'domain' => 'Literasi',
             'name' => 'Menemukan informasi',
@@ -652,6 +692,7 @@ class QuestionWorkflowTest extends TestCase
     private function payload(Competency $competency, string $prompt): array
     {
         return [
+            'subject_id' => $competency->subject_id,
             'competency_id' => $competency->id,
             'type' => 'single_choice',
             'title' => 'Soal informasi',

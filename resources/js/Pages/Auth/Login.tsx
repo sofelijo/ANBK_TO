@@ -56,7 +56,7 @@ export default function Login({
 
             <div className="mb-6 text-center">
                 <h1 className="text-2xl font-bold text-gray-900">
-                    Masuk ANBK Cerdas
+                    Masuk TKA Cerdas
                 </h1>
                 <p className="mt-1 text-sm text-gray-600">
                     Pilih cara masuk sesuai akunmu.
@@ -90,7 +90,7 @@ export default function Login({
                             : 'text-gray-600'
                     }`}
                 >
-                    Guru / Admin
+                    Guru / Operator / Admin
                 </button>
             </div>
 

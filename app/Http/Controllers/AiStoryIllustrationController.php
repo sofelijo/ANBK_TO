@@ -99,7 +99,7 @@ class AiStoryIllustrationController extends Controller
     private function prompt(string $theme, string $story): string
     {
         return <<<PROMPT
-Buat satu ilustrasi edukatif rasio 16:9 untuk mendampingi soal cerita ANBK siswa Indonesia.
+Buat satu ilustrasi edukatif rasio 16:9 untuk mendampingi soal cerita TKA siswa Indonesia.
 
 Tema: {$theme}
 Cerita: {$story}

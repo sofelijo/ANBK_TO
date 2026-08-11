@@ -1,6 +1,8 @@
-# ANBK Cerdas
+# TKA Cerdas
 
-Platform try out ANBK berbasis Laravel 13 dan React/Inertia. Guru dapat mengelola kompetensi dan bank soal, membuat soal dengan bantuan AI, menyusun paket ujian fleksibel, serta melihat laporan hasil dan analisis butir.
+Platform try out TKA berbasis Laravel 13 dan React/Inertia. Guru dapat mengelola kompetensi dan bank soal, membuat soal dengan bantuan AI, menyusun paket ujian fleksibel, serta melihat laporan hasil dan analisis butir.
+
+> **Konteks proyek:** Produk aktif bernama **TKA Cerdas**. Nama repository, folder deployment, domain lama, atau project Docker mungkin masih memakai identifier lama hanya untuk menjaga kompatibilitas infrastruktur dan volume database produksi. Identifier tersebut bukan branding produk dan tidak boleh digunakan pada teks antarmuka atau fitur baru.
 
 AI hanya digunakan untuk pembuatan konten, review, chatbot belajar, dan ringkasan hasil. Alur ujian, autosave, timer, pemilihan soal, scoring, serta analisis kompetensi tetap berjalan deterministik tanpa menunggu provider AI.
 
@@ -24,6 +26,8 @@ AI hanya digunakan untuk pembuatan konten, review, chatbot belajar, dan ringkasa
 - Multi-sekolah berdasarkan NPSN.
 - Login siswa menggunakan NPSN dan NISN tanpa password; akun dibuat otomatis pada akses pertama.
 - Registrasi guru dengan persetujuan admin sekolah.
+- Empat peran terpisah: admin, operator sekolah, guru, dan siswa. Operator mengelola data sekolah, melihat data siswa sesuai NPSN, serta mengklaim jadwal TKA.
+- CRUD mata pelajaran dengan alur klasifikasi `Mata Pelajaran → Kompetensi → Soal`.
 - CRUD kompetensi sekolah dengan kompetensi global read-only.
 - Bank soal pilihan tunggal, pilihan kompleks, isian singkat, menjodohkan, dan tabel kategori.
 - Stimulus opsional dan bundle satu cerita untuk 2–4 soal.
@@ -109,6 +113,7 @@ AI_DRIVER=fake
 Akun staff hasil seeder:
 
 - Admin: `admin@example.com` / `password`
+- Operator: `operator@example.com` / `password`
 - Guru: `guru@example.com` / `password`
 
 Login siswa dilakukan dari tab **Siswa** menggunakan NPSN 8 digit dan NISN 10 digit. Jika kombinasi belum ada, aplikasi meminta nama lalu membuat akun siswa secara otomatis. NPSN demo adalah `69999999`.
@@ -135,7 +140,7 @@ Untuk ujian serentak, kapasitas akhir harus ditentukan melalui load test. Postgr
 
 ### 2. Siapkan DNS dan firewall
 
-Buat record `A`/`AAAA` domain, misalnya `anbk.sekolah.id`, menuju server. Caddy baru dapat menerbitkan sertifikat TLS setelah DNS benar dan port 80/443 dapat diakses publik.
+Buat record `A`/`AAAA` domain, misalnya `tka.sekolah.id`, menuju server. Caddy baru dapat menerbitkan sertifikat TLS setelah DNS benar dan port 80/443 dapat diakses publik.
 
 Contoh UFW:
 
@@ -152,15 +157,15 @@ PostgreSQL dan Redis tidak dipublikasikan oleh `compose.yaml`; jangan membuka po
 ### 3. Ambil source code
 
 ```bash
-sudo mkdir -p /opt/anbk-cerdas
-sudo chown "$USER":"$USER" /opt/anbk-cerdas
-git clone <URL_REPOSITORY> /opt/anbk-cerdas
-cd /opt/anbk-cerdas
+sudo mkdir -p /opt/tka-cerdas
+sudo chown "$USER":"$USER" /opt/tka-cerdas
+git clone <URL_REPOSITORY> /opt/tka-cerdas
+cd /opt/tka-cerdas
 cp .env.docker.example .env.docker
 chmod 600 .env.docker
 ```
 
-Jika source dikirim sebagai arsip, ekstrak ke `/opt/anbk-cerdas` dan pastikan `compose.yaml`, `Dockerfile`, serta folder `docker/` tersedia.
+Jika source dikirim sebagai arsip, ekstrak ke `/opt/tka-cerdas` dan pastikan `compose.yaml`, `Dockerfile`, serta folder `docker/` tersedia.
 
 ### 4. Buat APP_KEY
 
@@ -177,8 +182,8 @@ Minimal ubah nilai berikut di `.env.docker`:
 ```dotenv
 APP_ENV=production
 APP_DEBUG=false
-APP_URL=https://anbk.sekolah.id
-APP_DOMAIN=anbk.sekolah.id
+APP_URL=https://tka.sekolah.id
+APP_DOMAIN=tka.sekolah.id
 APP_KEY=base64:HASIL_GENERATE
 
 DB_PASSWORD=PASSWORD_DATABASE_PANJANG_DAN_ACAK
@@ -259,7 +264,7 @@ Ketik `exit` untuk keluar. Admin kemudian dapat menyetujui akun guru melalui men
 ### 9. Smoke test
 
 ```bash
-curl -fsS https://anbk.sekolah.id/up
+curl -fsS https://tka.sekolah.id/up
 docker compose exec app php artisan migrate:status
 docker compose exec scheduler php artisan schedule:list
 docker compose exec queue php artisan queue:failed
@@ -298,8 +303,8 @@ Jangan mengaktifkan `APP_DEBUG=true` pada server publik karena detail exception 
 DB_CONNECTION=pgsql
 DB_HOST=postgres
 DB_PORT=5432
-DB_DATABASE=anbk
-DB_USERNAME=anbk
+DB_DATABASE=tka
+DB_USERNAME=tka
 DB_PASSWORD=secret
 
 SESSION_DRIVER=redis
@@ -340,9 +345,9 @@ AI_IMAGE_DISK=s3
 AWS_ACCESS_KEY_ID=...
 AWS_SECRET_ACCESS_KEY=...
 AWS_DEFAULT_REGION=auto
-AWS_BUCKET=anbk-assets
+AWS_BUCKET=tka-assets
 AWS_ENDPOINT=https://ACCOUNT_ID.r2.cloudflarestorage.com
-AWS_URL=https://assets.anbk.sekolah.id
+AWS_URL=https://assets.tka.sekolah.id
 AWS_USE_PATH_STYLE_ENDPOINT=false
 ```
 
@@ -359,15 +364,15 @@ Template production masih memakai `MAIL_MAILER=log`. Dengan konfigurasi tersebut
 Jalankan backup terlebih dahulu, lalu:
 
 ```bash
-cd /opt/anbk-cerdas
-./scripts/backup-postgres.sh /opt/backups/anbk
+cd /opt/tka-cerdas
+./scripts/backup-postgres.sh /opt/backups/tka
 git pull --ff-only
 docker compose build --pull
 docker compose run --rm app php artisan migrate --force
 docker compose up -d --remove-orphans
 docker compose exec app php artisan optimize
 docker compose ps
-curl -fsS https://anbk.sekolah.id/up
+curl -fsS https://tka.sekolah.id/up
 ```
 
 `queue` dan `scheduler` ikut dibuat ulang menggunakan image terbaru. Jangan menjalankan `migrate:fresh`, `db:wipe`, atau `--seed` pada production.
@@ -432,8 +437,8 @@ Pastikan perintah `up` tetap dijalankan jika proses deploy gagal.
 ### Backup PostgreSQL
 
 ```bash
-mkdir -p /opt/backups/anbk
-./scripts/backup-postgres.sh /opt/backups/anbk
+mkdir -p /opt/backups/tka
+./scripts/backup-postgres.sh /opt/backups/tka
 ```
 
 Script menghasilkan PostgreSQL custom dump dengan permission `600`. Kirim hasil backup ke storage di luar VPS dan gunakan retensi, misalnya harian 7 hari, mingguan 4 minggu, dan bulanan 6 bulan.
@@ -441,7 +446,7 @@ Script menghasilkan PostgreSQL custom dump dengan permission `600`. Kirim hasil 
 Contoh cron host pukul 02.15:
 
 ```cron
-15 2 * * * cd /opt/anbk-cerdas && ./scripts/backup-postgres.sh /opt/backups/anbk >> /var/log/anbk-backup.log 2>&1
+15 2 * * * cd /opt/tka-cerdas && ./scripts/backup-postgres.sh /opt/backups/tka >> /var/log/tka-backup.log 2>&1
 ```
 
 ### Uji restore
@@ -451,7 +456,7 @@ Restore bersifat destruktif. Lakukan pada database staging atau saat maintenance
 ```bash
 docker compose exec -T postgres pg_restore \
   --clean --if-exists \
-  -U anbk -d anbk < /opt/backups/anbk/anbk-YYYY-MM-DD-HHMMSS.dump
+  -U tka -d tka < /opt/backups/tka/tka-YYYY-MM-DD-HHMMSS.dump
 ```
 
 Setelah restore:
@@ -504,18 +509,18 @@ Jangan menjalankan Vite development server pada production.
 
 ### Queue worker systemd
 
-Contoh `/etc/systemd/system/anbk-queue.service`:
+Contoh `/etc/systemd/system/tka-queue.service`:
 
 ```ini
 [Unit]
-Description=ANBK Cerdas Queue Worker
+Description=TKA Cerdas Queue Worker
 After=network.target postgresql.service redis-server.service
 
 [Service]
 Type=simple
 User=www-data
 Group=www-data
-WorkingDirectory=/var/www/anbk-cerdas
+WorkingDirectory=/var/www/tka-cerdas
 ExecStart=/usr/bin/php artisan queue:work redis --sleep=1 --tries=2 --timeout=120 --max-time=3600
 Restart=always
 RestartSec=5
@@ -529,7 +534,7 @@ Aktifkan:
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now anbk-queue
+sudo systemctl enable --now tka-queue
 ```
 
 Setelah setiap deploy jalankan `php artisan queue:restart`.
@@ -537,7 +542,7 @@ Setelah setiap deploy jalankan `php artisan queue:restart`.
 ### Scheduler cron
 
 ```cron
-* * * * * cd /var/www/anbk-cerdas && /usr/bin/php artisan schedule:run >> /dev/null 2>&1
+* * * * * cd /var/www/tka-cerdas && /usr/bin/php artisan schedule:run >> /dev/null 2>&1
 ```
 
 Gunakan hanya satu scheduler aktif.
@@ -566,16 +571,16 @@ Siswa yang memasukkan NPSN baru dapat menyebabkan sekolah placeholder dibuat oto
 Install k6 pada mesin penguji terpisah. Buat akun sintetis:
 
 ```bash
-docker compose exec app php artisan anbk:load-users 69999999 --count=100 --grade=5 --force
+docker compose exec app php artisan tka:load-users 69999999 --count=100 --grade=5 --force
 ```
 
 Jalankan dari luar VPS:
 
 ```bash
 k6 run \
-  -e BASE_URL=https://anbk.sekolah.id \
+  -e BASE_URL=https://tka.sekolah.id \
   -e TARGET_VUS=100 \
-  tests/load/anbk.js
+  tests/load/tka.js
 ```
 
 Tambahkan `-e ASSESSMENT_ID=1` untuk menguji start/resume paket. Uji minimal login, daftar paket, start, pengambilan set soal personal, autosave, event integritas, submit, dan halaman hasil.
@@ -595,7 +600,7 @@ npm run build
 Pemeriksaan production setelah deploy:
 
 ```bash
-curl -fsS https://anbk.sekolah.id/up
+curl -fsS https://tka.sekolah.id/up
 docker compose exec app php artisan migrate:status
 docker compose exec queue php artisan queue:failed
 docker compose exec scheduler php artisan schedule:list

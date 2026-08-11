@@ -8,6 +8,7 @@ use App\Enums\QuestionType;
 use App\Models\AiGeneration;
 use App\Models\Competency;
 use App\Models\Question;
+use App\Models\Subject;
 use App\Services\AuditLogger;
 use App\Services\StimulusImageService;
 use Illuminate\Http\RedirectResponse;
@@ -39,7 +40,8 @@ class QuestionController extends Controller
                     });
             })
             ->with([
-                'competency:id,code,name',
+                'competency:id,subject_id,code,name',
+                'competency.subject:id,code,name',
                 'author:id,name',
                 'storyGeneration:id,request_payload,result_payload',
             ])
@@ -67,19 +69,23 @@ class QuestionController extends Controller
                         ->whereNotNull('questions.story_generation_id')
                         ->whereHas('bundleQuestions', fn ($bundleQuestion) => $bundleQuestion->where('status', $status))));
             })
+            ->when($request->integer('subject_id'), fn ($query, int $subjectId) => $query
+                ->whereHas('competency', fn ($competency) => $competency->where('subject_id', $subjectId)))
             ->latest()
             ->paginate(15)
             ->withQueryString();
 
         return Inertia::render('Questions/Index', [
             'questions' => $questions,
-            'filters' => $request->only(['search', 'status']),
+            'subjects' => $this->subjects($request),
+            'filters' => $request->only(['search', 'status', 'subject_id']),
         ]);
     }
 
     public function create(Request $request): Response
     {
         return Inertia::render('Questions/Create', [
+            'subjects' => $this->subjects($request),
             'competencies' => $this->competencies($request),
         ]);
     }
@@ -115,7 +121,8 @@ class QuestionController extends Controller
     {
         $this->ensureSameSchool($request, $question);
         $question->load([
-            'competency:id,code,domain,name',
+            'competency:id,subject_id,code,domain,name',
+            'competency.subject:id,code,name',
             'author:id,name',
             'approver:id,name',
             'options',
@@ -142,6 +149,7 @@ class QuestionController extends Controller
         $question->load('options');
 
         return Inertia::render('Questions/Create', [
+            'subjects' => $this->subjects($request),
             'competencies' => $this->competencies($request),
             'question' => $question,
         ]);
@@ -278,6 +286,7 @@ class QuestionController extends Controller
     private function validatedData(Request $request): array
     {
         $data = $request->validate([
+            'subject_id' => ['required', 'integer'],
             'competency_id' => ['required', 'integer'],
             'type' => ['required', Rule::enum(QuestionType::class)],
             'title' => ['nullable', 'string', 'max:255'],
@@ -312,12 +321,31 @@ class QuestionController extends Controller
             'matrix_rows.*.correct_column_index' => ['required_if:type,category_matrix', 'integer', 'between:0,3'],
         ]);
 
+        $subjectExists = Subject::query()
+            ->whereKey($data['subject_id'])
+            ->where(fn ($query) => $query
+                ->whereNull('school_id')
+                ->orWhere('school_id', $request->user()->school_id))
+            ->exists();
+
+        if (! $subjectExists) {
+            throw ValidationException::withMessages([
+                'subject_id' => 'Mata pelajaran tidak tersedia.',
+            ]);
+        }
+
         $competency = Competency::query()
             ->whereKey($data['competency_id'])
             ->where(fn ($query) => $query
                 ->whereNull('school_id')
                 ->orWhere('school_id', $request->user()->school_id))
             ->firstOrFail();
+
+        if ($competency->subject_id !== (int) $data['subject_id']) {
+            throw ValidationException::withMessages([
+                'competency_id' => 'Kompetensi harus berasal dari mata pelajaran yang dipilih.',
+            ]);
+        }
 
         if ($competency->grade_level !== (int) $data['grade_level']) {
             throw ValidationException::withMessages([
@@ -495,7 +523,17 @@ class QuestionController extends Controller
             ->orderBy('grade_level')
             ->orderBy('domain')
             ->orderBy('name')
-            ->get(['id', 'code', 'domain', 'name', 'grade_level']);
+            ->get(['id', 'subject_id', 'parent_id', 'code', 'domain', 'name', 'grade_level']);
+    }
+
+    private function subjects(Request $request)
+    {
+        return Subject::query()
+            ->where(fn ($query) => $query
+                ->whereNull('school_id')
+                ->orWhere('school_id', $request->user()->school_id))
+            ->orderBy('name')
+            ->get(['id', 'code', 'name']);
     }
 
     private function ensureSameSchool(Request $request, Question $question): void

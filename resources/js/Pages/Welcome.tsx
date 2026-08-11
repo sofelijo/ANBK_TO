@@ -32,7 +32,7 @@ export default function Welcome({ auth, canLogin, canRegister }: WelcomeProps) {
 
     return (
         <>
-            <Head title="ANBK Cerdas" />
+            <Head title="TKA Cerdas" />
             <div className="min-h-screen overflow-hidden bg-[#f7faf9] text-slate-900">
                 <header className="relative z-20 border-b border-emerald-100/80 bg-white/90 backdrop-blur">
                     <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 sm:px-8 lg:px-10">
@@ -40,7 +40,7 @@ export default function Welcome({ auth, canLogin, canRegister }: WelcomeProps) {
                             <BrandMark className="h-11 w-11" />
                             <div>
                                 <p className="text-lg font-bold tracking-tight text-slate-900">
-                                    ANBK Cerdas
+                                    TKA Cerdas
                                 </p>
                                 <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-emerald-600">
                                     Belajar lebih terarah
@@ -89,7 +89,7 @@ export default function Welcome({ auth, canLogin, canRegister }: WelcomeProps) {
                             <div>
                                 <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-white px-3 py-1.5 text-xs font-bold uppercase tracking-[0.14em] text-emerald-700 shadow-sm">
                                     <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                                    Try Out ANBK Berbasis AI
+                                    Try Out TKA Berbasis AI
                                 </div>
                                 <h1 className="mt-6 max-w-3xl text-4xl font-black leading-[1.08] tracking-tight text-slate-950 sm:text-5xl lg:text-6xl">
                                     Latihan lebih cerdas,
@@ -187,7 +187,7 @@ export default function Welcome({ auth, canLogin, canRegister }: WelcomeProps) {
                                 href={primaryHref}
                                 className="shrink-0 rounded-2xl bg-emerald-500 px-7 py-4 text-sm font-bold text-white transition hover:bg-emerald-400"
                             >
-                                {auth.user ? 'Buka Dashboard' : 'Masuk ke ANBK Cerdas'}
+                                {auth.user ? 'Buka Dashboard' : 'Masuk ke TKA Cerdas'}
                             </Link>
                         </div>
                     </section>
@@ -196,7 +196,7 @@ export default function Welcome({ auth, canLogin, canRegister }: WelcomeProps) {
                 <footer className="border-t border-slate-200 bg-white">
                     <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-3 px-5 py-7 text-sm text-slate-500 sm:flex-row sm:px-8 lg:px-10">
                         <div className="flex items-center gap-2 font-semibold text-slate-700">
-                            <BrandMark className="h-8 w-8" /> ANBK Cerdas
+                            <BrandMark className="h-8 w-8" /> TKA Cerdas
                         </div>
                         <p>Platform try out dan pembelajaran berbantuan AI.</p>
                     </div>

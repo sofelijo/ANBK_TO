@@ -5,8 +5,10 @@ namespace App\Http\Controllers;
 use App\Enums\AssessmentStatus;
 use App\Enums\UserRole;
 use App\Models\Assessment;
+use App\Models\AssessmentSchedule;
 use App\Models\Attempt;
 use App\Models\Question;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -31,6 +33,25 @@ class DashboardController extends Controller
                         ->count(),
                 ],
                 'mode' => 'student',
+            ]);
+        }
+
+        if ($user->hasRole(UserRole::Operator)) {
+            $schoolNpsn = (string) $user->school()->value('npsn');
+
+            return Inertia::render('Dashboard', [
+                'stats' => [
+                    'upcomingSchedules' => AssessmentSchedule::query()
+                        ->where('school_npsn', $schoolNpsn)
+                        ->where('ends_at', '>=', now())
+                        ->count(),
+                    'schoolUsers' => User::query()->where('school_id', $user->school_id)->count(),
+                    'students' => User::query()
+                        ->where('school_id', $user->school_id)
+                        ->where('role', UserRole::Student)
+                        ->count(),
+                ],
+                'mode' => 'operator',
             ]);
         }
 

@@ -49,4 +49,9 @@ class Assessment extends Model
     {
         return $this->hasMany(Attempt::class);
     }
+
+    public function schedules(): HasMany
+    {
+        return $this->hasMany(AssessmentSchedule::class);
+    }
 }

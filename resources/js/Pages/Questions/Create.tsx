@@ -5,6 +5,8 @@ import { FormEvent } from 'react';
 
 type Competency = {
     id: number;
+    subject_id: number;
+    parent_id?: number;
     code: string;
     domain: string;
     name: string;
@@ -17,6 +19,8 @@ type MatrixColumn = { id?: string; label: string };
 type MatrixRow = { id?: string; statement: string; correct_column_index: number };
 
 type QuestionForm = {
+    subject_id: string;
+    root_competency_id: string;
     competency_id: string;
     type: 'single_choice' | 'multiple_choice' | 'short_answer' | 'matching' | 'category_matrix';
     title: string;
@@ -62,7 +66,7 @@ type ExistingQuestion = {
     };
 };
 
-export default function Create({ competencies, question }: { competencies: Competency[]; question?: ExistingQuestion }) {
+export default function Create({ subjects, competencies, question }: { subjects: { id: number; code: string; name: string }[]; competencies: Competency[]; question?: ExistingQuestion }) {
     const defaultOptions = [
             { content: '', is_correct: true },
             { content: '', is_correct: false },
@@ -81,7 +85,11 @@ export default function Create({ competencies, question }: { competencies: Compe
         { statement: '', correct_column_index: 0 },
         { statement: '', correct_column_index: 1 },
     ];
+    const questionCompetency = question ? competencies.find((competency) => competency.id === question.competency_id) : undefined;
+    const initialRootCompetencyId = questionCompetency?.parent_id || questionCompetency?.id;
     const { data, setData, post, transform, processing, errors } = useForm<QuestionForm>({
+        subject_id: questionCompetency ? String(questionCompetency.subject_id) : '',
+        root_competency_id: initialRootCompetencyId ? String(initialRootCompetencyId) : '',
         competency_id: question ? String(question.competency_id) : '',
         type: question?.type || 'single_choice',
         title: question?.title || '',
@@ -105,6 +113,12 @@ export default function Create({ competencies, question }: { competencies: Compe
         matrix_columns: initialMatrixColumns,
         matrix_rows: initialMatrixRows,
     });
+    const availableCompetencies = competencies.filter(
+        (competency) => competency.subject_id === Number(data.subject_id) && !competency.parent_id,
+    );
+    const availableSubcompetencies = competencies.filter(
+        (competency) => competency.parent_id === Number(data.root_competency_id),
+    );
 
     const submit = (event: FormEvent) => {
         event.preventDefault();
@@ -143,27 +157,54 @@ export default function Create({ competencies, question }: { competencies: Compe
                         Anda sedang mengedit soal terbit versi {question.version}. Saat disimpan, sistem membuat revisi draft baru dan tidak mengubah soal pada paket yang sudah terbit.
                     </div>
                 )}
+                {subjects.length === 0 && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">Belum ada mata pelajaran. <Link href={route('subjects.create')} className="font-bold underline">Tambahkan mata pelajaran</Link> sebelum membuat soal.</div>}
                 <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                     <h2 className="font-semibold text-slate-900">Klasifikasi</h2>
                     <div className="mt-4 grid gap-4 sm:grid-cols-2">
                         <label className="text-sm font-medium text-slate-700">
+                            Mata pelajaran
+                            <select value={data.subject_id} onChange={(event) => setData((current) => ({ ...current, subject_id: event.target.value, root_competency_id: '', competency_id: '' }))} className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500">
+                                <option value="">Pilih mata pelajaran terlebih dahulu</option>
+                                {subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.code} · {subject.name}</option>)}
+                            </select>
+                            <InputError message={errors.subject_id} className="mt-1" />
+                        </label>
+                        <label className="text-sm font-medium text-slate-700">
                             Kompetensi
                             <select
-                                value={data.competency_id}
+                                value={data.root_competency_id}
                                 onChange={(event) => {
                                     const competency = competencies.find((item) => item.id === Number(event.target.value));
-                                    setData((current) => ({ ...current, competency_id: event.target.value, grade_level: competency?.grade_level || current.grade_level }));
+                                    setData((current) => ({ ...current, root_competency_id: event.target.value, competency_id: event.target.value, grade_level: competency?.grade_level || current.grade_level }));
                                 }}
                                 className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500"
                             >
                                 <option value="">Pilih kompetensi</option>
-                                {competencies.map((competency) => (
+                                {availableCompetencies.map((competency) => (
                                     <option key={competency.id} value={competency.id}>
                                         Kelas {competency.grade_level} · {competency.code} · {competency.name}
                                     </option>
                                 ))}
                             </select>
+                            {data.subject_id && availableCompetencies.length === 0 && <p className="mt-1 text-xs text-amber-700">Mapel ini belum memiliki kompetensi. <Link href={route('competencies.create')} className="font-bold underline">Tambahkan kompetensi</Link>.</p>}
                             <InputError message={errors.competency_id} className="mt-1" />
+                        </label>
+                        <label className="text-sm font-medium text-slate-700">
+                            Subkompetensi <span className="font-normal text-slate-500">(opsional)</span>
+                            <select
+                                value={availableSubcompetencies.some((item) => item.id === Number(data.competency_id)) ? data.competency_id : ''}
+                                onChange={(event) => setData('competency_id', event.target.value || data.root_competency_id)}
+                                disabled={!data.root_competency_id || availableSubcompetencies.length === 0}
+                                className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500 disabled:bg-slate-100"
+                            >
+                                <option value="">{availableSubcompetencies.length === 0 ? 'Belum ada subkompetensi' : 'Gunakan kompetensi utama'}</option>
+                                {availableSubcompetencies.map((competency) => (
+                                    <option key={competency.id} value={competency.id}>
+                                        {competency.code} · {competency.name}
+                                    </option>
+                                ))}
+                            </select>
+                            {data.root_competency_id && availableSubcompetencies.length === 0 && <p className="mt-1 text-xs text-slate-500">Soal akan diklasifikasikan langsung ke kompetensi utama.</p>}
                         </label>
                         <label className="text-sm font-medium text-slate-700">
                             Bentuk soal

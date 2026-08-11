@@ -9,6 +9,7 @@ type Competency = {
     name: string;
     description?: string;
     grade_level: number;
+    subject?: { id: number; code: string; name: string };
     parent?: { id: number; code: string; name: string };
     questions_count: number;
     children_count: number;
@@ -17,19 +18,22 @@ type Competency = {
 
 export default function Index({
     competencies,
+    subjects,
     filters,
 }: {
     competencies: Competency[];
-    filters: { search?: string; grade_level?: string };
+    subjects: { id: number; code: string; name: string }[];
+    filters: { search?: string; grade_level?: string; subject_id?: string };
 }) {
     const [search, setSearch] = useState(filters.search || '');
     const [gradeLevel, setGradeLevel] = useState(filters.grade_level || '');
+    const [subjectId, setSubjectId] = useState(filters.subject_id || '');
 
     const filter = (event: FormEvent) => {
         event.preventDefault();
         router.get(
             route('competencies.index'),
-            { search, grade_level: gradeLevel },
+            { search, grade_level: gradeLevel, subject_id: subjectId },
             { preserveState: true, replace: true },
         );
     };
@@ -37,13 +41,14 @@ export default function Index({
     const clearFilters = () => {
         setSearch('');
         setGradeLevel('');
+        setSubjectId('');
         router.get(route('competencies.index'), {}, { replace: true });
     };
 
     const remove = (competency: Competency) => {
         if (
             window.confirm(
-                `Hapus kompetensi ${competency.code} · ${competency.name}?`,
+                `Hapus ${competency.parent ? 'subkompetensi' : 'kompetensi'} ${competency.code} · ${competency.name}?`,
             )
         ) {
             router.delete(route('competencies.destroy', competency.id), {
@@ -61,7 +66,7 @@ export default function Index({
                             Klasifikasi Bank Soal
                         </p>
                         <h1 className="mt-1 text-2xl font-bold text-slate-900">
-                            Kompetensi
+                            Kompetensi & Subkompetensi
                         </h1>
                     </div>
                     <Link
@@ -78,7 +83,7 @@ export default function Index({
             <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
                 <form
                     onSubmit={filter}
-                    className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-[1fr_180px_auto]"
+                    className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-[1fr_200px_160px_auto]"
                 >
                     <input
                         type="search"
@@ -87,6 +92,10 @@ export default function Index({
                         placeholder="Cari kode, nama, atau domain…"
                         className="rounded-xl border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500"
                     />
+                    <select value={subjectId} onChange={(event) => setSubjectId(event.target.value)} className="rounded-xl border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500">
+                        <option value="">Semua mata pelajaran</option>
+                        {subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.code} · {subject.name}</option>)}
+                    </select>
                     <select
                         value={gradeLevel}
                         onChange={(event) => setGradeLevel(event.target.value)}
@@ -104,7 +113,7 @@ export default function Index({
                         >
                             Terapkan
                         </button>
-                        {(filters.search || filters.grade_level) && (
+                        {(filters.search || filters.grade_level || filters.subject_id) && (
                             <button
                                 type="button"
                                 onClick={clearFilters}
@@ -133,6 +142,7 @@ export default function Index({
                                 <thead className="bg-slate-50">
                                     <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                                         <th className="px-5 py-4">Kompetensi</th>
+                                        <th className="px-5 py-4">Mata Pelajaran</th>
                                         <th className="px-5 py-4">Domain</th>
                                         <th className="px-5 py-4">Jenjang</th>
                                         <th className="px-5 py-4">Penggunaan</th>
@@ -159,15 +169,18 @@ export default function Index({
                                                     )}
                                                 </div>
                                                 <p className="mt-2 font-semibold text-slate-900">
-                                                    {competency.name}
+                                                    {competency.parent ? `↳ ${competency.name}` : competency.name}
                                                 </p>
                                                 {competency.parent && (
                                                     <p className="mt-1 text-xs text-slate-500">
-                                                        Induk:{' '}
+                                                        Kompetensi:{' '}
                                                         {competency.parent.code} ·{' '}
                                                         {competency.parent.name}
                                                     </p>
                                                 )}
+                                            </td>
+                                            <td className="px-5 py-4 text-sm text-slate-600">
+                                                {competency.subject ? `${competency.subject.code} · ${competency.subject.name}` : '-'}
                                             </td>
                                             <td className="px-5 py-4 text-sm text-slate-600">
                                                 {competency.domain}
@@ -185,13 +198,21 @@ export default function Index({
                                                         {
                                                             competency.children_count
                                                         }{' '}
-                                                        turunan
+                                                        subkompetensi
                                                     </p>
                                                 )}
                                             </td>
                                             <td className="px-5 py-4">
                                                 {competency.can_manage ? (
                                                     <div className="flex justify-end gap-2">
+                                                        {!competency.parent && (
+                                                            <Link
+                                                                href={route('competencies.create', { parent_id: competency.id })}
+                                                                className="rounded-lg border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+                                                            >
+                                                                + Subkompetensi
+                                                            </Link>
+                                                        )}
                                                         <Link
                                                             href={route(
                                                                 'competencies.edit',

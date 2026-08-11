@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Competency;
 use App\Models\CompetencyResult;
 use App\Models\Recommendation;
+use App\Models\Subject;
 use App\Services\AuditLogger;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -30,10 +31,12 @@ class CompetencyController extends Controller
                     ->orWhere('domain', 'like', "%{$search}%"));
             })
             ->when($request->integer('grade_level'), fn ($query, int $grade) => $query->where('grade_level', $grade))
-            ->with(['parent:id,code,name'])
+            ->when($request->integer('subject_id'), fn ($query, int $subjectId) => $query->where('subject_id', $subjectId))
+            ->with(['parent:id,code,name', 'subject:id,code,name'])
             ->withCount(['questions', 'children'])
             ->orderBy('grade_level')
-            ->orderBy('domain')
+            ->orderByRaw('COALESCE(parent_id, id)')
+            ->orderBy('parent_id')
             ->orderBy('code')
             ->get();
 
@@ -45,20 +48,30 @@ class CompetencyController extends Controller
                 'name' => $competency->name,
                 'description' => $competency->description,
                 'grade_level' => $competency->grade_level,
+                'subject' => $competency->subject,
                 'parent' => $competency->parent,
                 'questions_count' => $competency->questions_count,
                 'children_count' => $competency->children_count,
                 'can_manage' => $competency->school_id === $schoolId,
             ]),
-            'filters' => $request->only(['search', 'grade_level']),
+            'subjects' => $this->subjects($request),
+            'filters' => $request->only(['search', 'grade_level', 'subject_id']),
         ]);
     }
 
     public function create(Request $request): Response
     {
+        $parents = $this->parentOptions($request);
+        $requestedParentId = $request->integer('parent_id') ?: null;
+        $parentId = $requestedParentId && $parents->contains('id', $requestedParentId)
+            ? $requestedParentId
+            : null;
+
         return Inertia::render('Competencies/Form', [
             'competency' => null,
-            'parents' => $this->parentOptions($request),
+            'defaultParentId' => $parentId,
+            'parents' => $parents,
+            'subjects' => $this->subjects($request),
         ]);
     }
 
@@ -82,7 +95,9 @@ class CompetencyController extends Controller
 
         return Inertia::render('Competencies/Form', [
             'competency' => $competency,
+            'defaultParentId' => null,
             'parents' => $this->parentOptions($request, $competency),
+            'subjects' => $this->subjects($request),
         ]);
     }
 
@@ -128,7 +143,8 @@ class CompetencyController extends Controller
             'name' => Str::squish($request->string('name')->toString()),
         ]);
 
-        return $request->validate([
+        $data = $request->validate([
+            'subject_id' => ['required', 'integer'],
             'code' => [
                 'required',
                 'string',
@@ -146,6 +162,19 @@ class CompetencyController extends Controller
         ], [
             'code.regex' => 'Kode hanya boleh berisi huruf kapital, angka, titik, garis bawah, dan tanda hubung.',
         ]);
+
+        $subjectExists = Subject::query()
+            ->whereKey($data['subject_id'])
+            ->where(fn ($query) => $query
+                ->whereNull('school_id')
+                ->orWhere('school_id', $request->user()->school_id))
+            ->exists();
+
+        if (! $subjectExists) {
+            throw ValidationException::withMessages(['subject_id' => 'Mata pelajaran tidak tersedia.']);
+        }
+
+        return $data;
     }
 
     private function ensureValidParent(Request $request, array $data, ?Competency $competency = null): void
@@ -169,6 +198,18 @@ class CompetencyController extends Controller
             throw ValidationException::withMessages(['parent_id' => 'Kompetensi induk harus berada pada jenjang kelas yang sama.']);
         }
 
+        if ($parent->subject_id !== (int) $data['subject_id']) {
+            throw ValidationException::withMessages(['parent_id' => 'Kompetensi induk harus berada pada mata pelajaran yang sama.']);
+        }
+
+        if ($parent->parent_id !== null) {
+            throw ValidationException::withMessages(['parent_id' => 'Subkompetensi tidak dapat memiliki subkompetensi lagi.']);
+        }
+
+        if ($competency?->children()->exists()) {
+            throw ValidationException::withMessages(['parent_id' => 'Kompetensi yang sudah memiliki subkompetensi tidak dapat dijadikan subkompetensi.']);
+        }
+
         if ($competency && ($parent->is($competency) || in_array($parent->id, $this->descendantIds($competency), true))) {
             throw ValidationException::withMessages(['parent_id' => 'Kompetensi tidak dapat menjadi induk bagi dirinya sendiri atau turunannya.']);
         }
@@ -183,9 +224,10 @@ class CompetencyController extends Controller
                 ->whereNull('school_id')
                 ->orWhere('school_id', $request->user()->school_id))
             ->when($excludedIds, fn ($query) => $query->whereNotIn('id', $excludedIds))
+            ->whereNull('parent_id')
             ->orderBy('grade_level')
             ->orderBy('code')
-            ->get(['id', 'code', 'name', 'grade_level']);
+            ->get(['id', 'subject_id', 'code', 'name', 'grade_level']);
     }
 
     private function descendantIds(Competency $competency): array
@@ -206,5 +248,15 @@ class CompetencyController extends Controller
     private function ensureManageable(Request $request, Competency $competency): void
     {
         abort_unless($competency->school_id === $request->user()->school_id, 404);
+    }
+
+    private function subjects(Request $request)
+    {
+        return Subject::query()
+            ->where(fn ($query) => $query
+                ->whereNull('school_id')
+                ->orWhere('school_id', $request->user()->school_id))
+            ->orderBy('name')
+            ->get(['id', 'code', 'name']);
     }
 }

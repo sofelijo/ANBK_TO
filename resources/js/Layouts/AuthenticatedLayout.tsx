@@ -5,6 +5,9 @@ import ResponsiveNavLink from '@/Components/ResponsiveNavLink';
 import { Link, usePage } from '@inertiajs/react';
 import { PropsWithChildren, ReactNode, useState } from 'react';
 
+type NavigationItem = { label: string; href: string; active: string };
+type NavigationGroup = { label: string; items: NavigationItem[] };
+
 export default function AuthenticatedLayout({
     header,
     children,
@@ -12,49 +15,67 @@ export default function AuthenticatedLayout({
     const { auth, flash } = usePage().props;
     const [showingNavigationDropdown, setShowingNavigationDropdown] =
         useState(false);
-    const canManage = ['admin', 'teacher'].includes(auth.user.role);
+    const isStudent = auth.user.role === 'student';
 
-    const navigation = [
-        { label: 'Dashboard', href: route('dashboard'), active: 'dashboard' },
+    const dashboard: NavigationItem = { label: 'Dashboard', href: route('dashboard'), active: 'dashboard' };
+    const studentNavigation: NavigationItem[] = [
+        dashboard,
+        { label: 'Try Out', href: route('assessments.index'), active: 'assessments.*' },
+        { label: 'Teman Belajar', href: route('student-chat.show'), active: 'student-chat.*' },
+    ];
+    const academicGroups: NavigationGroup[] = [
         {
-            label: canManage ? 'Paket Ujian' : 'Try Out',
-            href: route('assessments.index'),
-            active: 'assessments.*',
+            label: 'Pelaksanaan',
+            items: [
+                { label: 'Paket Ujian', href: route('assessments.index'), active: 'assessments.*' },
+                ...(auth.user.role === 'admin'
+                    ? [{ label: 'Jadwal Sekolah', href: route('schedules.index'), active: 'schedules.*' }]
+                    : []),
+            ],
         },
         {
-            label: canManage ? 'Chat Siswa' : 'Teman Belajar',
-            href: canManage ? route('teacher-chat.index') : route('student-chat.show'),
-            active: canManage ? 'teacher-chat.*' : 'student-chat.*',
+            label: 'Konten',
+            items: [
+                { label: 'Bank Soal', href: route('questions.index'), active: 'questions.*' },
+                { label: 'Mata Pelajaran', href: route('subjects.index'), active: 'subjects.*' },
+                { label: 'Kompetensi', href: route('competencies.index'), active: 'competencies.*' },
+            ],
         },
-        ...(canManage
-            ? [
-                  {
-                      label: 'Bank Soal',
-                      href: route('questions.index'),
-                      active: 'questions.*',
-                  },
-                  {
-                      label: 'Kompetensi',
-                      href: route('competencies.index'),
-                      active: 'competencies.*',
-                  },
-                  {
-                      label: 'Laporan',
-                      href: route('reports.index'),
-                      active: 'reports.*',
-                  },
-              ]
-            : []),
+        {
+            label: 'Pemantauan',
+            items: [
+                { label: 'Chat Siswa', href: route('teacher-chat.index'), active: 'teacher-chat.*' },
+                { label: 'Laporan', href: route('reports.index'), active: 'reports.*' },
+            ],
+        },
         ...(auth.user.role === 'admin'
-            ? [
-                  {
-                      label: 'Pengguna',
-                      href: route('admin.users.index'),
-                      active: 'admin.users.*',
-                  },
-              ]
+            ? [{
+                  label: 'Administrasi',
+                  items: [
+                      { label: 'Data Sekolah', href: route('school.edit'), active: 'school.edit' },
+                      { label: 'Data Siswa', href: route('school.students.index'), active: 'school.students.*' },
+                      { label: 'Pengguna', href: route('admin.users.index'), active: 'admin.users.*' },
+                  ],
+              }]
             : []),
     ];
+    const operatorGroups: NavigationGroup[] = [
+        {
+            label: 'Pelaksanaan',
+            items: [{ label: 'Jadwal Sekolah', href: route('schedules.index'), active: 'schedules.*' }],
+        },
+        {
+            label: 'Administrasi',
+            items: [
+                { label: 'Data Sekolah', href: route('school.edit'), active: 'school.edit' },
+                { label: 'Data Siswa', href: route('school.students.index'), active: 'school.students.*' },
+            ],
+        },
+    ];
+    const managementGroups = auth.user.role === 'operator' ? operatorGroups : academicGroups;
+    const roleLabels = { admin: 'Admin', operator: 'Operator', teacher: 'Guru', student: 'Siswa' };
+    const isItemActive = (item: NavigationItem) => Boolean(route().current(item.active));
+    const isGroupActive = (group: NavigationGroup) => group.items.some(isItemActive);
 
     return (
         <div className="min-h-screen bg-slate-50">
@@ -70,26 +91,36 @@ export default function AuthenticatedLayout({
                                     <ApplicationLogo className="h-full w-full fill-current" />
                                 </span>
                                 <span className="font-semibold text-slate-900">
-                                    ANBK Cerdas
+                                    TKA Cerdas
                                 </span>
                             </Link>
 
-                            <div className="hidden space-x-8 sm:ms-10 sm:flex">
-                                {navigation.map((item) => (
-                                    <NavLink
-                                        key={item.label}
-                                        href={item.href}
-                                        active={route().current(item.active)}
-                                    >
-                                        {item.label}
-                                    </NavLink>
+                            <div className="hidden sm:ms-10 sm:flex sm:items-stretch sm:gap-6">
+                                <NavLink href={dashboard.href} active={isItemActive(dashboard)}>Dashboard</NavLink>
+                                {!isStudent ? managementGroups.map((group) => (
+                                    <Dropdown key={group.label}>
+                                        <Dropdown.Trigger>
+                                            <button className={`inline-flex h-16 items-center border-b-2 px-1 text-sm font-medium transition ${isGroupActive(group) ? 'border-indigo-400 text-slate-900' : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700'}`}>
+                                                {group.label}<span className="ms-1.5 text-xs">⌄</span>
+                                            </button>
+                                        </Dropdown.Trigger>
+                                        <Dropdown.Content align="left" contentClasses="py-1 bg-white">
+                                            {group.items.map((item) => (
+                                                <Dropdown.Link key={item.label} href={item.href} className={isItemActive(item) ? 'bg-indigo-50 font-semibold text-indigo-700' : ''}>
+                                                    {item.label}
+                                                </Dropdown.Link>
+                                            ))}
+                                        </Dropdown.Content>
+                                    </Dropdown>
+                                )) : studentNavigation.slice(1).map((item) => (
+                                    <NavLink key={item.label} href={item.href} active={isItemActive(item)}>{item.label}</NavLink>
                                 ))}
                             </div>
                         </div>
 
                         <div className="hidden sm:ms-6 sm:flex sm:items-center">
                             <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-700">
-                                {auth.user.role}
+                                {roleLabels[auth.user.role]}
                             </span>
                             <div className="relative ms-3">
                                 <Dropdown>
@@ -130,14 +161,14 @@ export default function AuthenticatedLayout({
                     className={`${showingNavigationDropdown ? 'block' : 'hidden'} border-t border-slate-100 sm:hidden`}
                 >
                     <div className="space-y-1 py-2">
-                        {navigation.map((item) => (
-                            <ResponsiveNavLink
-                                key={item.label}
-                                href={item.href}
-                                active={route().current(item.active)}
-                            >
-                                {item.label}
-                            </ResponsiveNavLink>
+                        <ResponsiveNavLink href={dashboard.href} active={isItemActive(dashboard)}>Dashboard</ResponsiveNavLink>
+                        {!isStudent ? managementGroups.map((group) => (
+                            <div key={group.label} className="border-t border-slate-100 pt-2">
+                                <p className="px-4 pb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">{group.label}</p>
+                                {group.items.map((item) => <ResponsiveNavLink key={item.label} href={item.href} active={isItemActive(item)}>{item.label}</ResponsiveNavLink>)}
+                            </div>
+                        )) : studentNavigation.slice(1).map((item) => (
+                            <ResponsiveNavLink key={item.label} href={item.href} active={isItemActive(item)}>{item.label}</ResponsiveNavLink>
                         ))}
                         <ResponsiveNavLink href={route('profile.edit')}>
                             Profil

@@ -69,7 +69,11 @@ class UserController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')],
             'password' => ['required', 'string', 'min:8'],
-            'role' => ['required', Rule::in([UserRole::Teacher->value, UserRole::Student->value])],
+            'role' => ['required', Rule::in([
+                UserRole::Operator->value,
+                UserRole::Teacher->value,
+                UserRole::Student->value,
+            ])],
             'student_identifier' => [
                 Rule::requiredIf($request->string('role')->toString() === UserRole::Student->value),
                 'nullable',

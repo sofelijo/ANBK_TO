@@ -12,6 +12,7 @@ use App\Models\Competency;
 use App\Models\Question;
 use App\Models\School;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
@@ -19,6 +20,12 @@ use Tests\TestCase;
 class AttemptWorkflowTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->travelTo(CarbonImmutable::parse('2026-08-08 18:00'));
+    }
 
     public function test_student_can_view_and_start_published_assessment_from_another_school(): void
     {

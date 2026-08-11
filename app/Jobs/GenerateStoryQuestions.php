@@ -197,10 +197,13 @@ class GenerateStoryQuestions implements ShouldQueue
 
     private function competencies(AiGeneration $generation): Collection
     {
+        $subjectId = (int) data_get($generation->request_payload, 'subject_id');
         $competencies = Competency::query()
+            ->when($subjectId > 0, fn ($query) => $query->where('subject_id', $subjectId))
             ->where(fn ($query) => $query
                 ->whereNull('school_id')
                 ->orWhere('school_id', $generation->school_id))
+            ->whereDoesntHave('children')
             ->get()
             ->sortByDesc(fn (Competency $competency): bool => $competency->school_id === $generation->school_id)
             ->unique('code')
@@ -289,7 +292,7 @@ class GenerateStoryQuestions implements ShouldQueue
         $competencyJson = json_encode($competencies, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
 
         return <<<PROMPT
-Anda membantu guru membuat paket soal cerita try out ANBK berbahasa Indonesia.
+Anda membantu guru membuat paket soal cerita try out TKA berbahasa Indonesia.
 
 Buat satu cerita berdasarkan tema "{$theme}" dengan tepat {$paragraphCount} paragraf, lalu buat tepat {$questionCount} soal yang semuanya hanya menggunakan cerita tersebut sebagai stimulus. Kembalikan setiap paragraf sebagai satu elemen story_paragraphs tanpa nomor paragraf. Pilih kompetensi paling relevan hanya dari daftar yang diberikan. Semua soal harus berada pada satu jenjang kelas yang sama. Cerita harus sesuai usia jenjang tersebut, faktual, aman untuk anak, tidak bias, dan memuat seluruh informasi yang diperlukan untuk menjawab soal.
 

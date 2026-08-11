@@ -53,7 +53,7 @@ const hasCompleteAnswer = (question: ExamQuestion, response?: ResponseValue) => 
 };
 
 export default function Show({ attempt }: { attempt: Attempt }) {
-    const storageKey = `anbk-attempt-${attempt.public_id}`;
+    const storageKey = `tka-attempt-${attempt.public_id}`;
     const initialResponses = Object.fromEntries(attempt.questions.map((question) => [question.id, question.response || {}]));
     const [responses, setResponses] = useState<Record<number, ResponseValue>>(() => {
         const local = window.localStorage.getItem(storageKey);

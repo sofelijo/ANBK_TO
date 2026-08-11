@@ -10,6 +10,7 @@ use App\Models\Assessment;
 use App\Models\Competency;
 use App\Models\Question;
 use App\Models\School;
+use App\Models\Subject;
 use App\Models\User;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
@@ -43,6 +44,16 @@ class DatabaseSeeder extends Seeder
             'email_verified_at' => now(),
         ]);
 
+        User::create([
+            'school_id' => $school->id,
+            'name' => 'Operator Sekolah Demo',
+            'email' => 'operator@example.com',
+            'password' => 'password',
+            'role' => UserRole::Operator,
+            'email_verified_at' => now(),
+            'approved_at' => now(),
+        ]);
+
         $student = User::create([
             'school_id' => $school->id,
             'name' => 'Murid Demo',
@@ -54,13 +65,25 @@ class DatabaseSeeder extends Seeder
             'email_verified_at' => now(),
         ]);
 
-        $competencies = collect([
-            ['code' => 'LIT5-INFO', 'domain' => 'Literasi', 'name' => 'Menemukan informasi tersurat'],
-            ['code' => 'LIT5-INFER', 'domain' => 'Literasi', 'name' => 'Membuat inferensi'],
-            ['code' => 'NUM5-DATA', 'domain' => 'Numerasi', 'name' => 'Membaca data dan grafik'],
+        $subjects = collect([
+            ['code' => 'BIND', 'name' => 'Bahasa Indonesia'],
+            ['code' => 'MAT', 'name' => 'Matematika'],
         ])->mapWithKeys(function (array $data) use ($school): array {
+            $subject = Subject::create(['school_id' => $school->id, ...$data]);
+
+            return [$data['code'] => $subject];
+        });
+
+        $competencies = collect([
+            ['subject' => 'BIND', 'code' => 'LIT5-INFO', 'domain' => 'Literasi', 'name' => 'Menemukan informasi tersurat'],
+            ['subject' => 'BIND', 'code' => 'LIT5-INFER', 'domain' => 'Literasi', 'name' => 'Membuat inferensi'],
+            ['subject' => 'MAT', 'code' => 'NUM5-DATA', 'domain' => 'Numerasi', 'name' => 'Membaca data dan grafik'],
+        ])->mapWithKeys(function (array $data) use ($school, $subjects): array {
+            $subjectCode = $data['subject'];
+            unset($data['subject']);
             $competency = Competency::create([
                 'school_id' => $school->id,
+                'subject_id' => $subjects[$subjectCode]->id,
                 ...$data,
                 'grade_level' => 5,
             ]);
@@ -149,7 +172,7 @@ class DatabaseSeeder extends Seeder
         $assessment = Assessment::create([
             'school_id' => $school->id,
             'created_by' => $teacher->id,
-            'title' => 'Try Out ANBK Kelas 5 - Demo',
+            'title' => 'Try Out TKA Kelas 5 - Demo',
             'description' => 'Paket singkat untuk mencoba alur pengerjaan dan analisis kompetensi.',
             'grade_level' => 5,
             'duration_minutes' => 30,

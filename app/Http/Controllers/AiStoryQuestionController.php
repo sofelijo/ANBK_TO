@@ -8,6 +8,7 @@ use App\Enums\QuestionStatus;
 use App\Jobs\GenerateStoryQuestions;
 use App\Models\AiGeneration;
 use App\Models\Question;
+use App\Models\Subject;
 use App\Services\AI\AiManager;
 use App\Services\AI\StoryIllustrationService;
 use App\Services\AuditLogger;
@@ -23,6 +24,13 @@ class AiStoryQuestionController extends Controller
     public function create(Request $request): Response
     {
         return Inertia::render('Questions/StoryCreate', [
+            'subjects' => Subject::query()
+                ->where(fn ($query) => $query
+                    ->whereNull('school_id')
+                    ->orWhere('school_id', $request->user()->school_id))
+                ->whereHas('competencies')
+                ->orderBy('name')
+                ->get(['id', 'code', 'name']),
             'recentGenerations' => AiGeneration::query()
                 ->where('school_id', $request->user()->school_id)
                 ->where('requested_by', $request->user()->id)
@@ -36,10 +44,24 @@ class AiStoryQuestionController extends Controller
     public function store(Request $request, AiManager $manager, AuditLogger $auditLogger): RedirectResponse
     {
         $data = $request->validate([
+            'subject_id' => ['required', 'integer'],
             'theme' => ['required', 'string', 'max:255'],
             'paragraph_count' => ['required', 'integer', 'between:1,5'],
             'question_count' => ['required', 'integer', 'between:2,4'],
         ]);
+        $subject = Subject::query()
+            ->whereKey($data['subject_id'])
+            ->where(fn ($query) => $query
+                ->whereNull('school_id')
+                ->orWhere('school_id', $request->user()->school_id))
+            ->whereHas('competencies')
+            ->first();
+
+        if (! $subject) {
+            throw ValidationException::withMessages([
+                'subject_id' => 'Mata pelajaran belum memiliki kompetensi yang dapat dipakai.',
+            ]);
+        }
         $theme = trim($data['theme']);
 
         $dailyUsage = AiGeneration::query()
@@ -56,6 +78,8 @@ class AiStoryQuestionController extends Controller
 
         $provider = $manager->provider();
         $payload = [
+            'subject_id' => $subject->id,
+            'subject_name' => $subject->name,
             'theme' => $theme,
             'paragraph_count' => (int) $data['paragraph_count'],
             'question_count' => (int) $data['question_count'],

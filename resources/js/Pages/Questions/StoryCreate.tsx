@@ -6,13 +6,14 @@ import { FormEvent } from 'react';
 type Generation = {
     id: number;
     status: 'pending' | 'processing' | 'completed' | 'failed';
-    request_payload: { theme: string; paragraph_count?: number; question_count?: number };
+    request_payload: { subject_name?: string; theme: string; paragraph_count?: number; question_count?: number };
     result_payload?: { title?: string; question_count?: number };
     created_at: string;
 };
 
-export default function StoryCreate({ recentGenerations }: { recentGenerations: Generation[] }) {
+export default function StoryCreate({ subjects, recentGenerations }: { subjects: { id: number; code: string; name: string }[]; recentGenerations: Generation[] }) {
     const { data, setData, post, processing, errors } = useForm({
+        subject_id: 0,
         theme: '',
         paragraph_count: 3,
         question_count: 3,
@@ -38,11 +39,20 @@ export default function StoryCreate({ recentGenerations }: { recentGenerations: 
                     <div className="rounded-xl bg-indigo-50 p-5">
                         <h2 className="font-semibold text-indigo-950">Tentukan tema dan panjang paket</h2>
                         <p className="mt-2 text-sm leading-6 text-indigo-800">
-                            AI akan memilih kompetensi yang tersedia, menulis cerita sesuai jumlah paragraf, lalu membuat soal sebanyak yang dipilih. Semua hasil disimpan sebagai draft untuk diperiksa guru.
+                            Pilih mata pelajaran terlebih dahulu. AI hanya akan memakai kompetensi dari mapel tersebut, menulis cerita, lalu membuat soal sebanyak yang dipilih.
                         </p>
                     </div>
 
                     <label className="mt-6 block text-sm font-semibold text-slate-800">
+                        Mata pelajaran
+                        <select value={data.subject_id} onChange={(event) => setData('subject_id', Number(event.target.value))} className="mt-2 block w-full rounded-xl border-slate-300 focus:border-indigo-500 focus:ring-indigo-500">
+                            <option value={0}>{subjects.length === 0 ? 'Belum ada mapel dengan kompetensi' : 'Pilih mata pelajaran terlebih dahulu'}</option>
+                            {subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.code} · {subject.name}</option>)}
+                        </select>
+                        <InputError message={errors.subject_id} className="mt-1" />
+                    </label>
+
+                    <label className="mt-5 block text-sm font-semibold text-slate-800">
                         Tema cerita
                         <textarea
                             autoFocus
@@ -86,7 +96,7 @@ export default function StoryCreate({ recentGenerations }: { recentGenerations: 
                         <Link href={route('questions.index')} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700">
                             Kembali
                         </Link>
-                        <button disabled={processing || data.theme.trim().length === 0} className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50">
+                        <button disabled={processing || data.subject_id === 0 || data.theme.trim().length === 0} className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50">
                             {processing ? 'Mengirim tema...' : 'Buat Cerita & Soal'}
                         </button>
                     </div>
@@ -107,6 +117,7 @@ export default function StoryCreate({ recentGenerations }: { recentGenerations: 
                                         </span>
                                     </div>
                                     <p className="mt-2 text-xs text-slate-500">
+                                        {generation.request_payload.subject_name ? `${generation.request_payload.subject_name} · ` : ''}
                                         {generation.request_payload.paragraph_count ? `${generation.request_payload.paragraph_count} paragraf · ` : ''}
                                         {generation.result_payload?.question_count || generation.request_payload.question_count || '-'} soal
                                     </p>

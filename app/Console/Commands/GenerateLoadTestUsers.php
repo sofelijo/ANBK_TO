@@ -9,7 +9,7 @@ use Illuminate\Console\Command;
 
 class GenerateLoadTestUsers extends Command
 {
-    protected $signature = 'anbk:load-users
+    protected $signature = 'tka:load-users
         {npsn : NPSN sekolah target}
         {--count=50 : Jumlah akun}
         {--grade=5 : Jenjang 5, 8, atau 11}
@@ -45,7 +45,7 @@ class GenerateLoadTestUsers extends Command
         for ($number = 1; $number <= $count; $number++) {
             $suffix = str_pad((string) $number, 4, '0', STR_PAD_LEFT);
             User::updateOrCreate(
-                ['email' => "loadtest+{$suffix}@anbk.invalid"],
+                ['email' => "loadtest+{$suffix}@tka.invalid"],
                 [
                     'school_id' => $school->id,
                     'name' => "Load Test {$suffix}",

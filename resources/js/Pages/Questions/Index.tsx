@@ -22,7 +22,7 @@ type Question = {
     bundle_draft_count: number;
     bundle_published_count: number;
     bundle_archived_count: number;
-    competency: { code: string; name: string };
+    competency: { code: string; name: string; subject?: { code: string; name: string } };
     author: { name: string };
 };
 
@@ -31,16 +31,18 @@ type Props = {
         data: Question[];
         links: { url?: string; label: string; active: boolean }[];
     };
-    filters: { search?: string; status?: string };
+    subjects: { id: number; code: string; name: string }[];
+    filters: { search?: string; status?: string; subject_id?: string };
 };
 
-export default function Index({ questions, filters }: Props) {
+export default function Index({ questions, subjects, filters }: Props) {
     const [search, setSearch] = useState(filters.search || '');
     const [status, setStatus] = useState(filters.status || '');
+    const [subjectId, setSubjectId] = useState(filters.subject_id || '');
 
     const filter = (event: FormEvent) => {
         event.preventDefault();
-        router.get(route('questions.index'), { search, status }, { preserveState: true });
+        router.get(route('questions.index'), { search, status, subject_id: subjectId }, { preserveState: true });
     };
 
     return (
@@ -68,6 +70,10 @@ export default function Index({ questions, filters }: Props) {
                         placeholder="Cari judul atau pertanyaan"
                         className="flex-1 rounded-lg border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500"
                     />
+                    <select value={subjectId} onChange={(event) => setSubjectId(event.target.value)} className="rounded-lg border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500">
+                        <option value="">Semua mata pelajaran</option>
+                        {subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.code} · {subject.name}</option>)}
+                    </select>
                     <select
                         value={status}
                         onChange={(event) => setStatus(event.target.value)}
@@ -124,7 +130,7 @@ export default function Index({ questions, filters }: Props) {
                                                 <p className="mt-1 text-sm text-slate-500">
                                                     {bundled
                                                         ? `${question.bundle_question_count} soal dalam satu cerita · Tema: ${question.story_generation?.request_payload.theme}`
-                                                        : `${question.competency.code} · ${question.competency.name}`}
+                                                        : `${question.competency.subject ? `${question.competency.subject.name} · ` : ''}${question.competency.code} · ${question.competency.name}`}
                                                 </p>
                                             </div>
                                             <div className={`shrink-0 text-sm ${bundled ? 'font-semibold text-indigo-700' : 'text-slate-500'}`}>

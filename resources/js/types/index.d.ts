@@ -3,7 +3,7 @@ export interface User {
     name: string;
     email: string;
     email_verified_at?: string;
-    role: 'admin' | 'teacher' | 'student';
+    role: 'admin' | 'operator' | 'teacher' | 'student';
     school_id?: number;
     grade_level?: number;
 }

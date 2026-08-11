@@ -27,7 +27,7 @@ type Question = {
         matrix_rows?: { id: string; statement: string; correct_column_id: string }[];
     };
     options: Option[];
-    competency: { code: string; domain: string; name: string };
+    competency: { code: string; domain: string; name: string; subject?: { code: string; name: string } };
     author: { name: string };
     approver?: { name: string };
     approved_at?: string;
@@ -156,6 +156,7 @@ export default function Show({ question, latestGeneration }: { question: Questio
                 <aside className="h-fit rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                     <h2 className="font-semibold text-slate-900">Metadata</h2>
                     <dl className="mt-4 space-y-4 text-sm">
+                        <div><dt className="text-slate-500">Mata Pelajaran</dt><dd className="mt-1 font-medium text-slate-900">{question.competency.subject ? `${question.competency.subject.code} · ${question.competency.subject.name}` : '-'}</dd></div>
                         <div><dt className="text-slate-500">Kompetensi</dt><dd className="mt-1 font-medium text-slate-900">{question.competency.code} · {question.competency.name}</dd></div>
                         <div><dt className="text-slate-500">Domain</dt><dd className="mt-1 text-slate-900">{question.competency.domain}</dd></div>
                         <div><dt className="text-slate-500">Bentuk</dt><dd className="mt-1 text-slate-900">{question.type}</dd></div>

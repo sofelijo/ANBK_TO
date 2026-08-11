@@ -1,7 +1,7 @@
-name: anbk-cerdas
+name: tka-cerdas
 
 x-app: &app
-  image: anbk-cerdas-app:latest
+  image: tka-cerdas-app:latest
   build:
     context: .
   env_file:

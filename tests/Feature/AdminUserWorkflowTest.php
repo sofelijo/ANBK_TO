@@ -87,6 +87,25 @@ class AdminUserWorkflowTest extends TestCase
         $this->assertAuthenticatedAs($teacher);
     }
 
+    public function test_admin_can_create_school_operator(): void
+    {
+        [$admin] = $this->users();
+
+        $this->actingAs($admin)->post(route('admin.users.store'), [
+            'name' => 'Operator Baru',
+            'email' => 'operator-baru@example.com',
+            'password' => 'password123',
+            'role' => UserRole::Operator->value,
+        ])->assertRedirect()->assertSessionHasNoErrors();
+
+        $this->assertDatabaseHas('users', [
+            'school_id' => $admin->school_id,
+            'email' => 'operator-baru@example.com',
+            'role' => UserRole::Operator->value,
+            'is_active' => true,
+        ]);
+    }
+
     public function test_teacher_cannot_open_user_administration(): void
     {
         [, $teacher] = $this->users();

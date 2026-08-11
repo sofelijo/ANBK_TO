@@ -12,11 +12,13 @@ type Assessment = {
     attempts_count: number;
     starts_at?: string;
     ends_at?: string;
+    schedules_count?: number;
+    schedules?: { id: number; school_npsn: string; starts_at: string; ends_at: string; session_number: number }[];
     settings?: { type_label?: string; selection_mode?: string };
     attempts?: { public_id: string; status: string }[];
 };
 
-export default function Index({ assessments, canManage }: { assessments: Assessment[]; canManage: boolean }) {
+export default function Index({ assessments, canManage, bookingRequired }: { assessments: Assessment[]; canManage: boolean; bookingRequired: boolean }) {
     return (
         <AuthenticatedLayout
             header={
@@ -31,14 +33,24 @@ export default function Index({ assessments, canManage }: { assessments: Assessm
         >
             <Head title={canManage ? 'Paket Ujian' : 'Try Out'} />
             <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+                {!canManage && (
+                    <div className={`mb-5 rounded-xl border p-4 text-sm ${bookingRequired ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-emerald-200 bg-emerald-50 text-emerald-900'}`}>
+                        {bookingRequired
+                            ? 'Saat ini jam operasional sekolah. Try out hanya dapat dikerjakan jika guru sudah mengambil jadwal untuk NPSN sekolahmu.'
+                            : 'Saat ini di luar jam operasional. Semua try out terbit dapat digunakan untuk belajar mandiri di rumah tanpa booking jadwal.'}
+                    </div>
+                )}
                 {assessments.length === 0 ? (
-                    <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">Belum ada paket yang tersedia.</div>
+                    <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">{!canManage && bookingRequired ? 'Belum ada try out terjadwal untuk sekolahmu. Hubungi guru.' : 'Belum ada paket yang tersedia.'}</div>
                 ) : (
                     <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
                         {assessments.map((assessment) => {
                             const attempt = assessment.attempts?.[0];
-                            const startsInFuture = assessment.starts_at && new Date(assessment.starts_at).getTime() > Date.now();
-                            const hasEnded = assessment.ends_at && new Date(assessment.ends_at).getTime() < Date.now();
+                            const schoolSchedule = assessment.schedules?.[0];
+                            const effectiveStart = schoolSchedule?.starts_at || assessment.starts_at;
+                            const effectiveEnd = schoolSchedule?.ends_at || assessment.ends_at;
+                            const startsInFuture = effectiveStart && new Date(effectiveStart).getTime() > Date.now();
+                            const hasEnded = effectiveEnd && new Date(effectiveEnd).getTime() < Date.now();
                             return (
                                 <article key={assessment.id} className="flex flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                                     <div className="flex items-center justify-between">
@@ -47,12 +59,13 @@ export default function Index({ assessments, canManage }: { assessments: Assessm
                                     </div>
                                     <h2 className="mt-4 text-lg font-semibold text-slate-900">{assessment.title}</h2>
                                     <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-indigo-600">{assessment.settings?.type_label || 'Try Out Reguler'}</p>
-                                    <p className="mt-2 flex-1 text-sm leading-6 text-slate-500">{assessment.description || 'Paket try out ANBK.'}</p>
+                                    <p className="mt-2 flex-1 text-sm leading-6 text-slate-500">{assessment.description || 'Paket try out TKA.'}</p>
                                     <div className="mt-5 flex gap-4 border-t border-slate-100 pt-4 text-xs text-slate-500">
                                         <span>{assessment.questions_count} soal</span>
                                         <span>{assessment.duration_minutes} menit</span>
+                                        {canManage && (assessment.schedules_count || 0) > 0 && <span>{assessment.schedules_count} sekolah terjadwal</span>}
                                     </div>
-                                    {(assessment.starts_at || assessment.ends_at) && <p className="mt-3 text-xs text-slate-500">{assessment.starts_at ? `Mulai ${new Date(assessment.starts_at).toLocaleString('id-ID')}` : 'Tersedia sekarang'}{assessment.ends_at ? ` · Tutup ${new Date(assessment.ends_at).toLocaleString('id-ID')}` : ''}</p>}
+                                    {(effectiveStart || effectiveEnd) && <p className="mt-3 text-xs text-slate-500">{schoolSchedule && `Sesi ${schoolSchedule.session_number} · `}{effectiveStart ? `Mulai ${new Date(effectiveStart).toLocaleString('id-ID')}` : 'Tersedia sekarang'}{effectiveEnd ? ` · Tutup ${new Date(effectiveEnd).toLocaleString('id-ID')}` : ''}</p>}
                                     {canManage ? (
                                         <div className="mt-4 flex gap-2">
                                             {assessment.attempts_count === 0 && <Link href={route('assessments.edit', assessment.id)} className="flex-1 rounded-lg border border-slate-300 px-4 py-2 text-center text-sm font-semibold text-slate-700">Edit</Link>}
