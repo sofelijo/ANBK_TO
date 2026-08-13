@@ -41,7 +41,7 @@ class AttemptWorkflowTest extends TestCase
             'password' => 'password',
             'role' => UserRole::Student,
             'student_identifier' => '0011111111',
-            'grade_level' => 5,
+            'grade_level' => 6,
             'email_verified_at' => now(),
         ]);
 
@@ -210,7 +210,7 @@ class AttemptWorkflowTest extends TestCase
             'title' => 'Menjodohkan tokoh',
             'prompt' => 'Pasangkan deskripsi dengan tokoh.',
             'difficulty' => 2,
-            'grade_level' => 5,
+            'grade_level' => 6,
             'metadata' => [
                 'matching_pairs' => [
                     ['left_id' => '00000000-0000-4000-8000-000000000001', 'left' => 'Deskripsi satu', 'right_id' => '10000000-0000-4000-8000-000000000001', 'right' => 'Tokoh A'],
@@ -287,7 +287,7 @@ class AttemptWorkflowTest extends TestCase
             'title' => 'Kebutuhan gambar pendukung',
             'prompt' => 'Pilih kategori untuk setiap pernyataan.',
             'difficulty' => 2,
-            'grade_level' => 5,
+            'grade_level' => 6,
             'metadata' => [
                 'matrix_columns' => [
                     ['id' => '30000000-0000-4000-8000-000000000001', 'label' => 'Perlu'],
@@ -381,7 +381,7 @@ class AttemptWorkflowTest extends TestCase
             ->post(route('assessments.store'), [
                 'title' => 'Seleksi Literasi Sekolah',
                 'description' => 'Paket custom untuk seleksi internal.',
-                'grade_level' => 5,
+                'grade_level' => 6,
                 'duration_minutes' => 45,
                 'assessment_type' => 'custom',
                 'custom_type_name' => 'Seleksi Literasi',
@@ -418,7 +418,7 @@ class AttemptWorkflowTest extends TestCase
         $this->actingAs($teacher)
             ->post(route('assessments.store'), [
                 'title' => 'Paket Minim Pengulangan',
-                'grade_level' => 5,
+                'grade_level' => 6,
                 'duration_minutes' => 30,
                 'assessment_type' => 'tryout',
                 'selection_mode' => 'automatic',
@@ -444,7 +444,7 @@ class AttemptWorkflowTest extends TestCase
 
         $this->actingAs($teacher)->post(route('assessments.store'), [
             'title' => 'Paket Personal Siswa',
-            'grade_level' => 5,
+            'grade_level' => 6,
             'duration_minutes' => 30,
             'assessment_type' => 'tryout',
             'selection_mode' => 'automatic',
@@ -463,14 +463,14 @@ class AttemptWorkflowTest extends TestCase
             'email' => 'murid-kedua@example.com',
             'password' => 'password',
             'role' => UserRole::Student,
-            'grade_level' => 5,
+            'grade_level' => 6,
             'email_verified_at' => now(),
         ]);
         $secondStudentHistory = Assessment::create([
             'school_id' => $teacher->school_id,
             'created_by' => $teacher->id,
             'title' => 'Riwayat Murid Kedua',
-            'grade_level' => 5,
+            'grade_level' => 6,
             'duration_minutes' => 30,
             'status' => AssessmentStatus::Published,
         ]);
@@ -517,7 +517,7 @@ class AttemptWorkflowTest extends TestCase
             ->post(route('assessments.store'), [
                 'title' => 'Blueprint Literasi',
                 'description' => 'Komposisi kompetensi terstruktur.',
-                'grade_level' => 5,
+                'grade_level' => 6,
                 'duration_minutes' => 45,
                 'assessment_type' => 'tryout',
                 'selection_mode' => 'blueprint',
@@ -561,7 +561,7 @@ class AttemptWorkflowTest extends TestCase
             ->post(route('assessments.store'), [
                 'title' => 'Komposisi Kompetensi Literasi',
                 'description' => 'Kuota sederhana per kompetensi.',
-                'grade_level' => 5,
+                'grade_level' => 6,
                 'duration_minutes' => 45,
                 'assessment_type' => 'tryout',
                 'selection_mode' => 'competency',
@@ -599,7 +599,7 @@ class AttemptWorkflowTest extends TestCase
         $this->actingAs($teacher)
             ->post(route('assessments.store'), [
                 'title' => 'Paket manual',
-                'grade_level' => 5,
+                'grade_level' => 6,
                 'duration_minutes' => 30,
                 'assessment_type' => 'tryout',
                 'selection_mode' => 'manual',
@@ -645,7 +645,7 @@ class AttemptWorkflowTest extends TestCase
             ->put(route('assessments.update', $assessment), [
                 'title' => 'Diagnostik Literasi Diperbarui',
                 'description' => 'Petunjuk baru.',
-                'grade_level' => 5,
+                'grade_level' => 6,
                 'duration_minutes' => 75,
                 'assessment_type' => 'diagnostic',
                 'custom_type_name' => '',
@@ -696,22 +696,22 @@ class AttemptWorkflowTest extends TestCase
             'email' => 'murid-attempt@example.com',
             'password' => 'password',
             'role' => UserRole::Student,
-            'grade_level' => 5,
+            'grade_level' => 6,
             'email_verified_at' => now(),
         ]);
         $information = Competency::create([
             'school_id' => $school->id,
-            'code' => 'LIT5-INFO',
+            'code' => 'LIT6-INFO',
             'domain' => 'Literasi',
             'name' => 'Menemukan informasi',
-            'grade_level' => 5,
+            'grade_level' => 6,
         ]);
         $inference = Competency::create([
             'school_id' => $school->id,
-            'code' => 'LIT5-INFER',
+            'code' => 'LIT6-INFER',
             'domain' => 'Literasi',
             'name' => 'Membuat inferensi',
-            'grade_level' => 5,
+            'grade_level' => 6,
         ]);
 
         $informationQuestion = $this->question($teacher, $information, 'Soal informasi');
@@ -721,7 +721,7 @@ class AttemptWorkflowTest extends TestCase
             'school_id' => $school->id,
             'created_by' => $teacher->id,
             'title' => 'Try Out Uji',
-            'grade_level' => 5,
+            'grade_level' => 6,
             'duration_minutes' => 30,
             'status' => AssessmentStatus::Published,
         ]);
@@ -744,7 +744,7 @@ class AttemptWorkflowTest extends TestCase
             'title' => $title,
             'prompt' => 'Pilih jawaban yang tepat.',
             'difficulty' => 1,
-            'grade_level' => 5,
+            'grade_level' => 6,
         ]);
         $question->options()->createMany([
             ['label' => 'A', 'content' => 'Jawaban benar', 'is_correct' => true, 'position' => 1],

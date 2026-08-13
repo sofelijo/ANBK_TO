@@ -22,6 +22,19 @@ type Competency = {
     description?: string;
     grade_level: number;
     parent_id?: number;
+    question_blueprint_ids?: number[];
+};
+
+type QuestionBlueprint = { id: number; subject_id: number; code: string; name: string };
+
+const normalizeGradeLevel = (gradeLevel?: number): number => {
+    const legacyGradeLevels: Record<number, number> = {
+        5: 6,
+        8: 9,
+        11: 12,
+    };
+
+    return legacyGradeLevels[gradeLevel ?? 6] ?? gradeLevel ?? 6;
 };
 
 export default function Form({
@@ -29,11 +42,13 @@ export default function Form({
     defaultParentId,
     parents,
     subjects,
+    questionBlueprints,
 }: {
     competency?: Competency;
     defaultParentId?: number;
     parents: ParentOption[];
     subjects: { id: number; code: string; name: string }[];
+    questionBlueprints: QuestionBlueprint[];
 }) {
     const editing = Boolean(competency);
     const selectedParentId = competency?.parent_id || defaultParentId;
@@ -44,11 +59,15 @@ export default function Form({
         domain: competency?.domain || '',
         name: competency?.name || '',
         description: competency?.description || '',
-        grade_level: competency?.grade_level || initialParent?.grade_level || 5,
+        grade_level: normalizeGradeLevel(competency?.grade_level ?? initialParent?.grade_level),
         parent_id: selectedParentId ? String(selectedParentId) : '',
+        question_blueprint_ids: competency?.question_blueprint_ids || [],
     });
+    const selectedSubject = subjects.find((subject) => subject.id === Number(data.subject_id));
+    const usesQuestionBlueprints = selectedSubject?.code === 'BIND' && data.parent_id === '';
+    const availableQuestionBlueprints = questionBlueprints.filter((item) => item.subject_id === Number(data.subject_id));
     const availableParents = parents.filter(
-        (parent) => parent.grade_level === data.grade_level && parent.subject_id === Number(data.subject_id),
+        (parent) => normalizeGradeLevel(parent.grade_level) === data.grade_level && parent.subject_id === Number(data.subject_id),
     );
 
     const submit = (event: FormEvent) => {
@@ -83,12 +102,19 @@ export default function Form({
                 >
                     <div>
                         <InputLabel htmlFor="subject_id" value="Mata pelajaran" />
-                        <select id="subject_id" value={data.subject_id} onChange={(event) => setData((current) => ({ ...current, subject_id: event.target.value, parent_id: '' }))} className="mt-1 block w-full rounded-xl border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500">
+                        <select id="subject_id" value={data.subject_id} onChange={(event) => setData((current) => ({ ...current, subject_id: event.target.value, parent_id: '', question_blueprint_ids: [] }))} className="mt-1 block w-full rounded-xl border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500">
                             <option value="">Pilih mata pelajaran</option>
                             {subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.code} · {subject.name}</option>)}
                         </select>
                         <InputError message={errors.subject_id} className="mt-2" />
                     </div>
+
+                    {usesQuestionBlueprints && <div className="mt-5 rounded-xl border border-indigo-200 bg-indigo-50 p-5">
+                        <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-bold text-indigo-950">Tipe soal default</h2><p className="mt-1 text-sm text-indigo-800">Boleh memilih beberapa tipe reusable. Guru masih dapat menyesuaikannya saat membuat soal.</p></div><Link href={route('question-types.index')} className="text-sm font-bold text-indigo-700 underline">Kelola tipe soal</Link></div>
+                        <div className="mt-4 grid gap-2 sm:grid-cols-2">{availableQuestionBlueprints.map((blueprint) => <label key={blueprint.id} className="flex items-center gap-3 rounded-lg bg-white p-3 text-sm text-slate-800"><input type="checkbox" checked={data.question_blueprint_ids.includes(blueprint.id)} onChange={() => setData('question_blueprint_ids', data.question_blueprint_ids.includes(blueprint.id) ? data.question_blueprint_ids.filter((id) => id !== blueprint.id) : [...data.question_blueprint_ids, blueprint.id])} className="rounded border-slate-300 text-indigo-600" /><span><strong>{blueprint.name}</strong><span className="ml-2 font-mono text-xs text-slate-400">{blueprint.code}</span></span></label>)}</div>
+                        {availableQuestionBlueprints.length === 0 && <p className="mt-4 text-sm text-amber-700">Belum ada tipe soal. Tambahkan melalui menu Tipe Soal B. Indonesia.</p>}
+                        <InputError message={errors.question_blueprint_ids} className="mt-2" />
+                    </div>}
 
                     <div className="grid gap-5 sm:grid-cols-2">
                         <div>
@@ -102,7 +128,7 @@ export default function Form({
                                         event.target.value.toUpperCase(),
                                     )
                                 }
-                                placeholder="Contoh: LIT5-INFER"
+                                placeholder="Contoh: LIT6-INFER"
                                 className="mt-1 block w-full font-mono uppercase"
                                 isFocused
                             />
@@ -177,9 +203,9 @@ export default function Form({
                                 }}
                                 className="mt-1 block w-full rounded-xl border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500"
                             >
-                                <option value={5}>Kelas 5</option>
-                                <option value={8}>Kelas 8</option>
-                                <option value={11}>Kelas 11</option>
+                                <option value={6}>Kelas 6</option>
+                                <option value={9}>Kelas 9</option>
+                                <option value={12}>Kelas 12</option>
                             </select>
                             <InputError
                                 message={errors.grade_level}

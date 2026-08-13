@@ -140,10 +140,10 @@ class AssessmentScheduleWorkflowTest extends TestCase
         $otherStudent = $this->user($otherSchool, 'Siswa Lain', 'other@example.com', UserRole::Student);
         $competency = Competency::create([
             'school_id' => $ownerSchool->id,
-            'code' => 'LIT5-JADWAL',
+            'code' => 'LIT6-JADWAL',
             'domain' => 'Literasi',
             'name' => 'Memahami jadwal',
-            'grade_level' => 5,
+            'grade_level' => 6,
         ]);
         $question = Question::create([
             'school_id' => $ownerSchool->id,
@@ -153,7 +153,7 @@ class AssessmentScheduleWorkflowTest extends TestCase
             'status' => QuestionStatus::Published,
             'prompt' => 'Pilih jawaban benar.',
             'difficulty' => 1,
-            'grade_level' => 5,
+            'grade_level' => 6,
         ]);
         $question->options()->createMany([
             ['label' => 'A', 'content' => 'Benar', 'is_correct' => true, 'position' => 1],
@@ -163,7 +163,7 @@ class AssessmentScheduleWorkflowTest extends TestCase
             'school_id' => $ownerSchool->id,
             'created_by' => $owner->id,
             'title' => 'Try Out Terjadwal',
-            'grade_level' => 5,
+            'grade_level' => 6,
             'duration_minutes' => 150,
             'status' => AssessmentStatus::Published,
         ]);
@@ -180,7 +180,7 @@ class AssessmentScheduleWorkflowTest extends TestCase
             'email' => $email,
             'password' => 'password',
             'role' => $role,
-            'grade_level' => $role === UserRole::Student ? 5 : null,
+            'grade_level' => $role === UserRole::Student ? 6 : null,
             'is_active' => true,
             'approved_at' => now(),
             'email_verified_at' => now(),

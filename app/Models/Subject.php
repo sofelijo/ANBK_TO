@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['school_id', 'code', 'name', 'description'])]
+#[Fillable(['school_id', 'code', 'name', 'description', 'ai_question_format'])]
 class Subject extends Model
 {
     use HasFactory;
@@ -21,5 +21,10 @@ class Subject extends Model
     public function competencies(): HasMany
     {
         return $this->hasMany(Competency::class);
+    }
+
+    public function questionBlueprints(): HasMany
+    {
+        return $this->hasMany(QuestionBlueprint::class);
     }
 }

@@ -71,7 +71,7 @@ class StudentAccessController extends Controller
                 'password' => Str::random(40),
                 'role' => UserRole::Student,
                 'student_identifier' => $nisn,
-                'grade_level' => 5,
+                'grade_level' => $request->integer('grade_level', 6),
                 'email_verified_at' => now(),
                 'is_active' => true,
             ]);

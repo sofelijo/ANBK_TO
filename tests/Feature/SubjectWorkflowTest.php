@@ -23,11 +23,13 @@ class SubjectWorkflowTest extends TestCase
             'code' => ' bind ',
             'name' => ' Bahasa   Indonesia ',
             'description' => 'Mapel literasi TKA.',
+            'ai_question_format' => 'story',
         ])->assertRedirect(route('subjects.index'));
 
         $subject = Subject::query()->where('code', 'BIND')->firstOrFail();
         $this->assertSame($teacher->school_id, $subject->school_id);
         $this->assertSame('Bahasa Indonesia', $subject->name);
+        $this->assertSame('story', $subject->ai_question_format);
         $this->assertDatabaseHas('audit_logs', [
             'actor_id' => $teacher->id,
             'action' => 'subject.created',
@@ -45,6 +47,7 @@ class SubjectWorkflowTest extends TestCase
             'code' => 'BIND',
             'name' => 'Bahasa Indonesia TKA',
             'description' => null,
+            'ai_question_format' => 'story',
         ])->assertRedirect(route('subjects.index'));
 
         $this->assertSame('Bahasa Indonesia TKA', $subject->fresh()->name);
@@ -69,7 +72,7 @@ class SubjectWorkflowTest extends TestCase
             'code' => 'MAT5-BIL',
             'domain' => 'Bilangan',
             'name' => 'Memahami bilangan',
-            'grade_level' => 5,
+            'grade_level' => 6,
         ]);
 
         $this->actingAs($teacher)
@@ -106,7 +109,7 @@ class SubjectWorkflowTest extends TestCase
             'email' => $email,
             'password' => 'password',
             'role' => $role,
-            'grade_level' => $role === UserRole::Student ? 5 : null,
+            'grade_level' => $role === UserRole::Student ? 6 : null,
             'email_verified_at' => now(),
         ]);
     }

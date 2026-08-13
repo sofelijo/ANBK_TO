@@ -1,0 +1,149 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Enums\UserRole;
+use App\Models\AiGeneration;
+use App\Models\Competency;
+use App\Models\Question;
+use App\Models\QuestionBlueprint;
+use App\Models\School;
+use App\Models\Subject;
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
+
+class QuestionBlueprintWorkflowTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_teacher_can_reuse_a_question_type_as_default_for_multiple_competencies(): void
+    {
+        [$teacher, $subject, $description, $exposition] = $this->context();
+
+        $this->actingAs($teacher)->post(route('question-types.store'), [
+            'subject_id' => $subject->id,
+            'code' => 'IDE-POKOK',
+            'name' => 'Ide pokok',
+            'description' => 'Menentukan gagasan utama teks.',
+            'competency_ids' => [$description->id, $exposition->id],
+        ])->assertRedirect(route('question-types.index'));
+
+        $blueprint = QuestionBlueprint::firstOrFail();
+        $this->assertEqualsCanonicalizing(
+            [$description->id, $exposition->id],
+            $blueprint->competencies()->pluck('competencies.id')->all(),
+        );
+
+        $this->actingAs($teacher)
+            ->get(route('question-types.edit', $blueprint))
+            ->assertOk();
+    }
+
+    public function test_competency_defaults_can_be_adjusted_and_manual_question_stores_selected_type(): void
+    {
+        [$teacher, $subject, $description] = $this->context();
+        $blueprint = QuestionBlueprint::create([
+            'school_id' => $teacher->school_id,
+            'subject_id' => $subject->id,
+            'code' => 'INFO-TERSURAT',
+            'name' => 'Informasi tersurat',
+        ]);
+
+        $this->actingAs($teacher)->put(route('competencies.update', $description), [
+            'subject_id' => $subject->id,
+            'code' => $description->code,
+            'domain' => $description->domain,
+            'name' => $description->name,
+            'description' => null,
+            'grade_level' => 6,
+            'parent_id' => null,
+            'question_blueprint_ids' => [$blueprint->id],
+        ])->assertRedirect(route('competencies.index'));
+        $this->assertTrue($description->fresh()->questionBlueprints->contains($blueprint));
+
+        $this->actingAs($teacher)->post(route('questions.store'), [
+            'subject_id' => $subject->id,
+            'competency_id' => $description->id,
+            'question_blueprint_id' => $blueprint->id,
+            'type' => 'single_choice',
+            'prompt' => 'Informasi apa yang tertulis langsung dalam teks?',
+            'difficulty' => 1,
+            'grade_level' => 6,
+            'options' => [
+                ['content' => 'Jawaban benar', 'is_correct' => true],
+                ['content' => 'Pengecoh', 'is_correct' => false],
+            ],
+        ])->assertRedirect();
+
+        $this->assertSame($blueprint->id, Question::firstOrFail()->question_blueprint_id);
+    }
+
+    public function test_ai_uses_selected_question_types_for_generated_questions(): void
+    {
+        config()->set('ai.driver', 'fake');
+        config()->set('queue.default', 'sync');
+        [$teacher, $subject, $description] = $this->context();
+        $blueprints = collect(['INFO-TERSURAT' => 'Informasi tersurat', 'IDE-POKOK' => 'Ide pokok'])
+            ->map(fn (string $name, string $code) => QuestionBlueprint::create([
+                'school_id' => $teacher->school_id,
+                'subject_id' => $subject->id,
+                'code' => $code,
+                'name' => $name,
+            ]));
+
+        $this->actingAs($teacher)->post(route('story-questions.store'), [
+            'subject_id' => $subject->id,
+            'root_competency_id' => $description->id,
+            'competency_id' => $description->id,
+            'question_blueprint_ids' => $blueprints->pluck('id')->all(),
+            'theme' => 'kegiatan perpustakaan sekolah',
+            'paragraph_count' => 2,
+            'question_count' => 3,
+        ])->assertRedirect();
+
+        $generation = AiGeneration::firstOrFail();
+        $questions = Question::query()->whereIn('id', $generation->result_payload['question_ids'])->orderBy('id')->get();
+        $this->assertSame(
+            [$blueprints->first()->id, $blueprints->last()->id, $blueprints->first()->id],
+            $questions->pluck('question_blueprint_id')->all(),
+        );
+    }
+
+    private function context(): array
+    {
+        $school = School::create(['name' => 'Sekolah Tipe Soal', 'npsn' => '10000999']);
+        $teacher = User::create([
+            'school_id' => $school->id,
+            'name' => 'Guru Bahasa',
+            'email' => 'guru-tipe-soal@example.com',
+            'password' => 'password',
+            'role' => UserRole::Teacher,
+            'email_verified_at' => now(),
+        ]);
+        $subject = Subject::create([
+            'school_id' => $school->id,
+            'code' => 'BIND',
+            'name' => 'Bahasa Indonesia',
+            'ai_question_format' => 'story',
+        ]);
+        $description = Competency::create([
+            'school_id' => $school->id,
+            'subject_id' => $subject->id,
+            'code' => 'LIT6-DESK',
+            'domain' => 'Literasi',
+            'name' => 'Informasi Deskripsi',
+            'grade_level' => 6,
+        ]);
+        $exposition = Competency::create([
+            'school_id' => $school->id,
+            'subject_id' => $subject->id,
+            'code' => 'LIT6-EKSP',
+            'domain' => 'Literasi',
+            'name' => 'Informasi Eksposisi',
+            'grade_level' => 6,
+        ]);
+
+        return [$teacher, $subject, $description, $exposition];
+    }
+}

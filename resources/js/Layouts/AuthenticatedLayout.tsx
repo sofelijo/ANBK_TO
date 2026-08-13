@@ -29,7 +29,10 @@ export default function AuthenticatedLayout({
             items: [
                 { label: 'Paket Ujian', href: route('assessments.index'), active: 'assessments.*' },
                 ...(auth.user.role === 'admin'
-                    ? [{ label: 'Jadwal Sekolah', href: route('schedules.index'), active: 'schedules.*' }]
+                    ? [
+                          { label: 'Jadwal Sekolah', href: route('schedules.index'), active: 'schedules.*' },
+                          { label: 'Monitoring TO', href: route('monitoring.index'), active: 'monitoring.*' },
+                      ]
                     : []),
             ],
         },
@@ -39,6 +42,7 @@ export default function AuthenticatedLayout({
                 { label: 'Bank Soal', href: route('questions.index'), active: 'questions.*' },
                 { label: 'Mata Pelajaran', href: route('subjects.index'), active: 'subjects.*' },
                 { label: 'Kompetensi', href: route('competencies.index'), active: 'competencies.*' },
+                { label: 'Tipe Soal B. Indonesia', href: route('question-types.index'), active: 'question-types.*' },
             ],
         },
         {
@@ -62,7 +66,10 @@ export default function AuthenticatedLayout({
     const operatorGroups: NavigationGroup[] = [
         {
             label: 'Pelaksanaan',
-            items: [{ label: 'Jadwal Sekolah', href: route('schedules.index'), active: 'schedules.*' }],
+            items: [
+                { label: 'Jadwal Sekolah', href: route('schedules.index'), active: 'schedules.*' },
+                { label: 'Monitoring TO', href: route('monitoring.index'), active: 'monitoring.*' },
+            ],
         },
         {
             label: 'Administrasi',

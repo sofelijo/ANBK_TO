@@ -12,6 +12,7 @@ use App\Models\Question;
 use App\Services\AI\AiManager;
 use App\Services\AttemptQuestionSelector;
 use App\Services\AttemptSubmissionService;
+use App\Services\QuestionScorer;
 use App\Services\QuestionSnapshotService;
 use App\Services\StudentChatService;
 use Illuminate\Http\JsonResponse;
@@ -218,6 +219,7 @@ class AttemptController extends Controller
         Request $request,
         Attempt $attempt,
         Question $question,
+        QuestionScorer $scorer,
         QuestionSnapshotService $snapshotService,
     ): JsonResponse {
         $this->authorizeStudent($request, $attempt);
@@ -292,11 +294,17 @@ class AttemptController extends Controller
             'matches' => $data['matches'] ?? null,
             'matrix_answers' => $data['matrix_answers'] ?? null,
         ], fn (mixed $value): bool => $value !== null);
+        $hasCompleteResponse = $this->hasCompleteResponse($snapshot, $response ?: null);
+        $isCorrect = $hasCompleteResponse
+            ? $scorer->isCorrect($assessmentQuestion, $response, $snapshot)
+            : null;
 
         $attempt->answers()->updateOrCreate(
             ['question_id' => $question->id],
             [
                 'response' => $response ?: null,
+                'is_correct' => $isCorrect,
+                'points_awarded' => $isCorrect ? (float) $assessmentQuestion->pivot->points : 0,
                 'duration_seconds' => $data['duration_seconds'] ?? 0,
                 'answered_at' => now(),
             ],

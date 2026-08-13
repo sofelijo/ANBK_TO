@@ -7,6 +7,7 @@ use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class StudentLoginRequest extends FormRequest
@@ -25,6 +26,7 @@ class StudentLoginRequest extends FormRequest
             'npsn' => ['required', 'digits:8'],
             'nisn' => ['required', 'digits:10'],
             'name' => ['nullable', 'string', 'max:255'],
+            'grade_level' => ['nullable', 'integer', Rule::in([6, 9, 12])],
         ];
     }
 

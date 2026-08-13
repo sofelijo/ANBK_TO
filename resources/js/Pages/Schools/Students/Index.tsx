@@ -49,7 +49,7 @@ export default function Index({ school, students, filters, summary }: Props) {
 
                 <form onSubmit={filter} className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:flex-row">
                     <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Cari nama atau NISN" className="min-w-0 flex-1 rounded-lg border-slate-300 text-sm" />
-                    <select value={grade} onChange={(event) => setGrade(event.target.value)} className="rounded-lg border-slate-300 text-sm"><option value="">Semua kelas</option><option value="5">Kelas 5</option><option value="8">Kelas 8</option><option value="11">Kelas 11</option></select>
+                    <select value={grade} onChange={(event) => setGrade(event.target.value)} className="rounded-lg border-slate-300 text-sm"><option value="">Semua kelas</option><option value="6">Kelas 6</option><option value="9">Kelas 9</option><option value="12">Kelas 12</option></select>
                     <select value={status} onChange={(event) => setStatus(event.target.value)} className="rounded-lg border-slate-300 text-sm"><option value="">Semua status</option><option value="active">Aktif</option><option value="inactive">Nonaktif</option></select>
                     <button className="rounded-lg bg-slate-900 px-5 py-2 text-sm font-semibold text-white">Terapkan</button>
                 </form>

@@ -9,8 +9,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['school_id', 'subject_id', 'parent_id', 'code', 'domain', 'name', 'description', 'grade_level'])]
-class Competency extends Model
+#[Fillable(['school_id', 'subject_id', 'code', 'name', 'description'])]
+class QuestionBlueprint extends Model
 {
     use HasFactory;
 
@@ -24,25 +24,15 @@ class Competency extends Model
         return $this->belongsTo(Subject::class);
     }
 
-    public function parent(): BelongsTo
+    public function competencies(): BelongsToMany
     {
-        return $this->belongsTo(self::class, 'parent_id');
-    }
-
-    public function children(): HasMany
-    {
-        return $this->hasMany(self::class, 'parent_id');
+        return $this->belongsToMany(Competency::class)
+            ->withPivot('position')
+            ->orderByPivot('position');
     }
 
     public function questions(): HasMany
     {
         return $this->hasMany(Question::class);
-    }
-
-    public function questionBlueprints(): BelongsToMany
-    {
-        return $this->belongsToMany(QuestionBlueprint::class)
-            ->withPivot('position')
-            ->orderByPivot('position');
     }
 }

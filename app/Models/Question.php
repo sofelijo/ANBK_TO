@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\QuestionStatus;
 use App\Enums\QuestionType;
+use App\Support\StorageUrl;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -11,11 +12,10 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Support\Facades\Storage;
 
 #[Fillable([
     'school_id', 'author_id', 'parent_id', 'revision_of_id', 'version', 'superseded_by_id',
-    'story_generation_id', 'competency_id', 'type', 'status',
+    'story_generation_id', 'competency_id', 'question_blueprint_id', 'type', 'status',
     'title', 'stimulus', 'prompt', 'explanation', 'difficulty', 'grade_level',
     'cognitive_level', 'metadata', 'approved_by', 'approved_at',
 ])]
@@ -45,7 +45,7 @@ class Question extends Model
                 return null;
             }
 
-            return Storage::disk($disk)->url($path);
+            return StorageUrl::for($disk, $path);
         });
     }
 
@@ -103,6 +103,11 @@ class Question extends Model
     public function competency(): BelongsTo
     {
         return $this->belongsTo(Competency::class);
+    }
+
+    public function questionBlueprint(): BelongsTo
+    {
+        return $this->belongsTo(QuestionBlueprint::class);
     }
 
     public function options(): HasMany

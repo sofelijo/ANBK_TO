@@ -6,6 +6,7 @@ use App\Http\Controllers\AiQuestionReviewController;
 use App\Http\Controllers\AiStoryIllustrationController;
 use App\Http\Controllers\AiStoryQuestionController;
 use App\Http\Controllers\AssessmentController;
+use App\Http\Controllers\AssessmentMonitoringController;
 use App\Http\Controllers\AssessmentScheduleController;
 use App\Http\Controllers\AttemptController;
 use App\Http\Controllers\AttemptEventController;
@@ -14,6 +15,7 @@ use App\Http\Controllers\CompetencyController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\QuestionController;
+use App\Http\Controllers\QuestionBlueprintController;
 use App\Http\Controllers\QuestionImportController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\SchoolProfileController;
@@ -50,15 +52,27 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/questions/import', [QuestionImportController::class, 'store'])->name('questions.import.store');
         Route::get('/questions/import/template', [QuestionImportController::class, 'template'])->name('questions.import.template');
         Route::get('/story-questions/create', [AiStoryQuestionController::class, 'create'])->name('story-questions.create');
+        Route::get('/ai-questions/create', [AiStoryQuestionController::class, 'create'])->name('ai-questions.create');
         Route::post('/story-questions', [AiStoryQuestionController::class, 'store'])->name('story-questions.store');
+        Route::post('/ai-questions', [AiStoryQuestionController::class, 'store'])->name('ai-questions.store');
         Route::get('/story-questions/{generation}', [AiStoryQuestionController::class, 'show'])->name('story-questions.show');
+        Route::get('/ai-questions/{generation}', [AiStoryQuestionController::class, 'show'])->name('ai-questions.show');
         Route::post('/story-questions/{generation}/retry', [AiStoryQuestionController::class, 'retry'])->name('story-questions.retry');
+        Route::post('/ai-questions/{generation}/retry', [AiStoryQuestionController::class, 'retry'])->name('ai-questions.retry');
         Route::post('/story-questions/{generation}/publish', [AiStoryQuestionController::class, 'publishBundle'])->name('story-questions.publish');
+        Route::post('/ai-questions/{generation}/publish', [AiStoryQuestionController::class, 'publishBundle'])->name('ai-questions.publish');
         Route::post('/story-questions/{generation}/illustration', [AiStoryIllustrationController::class, 'store'])->name('story-questions.illustration.store');
+        Route::post('/ai-questions/{generation}/illustration', [AiStoryIllustrationController::class, 'store'])->name('ai-questions.illustration.store');
+        Route::put('/generated-questions/{generation}/questions/{question}', [QuestionController::class, 'inlineUpdate'])->name('generated-questions.inline-update');
+        Route::delete('/generated-questions/{generation}/questions/{question}', [QuestionController::class, 'destroyGenerated'])->name('generated-questions.destroy');
         Route::resource('questions', QuestionController::class)->only(['index', 'create', 'store', 'show', 'edit', 'update']);
         Route::resource('subjects', SubjectController::class)->except('show');
         Route::resource('competencies', CompetencyController::class)->except('show');
+        Route::resource('question-types', QuestionBlueprintController::class)
+            ->parameters(['question-types' => 'questionType'])
+            ->except('show');
         Route::post('/questions/{question}/approve', [QuestionController::class, 'approve'])->name('questions.approve');
+        Route::post('/questions/{question}/duplicate-check', [QuestionController::class, 'duplicateCheck'])->name('questions.duplicate-check');
         Route::post('/questions/{question}/duplicate', [QuestionController::class, 'duplicate'])->name('questions.duplicate');
         Route::post('/questions/{question}/archive', [QuestionController::class, 'archive'])->name('questions.archive');
         Route::post('/questions/{question}/ai-variants', [AiQuestionController::class, 'store'])->name('questions.ai-variants.store');
@@ -72,6 +86,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     });
 
     Route::middleware('role:admin,operator')->group(function () {
+        Route::get('/monitoring', AssessmentMonitoringController::class)->name('monitoring.index');
         Route::get('/schedules', [AssessmentScheduleController::class, 'index'])->name('schedules.index');
         Route::post('/schedules', [AssessmentScheduleController::class, 'store'])->name('schedules.store');
         Route::delete('/schedules/{schedule}', [AssessmentScheduleController::class, 'destroy'])->name('schedules.destroy');

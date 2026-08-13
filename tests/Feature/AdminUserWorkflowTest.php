@@ -24,7 +24,7 @@ class AdminUserWorkflowTest extends TestCase
             'password' => 'password123',
             'role' => UserRole::Student->value,
             'student_identifier' => 'S-100',
-            'grade_level' => 5,
+            'grade_level' => 6,
         ])->assertRedirect();
 
         $student = User::query()->where('email', 'murid-baru@example.com')->firstOrFail();

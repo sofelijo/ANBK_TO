@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Competency;
 use App\Models\CompetencyResult;
 use App\Models\Recommendation;
+use App\Models\QuestionBlueprint;
 use App\Models\Subject;
 use App\Services\AuditLogger;
 use Illuminate\Http\RedirectResponse;
@@ -72,6 +73,7 @@ class CompetencyController extends Controller
             'defaultParentId' => $parentId,
             'parents' => $parents,
             'subjects' => $this->subjects($request),
+            'questionBlueprints' => $this->questionBlueprints($request),
         ]);
     }
 
@@ -79,11 +81,14 @@ class CompetencyController extends Controller
     {
         $data = $this->validatedData($request);
         $this->ensureValidParent($request, $data);
+        $questionBlueprintIds = $data['question_blueprint_ids'];
+        unset($data['question_blueprint_ids']);
 
         $competency = Competency::create([
             'school_id' => $request->user()->school_id,
             ...$data,
         ]);
+        $this->syncQuestionBlueprints($competency, $questionBlueprintIds);
         $auditLogger->log($request, 'competency.created', $competency);
 
         return to_route('competencies.index')->with('success', 'Kompetensi berhasil ditambahkan.');
@@ -94,10 +99,14 @@ class CompetencyController extends Controller
         $this->ensureManageable($request, $competency);
 
         return Inertia::render('Competencies/Form', [
-            'competency' => $competency,
+            'competency' => [
+                ...$competency->toArray(),
+                'question_blueprint_ids' => $competency->questionBlueprints()->pluck('question_blueprints.id'),
+            ],
             'defaultParentId' => null,
             'parents' => $this->parentOptions($request, $competency),
             'subjects' => $this->subjects($request),
+            'questionBlueprints' => $this->questionBlueprints($request),
         ]);
     }
 
@@ -106,8 +115,11 @@ class CompetencyController extends Controller
         $this->ensureManageable($request, $competency);
         $data = $this->validatedData($request, $competency);
         $this->ensureValidParent($request, $data, $competency);
+        $questionBlueprintIds = $data['question_blueprint_ids'];
+        unset($data['question_blueprint_ids']);
 
         $competency->update($data);
+        $this->syncQuestionBlueprints($competency, $questionBlueprintIds);
         $auditLogger->log($request, 'competency.updated', $competency);
 
         return to_route('competencies.index')->with('success', 'Kompetensi berhasil diperbarui.');
@@ -137,10 +149,14 @@ class CompetencyController extends Controller
 
     private function validatedData(Request $request, ?Competency $competency = null): array
     {
+        $gradeLevel = $request->integer('grade_level');
+        $normalizedGradeLevel = [5 => 6, 8 => 9, 11 => 12][$gradeLevel] ?? $gradeLevel;
+
         $request->merge([
             'code' => Str::upper(trim($request->string('code')->toString())),
             'domain' => Str::squish($request->string('domain')->toString()),
             'name' => Str::squish($request->string('name')->toString()),
+            'grade_level' => $normalizedGradeLevel,
         ]);
 
         $data = $request->validate([
@@ -157,11 +173,15 @@ class CompetencyController extends Controller
             'domain' => ['required', 'string', 'max:100'],
             'name' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:2000'],
-            'grade_level' => ['required', 'integer', Rule::in([5, 8, 11])],
+            'grade_level' => ['required', 'integer', Rule::in([6, 9, 12])],
             'parent_id' => ['nullable', 'integer'],
+            'question_blueprint_ids' => ['array'],
+            'question_blueprint_ids.*' => ['integer', 'distinct'],
         ], [
             'code.regex' => 'Kode hanya boleh berisi huruf kapital, angka, titik, garis bawah, dan tanda hubung.',
+            'grade_level.in' => 'Pilih jenjang kelas 6, 9, atau 12.',
         ]);
+        $data['question_blueprint_ids'] ??= [];
 
         $subjectExists = Subject::query()
             ->whereKey($data['subject_id'])
@@ -174,7 +194,46 @@ class CompetencyController extends Controller
             throw ValidationException::withMessages(['subject_id' => 'Mata pelajaran tidak tersedia.']);
         }
 
+        $validBlueprintCount = QuestionBlueprint::query()
+            ->whereIn('id', $data['question_blueprint_ids'] ?? [])
+            ->where('subject_id', $data['subject_id'])
+            ->where(fn ($query) => $query
+                ->whereNull('school_id')
+                ->orWhere('school_id', $request->user()->school_id))
+            ->count();
+        if ($validBlueprintCount !== count($data['question_blueprint_ids'] ?? [])) {
+            throw ValidationException::withMessages([
+                'question_blueprint_ids' => 'Ada tipe soal yang tidak tersedia untuk mata pelajaran ini.',
+            ]);
+        }
+
         return $data;
+    }
+
+    private function syncQuestionBlueprints(Competency $competency, array $blueprintIds): void
+    {
+        if ($competency->parent_id !== null || $competency->subject?->code !== 'BIND') {
+            $competency->questionBlueprints()->detach();
+
+            return;
+        }
+
+        $competency->questionBlueprints()->sync(
+            collect($blueprintIds)->values()->mapWithKeys(fn (int $id, int $index): array => [
+                $id => ['position' => $index + 1],
+            ])->all(),
+        );
+    }
+
+    private function questionBlueprints(Request $request)
+    {
+        return QuestionBlueprint::query()
+            ->where(fn ($query) => $query
+                ->whereNull('school_id')
+                ->orWhere('school_id', $request->user()->school_id))
+            ->whereHas('subject', fn ($query) => $query->where('code', 'BIND'))
+            ->orderBy('name')
+            ->get(['id', 'subject_id', 'code', 'name']);
     }
 
     private function ensureValidParent(Request $request, array $data, ?Competency $competency = null): void

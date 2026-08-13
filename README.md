@@ -326,12 +326,18 @@ AI_DRIVER=gemini
 GEMINI_API_KEY=your-key
 GEMINI_MODEL=gemini-3.1-flash-lite
 GEMINI_IMAGE_MODEL=gemini-3.1-flash-lite-image
+CLOUDFLARE_ACCOUNT_ID=your-cloudflare-account-id
+CLOUDFLARE_AI_API_TOKEN=your-workers-ai-token
+CLOUDFLARE_IMAGE_MODEL=@cf/black-forest-labs/flux-1-schnell
+CLOUDFLARE_IMAGE_STEPS=4
 AI_DAILY_QUESTION_LIMIT=50
 AI_DAILY_STORY_LIMIT=10
 AI_DAILY_IMAGE_LIMIT=20
 AI_DAILY_CHAT_LIMIT=20
 AI_CHAT_CONTEXT_MESSAGES=12
 ```
+
+Untuk ilustrasi soal, aplikasi mencoba Cloudflare Workers AI terlebih dahulu agar memakai alokasi gratis harian. Jika kredensial belum tersedia, kuota habis, rate-limit, atau respons Cloudflare tidak valid, aplikasi otomatis memakai Gemini Image Batch sebagai fallback berbayar. Provider aktual dan estimasi biaya dicatat pada `ai_generations`.
 
 Semua request AI dicatat di tabel `ai_generations`, termasuk model, status, token, estimasi biaya, dan error. Harga pada environment hanya dipakai untuk estimasi internal; sesuaikan ketika harga provider berubah.
 

@@ -50,7 +50,7 @@ class RegisteredUserController extends Controller
                 Rule::requiredIf($request->string('account_type')->toString() === UserRole::Student->value),
                 'nullable',
                 'integer',
-                Rule::in([5, 8, 11]),
+                Rule::in([6, 9, 12]),
             ],
         ]);
 

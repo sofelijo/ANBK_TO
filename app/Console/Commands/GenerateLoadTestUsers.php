@@ -35,8 +35,8 @@ class GenerateLoadTestUsers extends Command
 
         $count = max(1, min(5000, (int) $this->option('count')));
         $grade = (int) $this->option('grade');
-        if (! in_array($grade, [5, 8, 11], true)) {
-            $this->error('Grade harus 5, 8, atau 11.');
+        if (! in_array($grade, [6, 9, 12], true)) {
+            $this->error('Grade harus 6, 9, atau 12.');
 
             return self::FAILURE;
         }

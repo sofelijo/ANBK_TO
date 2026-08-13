@@ -15,6 +15,14 @@ return [
         'batch_cost_microusd' => (int) env('GEMINI_IMAGE_BATCH_COST_MICROUSD', 16800),
     ],
 
+    'cloudflare' => [
+        'account_id' => env('CLOUDFLARE_ACCOUNT_ID'),
+        'api_token' => env('CLOUDFLARE_AI_API_TOKEN'),
+        'base_url' => env('CLOUDFLARE_AI_BASE_URL', 'https://api.cloudflare.com/client/v4'),
+        'image_model' => env('CLOUDFLARE_IMAGE_MODEL', '@cf/black-forest-labs/flux-1-schnell'),
+        'image_steps' => (int) env('CLOUDFLARE_IMAGE_STEPS', 4),
+    ],
+
     'gemini' => [
         'api_key' => env('GEMINI_API_KEY'),
         'model' => env('GEMINI_MODEL', 'gemini-3.1-flash-lite'),

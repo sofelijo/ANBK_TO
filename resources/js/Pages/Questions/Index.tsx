@@ -1,4 +1,5 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
+import Modal from '@/Components/Modal';
 import { Head, Link, router } from '@inertiajs/react';
 import { FormEvent, useState } from 'react';
 
@@ -15,7 +16,7 @@ type Question = {
     story_generation_id?: number;
     story_generation?: {
         id: number;
-        request_payload: { theme: string };
+        request_payload: { theme: string; format?: 'direct' | 'story' };
         result_payload?: { title?: string };
     };
     bundle_question_count: number;
@@ -31,14 +32,23 @@ type Props = {
         data: Question[];
         links: { url?: string; label: string; active: boolean }[];
     };
-    subjects: { id: number; code: string; name: string }[];
+    subjects: { id: number; code: string; name: string; ai_question_format: 'direct' | 'story' }[];
     filters: { search?: string; status?: string; subject_id?: string };
 };
+
+type CreateMethod = 'ai' | 'manual';
 
 export default function Index({ questions, subjects, filters }: Props) {
     const [search, setSearch] = useState(filters.search || '');
     const [status, setStatus] = useState(filters.status || '');
     const [subjectId, setSubjectId] = useState(filters.subject_id || '');
+    const [showCreateOptions, setShowCreateOptions] = useState(false);
+    const [createMethod, setCreateMethod] = useState<CreateMethod | null>(null);
+
+    const closeCreateOptions = () => {
+        setShowCreateOptions(false);
+        setCreateMethod(null);
+    };
 
     const filter = (event: FormEvent) => {
         event.preventDefault();
@@ -55,13 +65,90 @@ export default function Index({ questions, subjects, filters }: Props) {
                     </div>
                     <div className="flex gap-2">
                         <Link href={route('questions.import.create')} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Impor Excel</Link>
-                        <Link href={route('story-questions.create')} className="rounded-lg border border-indigo-300 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-100">Soal Cerita AI</Link>
-                        <Link href={route('questions.create')} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500">Tambah soal</Link>
+                        <button
+                            type="button"
+                            onClick={() => setShowCreateOptions(true)}
+                            className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500"
+                        >
+                            Buat soal
+                        </button>
                     </div>
                 </div>
             }
         >
             <Head title="Bank Soal" />
+            <Modal show={showCreateOptions} maxWidth="lg" onClose={closeCreateOptions}>
+                <div className="p-6 sm:p-7">
+                    <div className="flex items-start justify-between gap-4">
+                        <div>
+                            <p className="text-sm font-semibold text-emerald-600">{createMethod ? 'Langkah 2 dari 2' : 'Langkah 1 dari 2'}</p>
+                            <h2 className="mt-1 text-xl font-bold text-slate-900">{createMethod ? 'Pilih mata pelajaran' : 'Mau membuat soal dengan cara apa?'}</h2>
+                            <p className="mt-2 text-sm leading-6 text-slate-500">
+                                {createMethod
+                                    ? `Mapel menentukan kompetensi dan format soal yang tersedia pada alur ${createMethod === 'ai' ? 'AI' : 'manual'}.`
+                                    : 'Pilih bantuan AI untuk membuat paket soal cerita, atau tulis satu soal secara manual.'}
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={closeCreateOptions}
+                            aria-label="Tutup pilihan pembuatan soal"
+                            className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                        >
+                            ×
+                        </button>
+                    </div>
+
+                    {!createMethod ? (
+                        <div className="mt-6 grid gap-4 sm:grid-cols-2">
+                            <button
+                                type="button"
+                                onClick={() => setCreateMethod('ai')}
+                                className="group rounded-xl border-2 border-indigo-200 bg-indigo-50/70 p-5 text-left transition hover:border-indigo-400 hover:bg-indigo-50"
+                            >
+                                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-600 text-lg font-bold text-white">AI</div>
+                                <h3 className="mt-4 font-bold text-slate-900 group-hover:text-indigo-700">Buat dengan AI</h3>
+                                <p className="mt-2 text-sm leading-6 text-slate-600">AI membuat cerita beserta 2–4 soal berdasarkan mapel dan kompetensi yang dipilih.</p>
+                                <span className="mt-4 inline-block text-sm font-semibold text-indigo-700">Pilih mapel →</span>
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => setCreateMethod('manual')}
+                                className="group rounded-xl border-2 border-emerald-200 bg-emerald-50/70 p-5 text-left transition hover:border-emerald-400 hover:bg-emerald-50"
+                            >
+                                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-600 text-xl font-bold text-white">✎</div>
+                                <h3 className="mt-4 font-bold text-slate-900 group-hover:text-emerald-700">Buat manual</h3>
+                                <p className="mt-2 text-sm leading-6 text-slate-600">Tulis sendiri stimulus, tipe jawaban, kompetensi, kunci, serta pembahasan.</p>
+                                <span className="mt-4 inline-block text-sm font-semibold text-emerald-700">Pilih mapel →</span>
+                            </button>
+                        </div>
+                    ) : (
+                        <div className="mt-6">
+                            <button type="button" onClick={() => setCreateMethod(null)} className="text-sm font-semibold text-slate-600 hover:text-slate-900">← Kembali pilih metode</button>
+                            {subjects.length === 0 ? (
+                                <p className="mt-4 rounded-xl bg-amber-50 p-4 text-sm text-amber-800">Belum ada mata pelajaran. Tambahkan mapel terlebih dahulu.</p>
+                            ) : (
+                                <div className="mt-4 grid max-h-80 gap-3 overflow-y-auto sm:grid-cols-2">
+                                    {subjects.map((subject) => (
+                                        <Link
+                                            key={subject.id}
+                                            href={route(createMethod === 'ai'
+                                                ? subject.ai_question_format === 'story' ? 'story-questions.create' : 'ai-questions.create'
+                                                : 'questions.create', { subject_id: subject.id })}
+                                            className="rounded-xl border border-slate-200 p-4 transition hover:border-emerald-400 hover:bg-emerald-50"
+                                        >
+                                            <span className="text-xs font-bold uppercase tracking-wide text-emerald-600">{subject.code}</span>
+                                            <h3 className="mt-1 font-semibold text-slate-900">{subject.name}</h3>
+                                            <span className="mt-3 inline-block text-sm font-semibold text-slate-500">Pilih mapel →</span>
+                                        </Link>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            </Modal>
             <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
                 <form onSubmit={filter} className="mb-5 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:flex-row">
                     <input
@@ -93,7 +180,11 @@ export default function Index({ questions, subjects, filters }: Props) {
                     ) : (
                         <div className="divide-y divide-slate-100">
                             {questions.data.map((question) => {
-                                const bundled = Boolean(question.story_generation_id && question.story_generation);
+                                const bundled = Boolean(
+                                    question.story_generation_id
+                                    && question.story_generation
+                                    && question.story_generation.request_payload.format !== 'direct',
+                                );
 
                                 return (
                                     <Link
@@ -129,7 +220,7 @@ export default function Index({ questions, subjects, filters }: Props) {
                                                 </h2>
                                                 <p className="mt-1 text-sm text-slate-500">
                                                     {bundled
-                                                        ? `${question.bundle_question_count} soal dalam satu cerita · Tema: ${question.story_generation?.request_payload.theme}`
+                                                        ? `${question.bundle_question_count} soal dalam satu bundel · Tema: ${question.story_generation?.request_payload.theme}`
                                                         : `${question.competency.subject ? `${question.competency.subject.name} · ` : ''}${question.competency.code} · ${question.competency.name}`}
                                                 </p>
                                             </div>

@@ -36,7 +36,7 @@ export default function Index({ users, filters, schoolNpsn, pendingCount }: Prop
         password: '',
         role: 'student',
         student_identifier: '',
-        grade_level: 5,
+        grade_level: 6,
     });
 
     const submit = (event: FormEvent) => {
@@ -63,7 +63,7 @@ export default function Index({ users, filters, schoolNpsn, pendingCount }: Prop
                         <label className="block text-sm font-medium text-slate-700">Email<input type="email" value={data.email} onChange={(event) => setData('email', event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300" /><InputError message={errors.email} /></label>
                         <label className="block text-sm font-medium text-slate-700">Kata sandi awal<input type="password" value={data.password} onChange={(event) => setData('password', event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300" /><InputError message={errors.password} /></label>
                         <label className="block text-sm font-medium text-slate-700">Peran<select value={data.role} onChange={(event) => setData('role', event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300"><option value="student">Murid</option><option value="teacher">Guru</option><option value="operator">Operator Sekolah</option></select></label>
-                        {data.role === 'student' && <><label className="block text-sm font-medium text-slate-700">Nomor peserta / NIS<input value={data.student_identifier} onChange={(event) => setData('student_identifier', event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300" /><InputError message={errors.student_identifier} /></label><label className="block text-sm font-medium text-slate-700">Kelas<select value={data.grade_level} onChange={(event) => setData('grade_level', Number(event.target.value))} className="mt-1 block w-full rounded-lg border-slate-300"><option value={5}>Kelas 5</option><option value={8}>Kelas 8</option><option value={11}>Kelas 11</option></select></label></>}
+                        {data.role === 'student' && <><label className="block text-sm font-medium text-slate-700">Nomor peserta / NIS<input value={data.student_identifier} onChange={(event) => setData('student_identifier', event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300" /><InputError message={errors.student_identifier} /></label><label className="block text-sm font-medium text-slate-700">Kelas<select value={data.grade_level} onChange={(event) => setData('grade_level', Number(event.target.value))} className="mt-1 block w-full rounded-lg border-slate-300"><option value={6}>Kelas 6</option><option value={9}>Kelas 9</option><option value={12}>Kelas 12</option></select></label></>}
                     </div>
                     <button disabled={processing} className="mt-5 w-full rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Tambah pengguna</button>
                 </form>

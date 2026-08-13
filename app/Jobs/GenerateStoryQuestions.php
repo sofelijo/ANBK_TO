@@ -35,9 +35,14 @@ class GenerateStoryQuestions implements ShouldQueue
 
         try {
             $competencies = $this->competencies($generation);
+            $format = data_get($generation->request_payload, 'format') === 'direct' ? 'direct' : 'story';
             $theme = trim((string) data_get($generation->request_payload, 'theme'));
             $paragraphCount = (int) data_get($generation->request_payload, 'paragraph_count', 3);
             $questionCount = (int) data_get($generation->request_payload, 'question_count', 3);
+            $questionStyle = (string) data_get($generation->request_payload, 'question_style', 'direct');
+            $answerFormat = (string) data_get($generation->request_payload, 'answer_format', 'single_choice');
+            $useIllustration = (bool) data_get($generation->request_payload, 'use_illustration', false);
+            $questionBlueprints = collect(data_get($generation->request_payload, 'question_blueprints', []))->values();
             $competencyContext = $competencies->map(fn (Competency $competency): array => [
                 'code' => $competency->code,
                 'domain' => $competency->domain,
@@ -46,24 +51,49 @@ class GenerateStoryQuestions implements ShouldQueue
             ])->values()->all();
 
             $response = $manager->provider()->generateJson(
-                $this->prompt($theme, $paragraphCount, $questionCount, $competencyContext),
+                $format === 'story'
+                    ? $this->prompt($theme, $paragraphCount, $questionCount, $competencyContext, $questionBlueprints->all())
+                    : $this->directPrompt(
+                        (string) data_get($generation->request_payload, 'example_question', ''),
+                        $questionCount,
+                        $competencyContext,
+                        $questionStyle,
+                        $answerFormat,
+                        $useIllustration,
+                        $questionBlueprints->all(),
+                    ),
                 [
                     'task' => 'story_questions',
+                    'format' => $format,
                     'theme' => $theme,
                     'paragraph_count' => $paragraphCount,
                     'question_count' => $questionCount,
+                    'question_style' => $questionStyle,
+                    'answer_format' => $answerFormat,
+                    'use_illustration' => $useIllustration,
                     'competencies' => $competencyContext,
+                    'question_blueprints' => $questionBlueprints->all(),
                 ],
             );
 
             $data = Validator::make($response->data, [
                 'title' => ['required', 'string', 'max:255'],
-                'story_paragraphs' => ['required', 'array', "size:{$paragraphCount}"],
+                'visual_description' => ['nullable', 'string', 'max:5000'],
+                'visual_spec' => ['nullable', 'array'],
+                'visual_spec.type' => ['required_with:visual_spec', Rule::in(['fraction_models', 'object_groups'])],
+                'visual_spec.items' => ['required_if:visual_spec.type,fraction_models', 'array', 'between:1,6'],
+                'visual_spec.items.*.shape' => ['required', Rule::in(['circle', 'rectangle'])],
+                'visual_spec.items.*.total_parts' => ['required', 'integer', 'between:1,20'],
+                'visual_spec.items.*.shaded_parts' => ['required', 'integer', 'between:0,20'],
+                'visual_spec.groups' => ['required_if:visual_spec.type,object_groups', 'integer', 'between:1,10'],
+                'visual_spec.objects_per_group' => ['required_if:visual_spec.type,object_groups', 'integer', 'between:1,20'],
+                'story_paragraphs' => [$format === 'story' ? 'required' : 'present', 'array', $format === 'story' ? "size:{$paragraphCount}" : 'size:0'],
                 'story_paragraphs.*' => ['required', 'string', 'max:5000'],
                 'questions' => ['required', 'array', "size:{$questionCount}"],
                 'questions.*.competency_code' => ['required', 'string', Rule::in($competencies->keys()->all())],
                 'questions.*.type' => ['required', Rule::enum(QuestionType::class)],
                 'questions.*.title' => ['nullable', 'string', 'max:255'],
+                'questions.*.stimulus' => ['nullable', 'string', 'max:10000'],
                 'questions.*.prompt' => ['required', 'string', 'max:10000'],
                 'questions.*.explanation' => ['required', 'string', 'max:10000'],
                 'questions.*.difficulty' => ['required', 'integer', 'between:1,3'],
@@ -85,16 +115,47 @@ class GenerateStoryQuestions implements ShouldQueue
                 'questions.*.matrix_rows.*.correct_column_index' => ['required', 'integer', 'between:0,3'],
             ])->validate();
 
-            $this->validateQuestionSet($data['questions'], $competencies);
-            $story = implode("\n\n", $data['story_paragraphs']);
+            if ($format === 'direct' && $useIllustration && trim((string) ($data['visual_description'] ?? '')) === '') {
+                throw ValidationException::withMessages([
+                    'visual_description' => 'AI tidak memberikan deskripsi visual untuk ilustrasi yang diminta.',
+                ]);
+            }
 
-            if (mb_strlen($story) > 20000) {
+            $precisionContext = mb_strtolower(
+                (string) data_get($generation->request_payload, 'subject_name').' '.
+                (string) data_get($generation->request_payload, 'competency_name'),
+            );
+            if ($format === 'direct'
+                && $useIllustration
+                && str_contains($precisionContext, 'matematika')
+                && Str::contains($precisionContext, ['pecahan', 'kelompok', 'perkalian'])
+                && ! $this->supportsPrecisionVisualSpec($data['visual_spec'] ?? null)) {
+                throw ValidationException::withMessages([
+                    'visual_spec' => 'Soal Matematika ini membutuhkan spesifikasi diagram presisi.',
+                ]);
+            }
+
+            foreach (data_get($data, 'visual_spec.items', []) as $index => $item) {
+                if ($item['shaded_parts'] > $item['total_parts']) {
+                    throw ValidationException::withMessages([
+                        "visual_spec.items.{$index}.shaded_parts" => 'Jumlah bagian diarsir tidak boleh melebihi jumlah seluruh bagian.',
+                    ]);
+                }
+            }
+
+            $this->validateQuestionSet($data['questions'], $competencies);
+            if ($format === 'direct') {
+                $this->validateAnswerFormat($data['questions'], $answerFormat);
+            }
+            $story = $format === 'story' ? implode("\n\n", $data['story_paragraphs']) : null;
+
+            if ($story !== null && mb_strlen($story) > 20000) {
                 throw ValidationException::withMessages([
                     'story_paragraphs' => 'Cerita yang dihasilkan terlalu panjang.',
                 ]);
             }
 
-            $questionIds = DB::transaction(function () use ($data, $generation, $manager, $response, $theme, $story, $competencies): array {
+            $questionIds = DB::transaction(function () use ($data, $generation, $manager, $response, $theme, $story, $competencies, $format, $questionBlueprints): array {
                 $questionIds = [];
 
                 foreach ($data['questions'] as $index => $questionData) {
@@ -103,7 +164,8 @@ class GenerateStoryQuestions implements ShouldQueue
                     $metadata = [
                         'generated_by_ai' => true,
                         'story_generation_id' => $generation->id,
-                        'story_theme' => $theme,
+                        'generation_format' => $format,
+                        'story_theme' => $format === 'story' ? $theme : null,
                     ];
 
                     if ($type === QuestionType::ShortAnswer) {
@@ -141,10 +203,13 @@ class GenerateStoryQuestions implements ShouldQueue
                         'author_id' => $generation->requested_by,
                         'story_generation_id' => $generation->id,
                         'competency_id' => $competency->id,
+                        'question_blueprint_id' => $questionBlueprints->isNotEmpty()
+                            ? $questionBlueprints[$index % $questionBlueprints->count()]['id']
+                            : null,
                         'type' => $type,
                         'status' => QuestionStatus::Draft,
                         'title' => ($questionData['title'] ?? null) ?: $data['title'].' - Soal '.($index + 1),
-                        'stimulus' => $story,
+                        'stimulus' => $format === 'story' ? $story : ($questionData['stimulus'] ?? null),
                         'prompt' => $questionData['prompt'],
                         'explanation' => $questionData['explanation'],
                         'difficulty' => $questionData['difficulty'],
@@ -169,7 +234,10 @@ class GenerateStoryQuestions implements ShouldQueue
                     'status' => AiGenerationStatus::Completed,
                     'result_payload' => [
                         'title' => $data['title'],
+                        'format' => $format,
                         'story' => $story,
+                        'visual_description' => $data['visual_description'] ?? null,
+                        'visual_spec' => $data['visual_spec'] ?? null,
                         'paragraph_count' => count($data['story_paragraphs']),
                         'question_ids' => $questionIds,
                         'question_count' => count($questionIds),
@@ -182,8 +250,10 @@ class GenerateStoryQuestions implements ShouldQueue
                 return $questionIds;
             });
 
-            if (count($questionIds) < 2 || count($questionIds) > 4) {
-                throw new RuntimeException('Jumlah soal cerita di luar batas yang diizinkan.');
+            $minimumQuestionCount = $format === 'story' ? 2 : 1;
+            $maximumQuestionCount = $format === 'story' ? 4 : 9;
+            if (count($questionIds) < $minimumQuestionCount || count($questionIds) > $maximumQuestionCount) {
+                throw new RuntimeException('Jumlah soal AI di luar batas yang diizinkan.');
             }
         } catch (Throwable $exception) {
             $generation->update([
@@ -198,12 +268,14 @@ class GenerateStoryQuestions implements ShouldQueue
     private function competencies(AiGeneration $generation): Collection
     {
         $subjectId = (int) data_get($generation->request_payload, 'subject_id');
+        $competencyId = (int) data_get($generation->request_payload, 'competency_id');
         $competencies = Competency::query()
             ->when($subjectId > 0, fn ($query) => $query->where('subject_id', $subjectId))
+            ->when($competencyId > 0, fn ($query) => $query->whereKey($competencyId))
             ->where(fn ($query) => $query
                 ->whereNull('school_id')
                 ->orWhere('school_id', $generation->school_id))
-            ->whereDoesntHave('children')
+            ->when($competencyId === 0, fn ($query) => $query->whereDoesntHave('children'))
             ->get()
             ->sortByDesc(fn (Competency $competency): bool => $competency->school_id === $generation->school_id)
             ->unique('code')
@@ -287,16 +359,71 @@ class GenerateStoryQuestions implements ShouldQueue
         }
     }
 
-    private function prompt(string $theme, int $paragraphCount, int $questionCount, array $competencies): string
+    private function validateAnswerFormat(array $questions, string $answerFormat): void
+    {
+        $types = collect($questions)->pluck('type');
+        $invalid = match ($answerFormat) {
+            'single_choice' => $types->contains(fn (string $type): bool => $type !== QuestionType::SingleChoice->value),
+            'multiple_choice' => collect($questions)->contains(fn (array $question): bool => $question['type'] !== QuestionType::MultipleChoice->value
+                || collect($question['options'] ?? [])->where('is_correct', true)->count() < 2),
+            'true_false' => collect($questions)->contains(function (array $question): bool {
+                $columns = collect($question['matrix_columns'] ?? [])->map(
+                    fn (string $column): string => mb_strtolower(trim($column)),
+                )->values()->all();
+
+                return $question['type'] !== QuestionType::CategoryMatrix->value
+                    || $columns !== ['benar', 'salah'];
+            }),
+            'mixed' => collect($questions)->contains(function (array $question): bool {
+                $type = $question['type'];
+                if (! in_array($type, [
+                    QuestionType::SingleChoice->value,
+                    QuestionType::MultipleChoice->value,
+                    QuestionType::CategoryMatrix->value,
+                ], true)) {
+                    return true;
+                }
+                if ($type === QuestionType::MultipleChoice->value) {
+                    return collect($question['options'] ?? [])->where('is_correct', true)->count() < 2;
+                }
+                if ($type === QuestionType::CategoryMatrix->value) {
+                    return collect($question['matrix_columns'] ?? [])
+                        ->map(fn (string $column): string => mb_strtolower(trim($column)))
+                        ->values()
+                        ->all() !== ['benar', 'salah'];
+                }
+
+                return false;
+            }) || $types->unique()->count() < 2,
+            default => true,
+        };
+
+        if ($invalid) {
+            throw ValidationException::withMessages([
+                'answer_format' => 'AI tidak menghasilkan format jawaban sesuai pilihan guru.',
+            ]);
+        }
+    }
+
+    private function supportsPrecisionVisualSpec(mixed $spec): bool
+    {
+        return is_array($spec)
+            && in_array(data_get($spec, 'type'), ['fraction_models', 'object_groups'], true);
+    }
+
+    private function prompt(string $theme, int $paragraphCount, int $questionCount, array $competencies, array $questionBlueprints): string
     {
         $competencyJson = json_encode($competencies, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+        $blueprintDirection = $this->questionBlueprintDirection($questionBlueprints);
 
         return <<<PROMPT
 Anda membantu guru membuat paket soal cerita try out TKA berbahasa Indonesia.
 
-Buat satu cerita berdasarkan tema "{$theme}" dengan tepat {$paragraphCount} paragraf, lalu buat tepat {$questionCount} soal yang semuanya hanya menggunakan cerita tersebut sebagai stimulus. Kembalikan setiap paragraf sebagai satu elemen story_paragraphs tanpa nomor paragraf. Pilih kompetensi paling relevan hanya dari daftar yang diberikan. Semua soal harus berada pada satu jenjang kelas yang sama. Cerita harus sesuai usia jenjang tersebut, faktual, aman untuk anak, tidak bias, dan memuat seluruh informasi yang diperlukan untuk menjawab soal.
+Buat satu cerita berdasarkan tema "{$theme}" dengan tepat {$paragraphCount} paragraf, lalu buat tepat {$questionCount} soal yang semuanya hanya menggunakan cerita tersebut sebagai stimulus. Kembalikan setiap paragraf sebagai satu elemen story_paragraphs tanpa nomor paragraf. Gunakan hanya kompetensi atau subkompetensi yang diberikan untuk seluruh soal dan jangan menggantinya dengan klasifikasi lain. Semua soal harus berada pada satu jenjang kelas yang sama. Cerita harus sesuai usia jenjang tersebut, faktual, aman untuk anak, tidak bias, dan memuat seluruh informasi yang diperlukan untuk menjawab soal.
 
 Gunakan variasi tingkat kesulitan dan proses kognitif. Soal boleh berbentuk single_choice, multiple_choice, short_answer, matching, atau category_matrix. Untuk single_choice berikan 4 opsi dengan tepat satu jawaban benar. Untuk multiple_choice berikan 4 opsi dan minimal satu jawaban benar. Untuk short_answer kosongkan options dan isi accepted_answers. Untuk matching kosongkan options dan accepted_answers, lalu isi matching_pairs dengan 2–5 objek left/right serta matching_distractors dengan 0–2 pilihan kanan pengecoh. Untuk category_matrix kosongkan options, isi matrix_columns dengan 2–4 label kategori, lalu isi matrix_rows dengan 2–6 pernyataan dan correct_column_index berbasis indeks mulai dari 0. Sertakan pembahasan yang merujuk isi cerita. Jangan membuat pertanyaan yang membutuhkan pengetahuan di luar cerita.
+
+{$blueprintDirection}
 
 Kembalikan JSON saja dengan struktur:
 {"title":"Judul cerita","story_paragraphs":["Paragraf pertama","Paragraf berikutnya"],"questions":[{"competency_code":"KODE_DARI_DAFTAR","type":"single_choice","title":"Judul internal soal","prompt":"Pertanyaan","explanation":"Pembahasan","difficulty":1,"cognitive_level":"menemukan informasi","options":[{"content":"Pilihan","is_correct":true}],"accepted_answers":[],"matching_pairs":[],"matching_distractors":[],"matrix_columns":[],"matrix_rows":[]}]}
@@ -304,5 +431,62 @@ Kembalikan JSON saja dengan struktur:
 Daftar kompetensi yang boleh dipilih:
 {$competencyJson}
 PROMPT;
+    }
+
+    private function directPrompt(string $exampleQuestion, int $questionCount, array $competencies, string $questionStyle, string $answerFormat, bool $useIllustration, array $questionBlueprints): string
+    {
+        $competencyJson = json_encode($competencies, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+        $exampleDirection = trim($exampleQuestion) !== ''
+            ? "Gunakan contoh soal berikut sebagai pola, lalu buat variasi baru dengan angka, objek, atau konteks berbeda tanpa menyalin persis:\n{$exampleQuestion}"
+            : 'Tidak ada contoh soal. Susun soal baru langsung dari kompetensi yang diberikan.';
+        $styleDirection = $questionStyle === 'reasoning'
+            ? 'Jenis soal: PENALARAN. Buat soal yang menuntut analisis, hubungan antar informasi, strategi, atau perhitungan bertahap; hindari sekadar hafalan dan hitung satu langkah.'
+            : 'Jenis soal: LANGSUNG. Buat pertanyaan ringkas dan fokus untuk mengukur penguasaan konsep atau prosedur secara langsung.';
+        $illustrationDirection = $useIllustration
+            ? 'Gunakan satu ilustrasi visual bersama untuk seluruh soal. Isi visual_description dengan deskripsi gambar yang presisi, termasuk jumlah objek, posisi, bentuk, ukuran, atau data visual yang dibutuhkan. Semua soal harus konsisten dengan ilustrasi tersebut dan tidak boleh membocorkan jawaban.'
+            : 'Soal tidak memakai ilustrasi. Isi visual_description dengan string kosong.';
+        $answerFormatDirection = match ($answerFormat) {
+            'single_choice' => 'FORMAT JAWABAN WAJIB: Semua soal harus bertipe single_choice dengan 4 opsi dan tepat 1 jawaban benar.',
+            'multiple_choice' => 'FORMAT JAWABAN WAJIB: Semua soal harus bertipe multiple_choice (MCMA) dengan 4 opsi dan minimal 2 jawaban benar. Pertanyaan harus memerintahkan siswa memilih semua jawaban yang benar.',
+            'true_false' => 'FORMAT JAWABAN WAJIB: Semua soal harus bertipe category_matrix. Gunakan tepat dua matrix_columns dalam urutan ["Benar", "Salah"] dan 2–6 pernyataan pada matrix_rows.',
+            'mixed' => 'FORMAT JAWABAN WAJIB: Campurkan hanya single_choice, multiple_choice, dan category_matrix. Gunakan minimal 2 tipe berbeda dalam paket. Untuk category_matrix gunakan tepat dua kolom ["Benar", "Salah"]. Untuk multiple_choice gunakan minimal 2 jawaban benar.',
+            default => 'FORMAT JAWABAN WAJIB: Semua soal harus bertipe single_choice.',
+        };
+        $blueprintDirection = $this->questionBlueprintDirection($questionBlueprints);
+
+        return <<<PROMPT
+Anda membantu guru membuat soal try out TKA berbahasa Indonesia.
+
+Buat tepat {$questionCount} variasi soal. Soal harus mengukur kompetensi yang diberikan. Jangan memaksakan cerita panjang. Gunakan stimulus singkat hanya jika memang dibutuhkan; jika tidak, isi stimulus dengan string kosong. Untuk Matematika, pastikan angka, operasi, satuan, kunci, dan pembahasan konsisten serta dapat dihitung dengan jelas.
+
+{$exampleDirection}
+
+{$styleDirection}
+
+{$answerFormatDirection}
+
+{$illustrationDirection} Jika visual berupa model pecahan atau kelompok objek, isi visual_spec agar sistem dapat menggambar diagram secara presisi. Gunakan type fraction_models dengan items berisi shape (circle atau rectangle), total_parts, dan shaded_parts. Untuk perkalian kelompok objek, gunakan type object_groups dengan groups dan objects_per_group. Untuk visual dekoratif yang tidak membutuhkan jumlah presisi, isi visual_spec dengan null.
+
+{$blueprintDirection}
+
+Gunakan variasi tingkat kesulitan dan proses kognitif. Soal boleh berbentuk single_choice, multiple_choice, short_answer, matching, atau category_matrix. Untuk single_choice berikan 4 opsi dengan tepat satu jawaban benar. Untuk multiple_choice berikan 4 opsi dan minimal satu jawaban benar. Untuk short_answer kosongkan options dan isi accepted_answers. Untuk matching kosongkan options dan accepted_answers, lalu isi matching_pairs dengan 2–5 objek left/right serta matching_distractors dengan 0–2 pilihan kanan pengecoh. Untuk category_matrix kosongkan options, isi matrix_columns dengan 2–4 label kategori, lalu isi matrix_rows dengan 2–6 pernyataan dan correct_column_index berbasis indeks mulai dari 0.
+
+Kembalikan JSON saja dengan struktur:
+{"title":"Judul paket","visual_description":"Deskripsi ilustrasi atau string kosong","visual_spec":{"type":"fraction_models","items":[{"shape":"circle","total_parts":4,"shaded_parts":2}]},"story_paragraphs":[],"questions":[{"competency_code":"KODE_DARI_DAFTAR","type":"single_choice","title":"Judul internal soal","stimulus":"Stimulus singkat atau kosong","prompt":"Pertanyaan","explanation":"Pembahasan langkah demi langkah","difficulty":1,"cognitive_level":"penerapan","options":[{"content":"Pilihan","is_correct":true}],"accepted_answers":[],"matching_pairs":[],"matching_distractors":[],"matrix_columns":[],"matrix_rows":[]}]}
+
+Kompetensi atau subkompetensi yang wajib digunakan:
+{$competencyJson}
+PROMPT;
+    }
+
+    private function questionBlueprintDirection(array $questionBlueprints): string
+    {
+        if ($questionBlueprints === []) {
+            return 'Tidak ada tipe soal khusus yang dipilih. Ikuti kompetensi secara umum.';
+        }
+
+        $blueprintJson = json_encode($questionBlueprints, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+
+        return "Gunakan tipe soal berikut secara bergiliran sesuai urutan untuk setiap soal. Isi pertanyaan harus benar-benar mengukur fokus tipe soal tersebut:\n{$blueprintJson}";
     }
 }

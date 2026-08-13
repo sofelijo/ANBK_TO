@@ -17,11 +17,14 @@ type MatchingPair = { left_id?: string; left: string; right_id?: string; right: 
 type MatchingDistractor = { id?: string; content: string };
 type MatrixColumn = { id?: string; label: string };
 type MatrixRow = { id?: string; statement: string; correct_column_index: number };
+type QuestionBlueprint = { id: number; subject_id: number; code: string; name: string; competency_ids: number[] };
 
 type QuestionForm = {
+    return_generation_id: number | null;
     subject_id: string;
     root_competency_id: string;
     competency_id: string;
+    question_blueprint_id: string;
     type: 'single_choice' | 'multiple_choice' | 'short_answer' | 'matching' | 'category_matrix';
     title: string;
     stimulus: string;
@@ -46,6 +49,7 @@ type ExistingQuestion = {
     status: string;
     version: number;
     competency_id: number;
+    question_blueprint_id?: number;
     type: QuestionForm['type'];
     title?: string;
     stimulus?: string;
@@ -66,7 +70,7 @@ type ExistingQuestion = {
     };
 };
 
-export default function Create({ subjects, competencies, question }: { subjects: { id: number; code: string; name: string }[]; competencies: Competency[]; question?: ExistingQuestion }) {
+export default function Create({ subjects, competencies, questionBlueprints, question, selectedSubjectId, returnGeneration }: { subjects: { id: number; code: string; name: string }[]; competencies: Competency[]; questionBlueprints: QuestionBlueprint[]; question?: ExistingQuestion; selectedSubjectId?: number | null; returnGeneration?: { id: number; format: 'direct' | 'story' } | null }) {
     const defaultOptions = [
             { content: '', is_correct: true },
             { content: '', is_correct: false },
@@ -88,9 +92,11 @@ export default function Create({ subjects, competencies, question }: { subjects:
     const questionCompetency = question ? competencies.find((competency) => competency.id === question.competency_id) : undefined;
     const initialRootCompetencyId = questionCompetency?.parent_id || questionCompetency?.id;
     const { data, setData, post, transform, processing, errors } = useForm<QuestionForm>({
-        subject_id: questionCompetency ? String(questionCompetency.subject_id) : '',
+        return_generation_id: returnGeneration?.id || null,
+        subject_id: questionCompetency ? String(questionCompetency.subject_id) : selectedSubjectId ? String(selectedSubjectId) : '',
         root_competency_id: initialRootCompetencyId ? String(initialRootCompetencyId) : '',
         competency_id: question ? String(question.competency_id) : '',
+        question_blueprint_id: question?.question_blueprint_id ? String(question.question_blueprint_id) : '',
         type: question?.type || 'single_choice',
         title: question?.title || '',
         stimulus: question?.stimulus || '',
@@ -100,7 +106,7 @@ export default function Create({ subjects, competencies, question }: { subjects:
         prompt: question?.prompt || '',
         explanation: question?.explanation || '',
         difficulty: question?.difficulty || 1,
-        grade_level: question?.grade_level || 5,
+        grade_level: question?.grade_level || 6,
         cognitive_level: question?.cognitive_level || '',
         options: question?.options.length ? question.options.map((option) => ({ content: option.content, is_correct: option.is_correct })) : defaultOptions,
         accepted_answers: question?.metadata?.accepted_answers?.length ? question.metadata.accepted_answers : [''],
@@ -119,6 +125,10 @@ export default function Create({ subjects, competencies, question }: { subjects:
     const availableSubcompetencies = competencies.filter(
         (competency) => competency.parent_id === Number(data.root_competency_id),
     );
+    const selectedSubject = subjects.find((subject) => subject.id === Number(data.subject_id));
+    const usesQuestionBlueprints = selectedSubject?.code === 'BIND';
+    const availableQuestionBlueprints = questionBlueprints.filter((item) => item.subject_id === Number(data.subject_id));
+    const defaultQuestionBlueprints = availableQuestionBlueprints.filter((item) => item.competency_ids.includes(Number(data.competency_id)));
 
     const submit = (event: FormEvent) => {
         event.preventDefault();
@@ -157,13 +167,18 @@ export default function Create({ subjects, competencies, question }: { subjects:
                         Anda sedang mengedit soal terbit versi {question.version}. Saat disimpan, sistem membuat revisi draft baru dan tidak mengubah soal pada paket yang sudah terbit.
                     </div>
                 )}
+                {question && returnGeneration && (
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm leading-6 text-emerald-900">
+                        Edit pertanyaan, kunci jawaban, dan pembahasan. Setelah disimpan, Anda akan kembali ke paket soal AI ini.
+                    </div>
+                )}
                 {subjects.length === 0 && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">Belum ada mata pelajaran. <Link href={route('subjects.create')} className="font-bold underline">Tambahkan mata pelajaran</Link> sebelum membuat soal.</div>}
                 <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                     <h2 className="font-semibold text-slate-900">Klasifikasi</h2>
                     <div className="mt-4 grid gap-4 sm:grid-cols-2">
                         <label className="text-sm font-medium text-slate-700">
                             Mata pelajaran
-                            <select value={data.subject_id} onChange={(event) => setData((current) => ({ ...current, subject_id: event.target.value, root_competency_id: '', competency_id: '' }))} className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500">
+                            <select value={data.subject_id} onChange={(event) => setData((current) => ({ ...current, subject_id: event.target.value, root_competency_id: '', competency_id: '', question_blueprint_id: '' }))} className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500">
                                 <option value="">Pilih mata pelajaran terlebih dahulu</option>
                                 {subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.code} · {subject.name}</option>)}
                             </select>
@@ -175,7 +190,8 @@ export default function Create({ subjects, competencies, question }: { subjects:
                                 value={data.root_competency_id}
                                 onChange={(event) => {
                                     const competency = competencies.find((item) => item.id === Number(event.target.value));
-                                    setData((current) => ({ ...current, root_competency_id: event.target.value, competency_id: event.target.value, grade_level: competency?.grade_level || current.grade_level }));
+                                    const defaults = questionBlueprints.filter((item) => item.competency_ids.includes(Number(event.target.value)));
+                                    setData((current) => ({ ...current, root_competency_id: event.target.value, competency_id: event.target.value, question_blueprint_id: defaults[0] ? String(defaults[0].id) : '', grade_level: competency?.grade_level || current.grade_level }));
                                 }}
                                 className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500"
                             >
@@ -189,7 +205,7 @@ export default function Create({ subjects, competencies, question }: { subjects:
                             {data.subject_id && availableCompetencies.length === 0 && <p className="mt-1 text-xs text-amber-700">Mapel ini belum memiliki kompetensi. <Link href={route('competencies.create')} className="font-bold underline">Tambahkan kompetensi</Link>.</p>}
                             <InputError message={errors.competency_id} className="mt-1" />
                         </label>
-                        <label className="text-sm font-medium text-slate-700">
+                        {!usesQuestionBlueprints && <label className="text-sm font-medium text-slate-700">
                             Subkompetensi <span className="font-normal text-slate-500">(opsional)</span>
                             <select
                                 value={availableSubcompetencies.some((item) => item.id === Number(data.competency_id)) ? data.competency_id : ''}
@@ -205,7 +221,15 @@ export default function Create({ subjects, competencies, question }: { subjects:
                                 ))}
                             </select>
                             {data.root_competency_id && availableSubcompetencies.length === 0 && <p className="mt-1 text-xs text-slate-500">Soal akan diklasifikasikan langsung ke kompetensi utama.</p>}
-                        </label>
+                        </label>}
+                        {usesQuestionBlueprints && <label className="text-sm font-medium text-slate-700">
+                            Tipe soal <span className="font-normal text-slate-500">(dapat disesuaikan)</span>
+                            <select value={data.question_blueprint_id} onChange={(event) => setData('question_blueprint_id', event.target.value)} disabled={!data.competency_id} className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500 disabled:bg-slate-100">
+                                <option value="">Tanpa tipe khusus</option>
+                                {availableQuestionBlueprints.map((blueprint) => <option key={blueprint.id} value={blueprint.id}>{defaultQuestionBlueprints.some((item) => item.id === blueprint.id) ? 'Default · ' : ''}{blueprint.name}</option>)}
+                            </select>
+                            <InputError message={errors.question_blueprint_id} className="mt-1" />
+                        </label>}
                         <label className="text-sm font-medium text-slate-700">
                             Bentuk soal
                             <select
@@ -505,7 +529,7 @@ export default function Create({ subjects, competencies, question }: { subjects:
                 </section>
 
                 <div className="flex justify-end gap-3">
-                    <Link href={question ? route('questions.show', question.id) : route('questions.index')} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700">Batal</Link>
+                    <Link href={returnGeneration ? route(returnGeneration.format === 'direct' ? 'ai-questions.show' : 'story-questions.show', returnGeneration.id) : question ? route('questions.show', question.id) : route('questions.index')} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700">Batal</Link>
                     <button disabled={processing} className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white disabled:opacity-50">{question ? 'Simpan perubahan' : 'Simpan draft'}</button>
                 </div>
             </form>

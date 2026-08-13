@@ -22,6 +22,7 @@ export default function Login({
         npsn: '',
         nisn: '',
         name: '',
+        grade_level: 6,
     });
     const staffForm = useForm({
         email: '',
@@ -295,6 +296,21 @@ export default function Login({
                                 message={studentForm.errors.name}
                                 className="mt-2"
                             />
+                        </div>
+
+                        <div className="mt-5">
+                            <InputLabel htmlFor="student-grade" value="Kelas" />
+                            <select
+                                id="student-grade"
+                                value={studentForm.data.grade_level}
+                                onChange={(event) => studentForm.setData('grade_level', Number(event.target.value))}
+                                className="mt-1 block w-full rounded-xl border-gray-300 px-4 py-3 text-base shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                            >
+                                <option value={6}>Kelas 6</option>
+                                <option value={9}>Kelas 9</option>
+                                <option value={12}>Kelas 12</option>
+                            </select>
+                            <InputError message={studentForm.errors.grade_level} className="mt-2" />
                         </div>
 
                         <div className="mt-6 flex gap-3">

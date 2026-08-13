@@ -161,7 +161,7 @@ class AssessmentController extends Controller
         $data = $request->validate([
             'title' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:3000'],
-            'grade_level' => ['required', 'integer', Rule::in([5, 8, 11])],
+            'grade_level' => ['required', 'integer', Rule::in([6, 9, 12])],
             'duration_minutes' => ['required', 'integer', 'between:5,480'],
             'assessment_type' => ['required', 'string', Rule::in(array_keys(config('assessment.types')))],
             'custom_type_name' => ['nullable', 'required_if:assessment_type,custom', 'string', 'max:100'],

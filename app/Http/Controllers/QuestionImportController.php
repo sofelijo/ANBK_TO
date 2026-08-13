@@ -52,8 +52,8 @@ class QuestionImportController extends Controller
             $stream = fopen('php://output', 'w');
             fputcsv($stream, $headers);
             fputcsv($stream, [
-                'LIT5-INFO', 'single_choice', 'Contoh soal', 'Stimulus singkat',
-                'Pertanyaan contoh?', 'Pembahasan', '1', '5', 'menemukan informasi',
+                'LIT6-INFO', 'single_choice', 'Contoh soal', 'Stimulus singkat',
+                'Pertanyaan contoh?', 'Pembahasan', '1', '6', 'menemukan informasi',
                 'Jawaban A', 'Jawaban B', 'Jawaban C', 'Jawaban D', '', '', 'B', '',
             ]);
             fclose($stream);

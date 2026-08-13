@@ -13,7 +13,7 @@ export default function Register() {
         npsn: '',
         account_type: 'student',
         student_identifier: '',
-        grade_level: 5,
+        grade_level: 6,
         password: '',
         password_confirmation: '',
     });
@@ -71,9 +71,9 @@ export default function Register() {
                     {data.account_type === 'student' && <div>
                         <InputLabel htmlFor="grade_level" value="Kelas" />
                         <select id="grade_level" value={data.grade_level} onChange={(e) => setData('grade_level', Number(e.target.value))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
-                            <option value={5}>Kelas 5</option>
-                            <option value={8}>Kelas 8</option>
-                            <option value={11}>Kelas 11</option>
+                            <option value={6}>Kelas 6</option>
+                            <option value={9}>Kelas 9</option>
+                            <option value={12}>Kelas 12</option>
                         </select>
                     </div>}
                 </div>

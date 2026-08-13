@@ -89,7 +89,7 @@ class ChatWorkflowTest extends TestCase
             'school_id' => $student->school_id,
             'created_by' => $teacher->id,
             'title' => 'Ujian Aktif',
-            'grade_level' => 5,
+            'grade_level' => 6,
             'duration_minutes' => 30,
             'status' => AssessmentStatus::Published,
         ]);
@@ -147,7 +147,7 @@ class ChatWorkflowTest extends TestCase
             'password' => 'password',
             'role' => $role,
             'student_identifier' => $role === UserRole::Student ? Str::upper(Str::random(8)) : null,
-            'grade_level' => $role === UserRole::Student ? 5 : null,
+            'grade_level' => $role === UserRole::Student ? 6 : null,
             'email_verified_at' => now(),
         ]);
     }

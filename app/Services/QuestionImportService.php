@@ -67,7 +67,7 @@ class QuestionImportService
 
         $gradeLevel = (int) $row['grade_level'];
         $difficulty = (int) $row['difficulty'];
-        if (! in_array($gradeLevel, [5, 8, 11], true) || ! in_array($difficulty, [1, 2, 3], true)) {
+        if (! in_array($gradeLevel, [6, 9, 12], true) || ! in_array($difficulty, [1, 2, 3], true)) {
             throw new \RuntimeException('grade_level atau difficulty tidak valid.');
         }
 

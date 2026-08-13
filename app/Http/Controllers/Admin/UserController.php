@@ -85,7 +85,7 @@ class UserController extends Controller
                 Rule::requiredIf($request->string('role')->toString() === UserRole::Student->value),
                 'nullable',
                 'integer',
-                Rule::in([5, 8, 11]),
+                Rule::in([6, 9, 12]),
             ],
         ]);
 

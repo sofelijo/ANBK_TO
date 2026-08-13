@@ -23,7 +23,7 @@ class SchoolProfileWorkflowTest extends TestCase
             'school_id' => $school->id,
             'created_by' => $admin->id,
             'title' => 'Paket TKA',
-            'grade_level' => 5,
+            'grade_level' => 6,
             'duration_minutes' => 150,
             'status' => AssessmentStatus::Published,
         ]);
@@ -137,7 +137,7 @@ class SchoolProfileWorkflowTest extends TestCase
             'password' => 'password',
             'role' => UserRole::Student,
             'student_identifier' => $nisn,
-            'grade_level' => 5,
+            'grade_level' => 6,
             'is_active' => true,
             'email_verified_at' => now(),
         ]);

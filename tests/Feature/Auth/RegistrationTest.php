@@ -29,7 +29,7 @@ class RegistrationTest extends TestCase
             'npsn' => '10000004',
             'account_type' => UserRole::Student->value,
             'student_identifier' => 'S-001',
-            'grade_level' => 5,
+            'grade_level' => 6,
             'password' => 'password',
             'password_confirmation' => 'password',
         ]);

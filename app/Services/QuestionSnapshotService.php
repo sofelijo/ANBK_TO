@@ -4,7 +4,7 @@ namespace App\Services;
 
 use App\Models\Assessment;
 use App\Models\Question;
-use Illuminate\Support\Facades\Storage;
+use App\Support\StorageUrl;
 
 class QuestionSnapshotService
 {
@@ -17,6 +17,7 @@ class QuestionSnapshotService
             'question_id' => $question->id,
             'question_version' => $question->version,
             'competency_id' => $question->competency_id,
+            'question_blueprint_id' => $question->question_blueprint_id,
             'type' => $question->type->value,
             'title' => $question->title,
             'stimulus' => $question->stimulus,
@@ -76,7 +77,7 @@ class QuestionSnapshotService
             return null;
         }
 
-        return Storage::disk($disk)->url($path);
+        return StorageUrl::for($disk, $path);
     }
 
     private function decode(mixed $snapshot): ?array

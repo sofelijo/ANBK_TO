@@ -49,7 +49,7 @@ export default function Create({ questions, competencies, assessmentTypes, quest
     const emptyForm: AssessmentForm = {
         title: '',
         description: '',
-        grade_level: 5,
+        grade_level: 6,
         duration_minutes: 60,
         assessment_type: 'tryout',
         custom_type_name: '',
@@ -166,7 +166,7 @@ export default function Create({ questions, competencies, assessmentTypes, quest
                                 blueprint_rows: current.selection_mode === 'blueprint' ? [defaultBlueprintRow(gradeLevel)] : [],
                                 question_count: ['competency', 'blueprint'].includes(current.selection_mode) ? 1 : current.question_count,
                             }));
-                        }} className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500"><option value={5}>Kelas 5</option><option value={8}>Kelas 8</option><option value={11}>Kelas 11</option></select></label>
+                        }} className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500"><option value={6}>Kelas 6</option><option value={9}>Kelas 9</option><option value={12}>Kelas 12</option></select></label>
                         <label className="text-sm font-medium text-slate-700">Durasi pengerjaan<input type="number" min={5} max={480} value={data.duration_minutes} onChange={(event) => setData('duration_minutes', Number(event.target.value))} className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500" /><span className="mt-1 block text-xs text-slate-400">5–480 menit</span><InputError message={errors.duration_minutes} /></label>
                         <label className="text-sm font-medium text-slate-700 sm:col-span-2">Deskripsi / petunjuk<textarea value={data.description} onChange={(event) => setData('description', event.target.value)} rows={3} placeholder="Petunjuk yang akan dibaca peserta sebelum mengerjakan." className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500" /></label>
                     </div>

@@ -2,15 +2,19 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\AiGenerationStatus;
 use App\Enums\AiGenerationType;
 use App\Enums\QuestionStatus;
 use App\Enums\QuestionType;
 use App\Models\AiGeneration;
 use App\Models\Competency;
 use App\Models\Question;
+use App\Models\QuestionBlueprint;
 use App\Models\Subject;
 use App\Services\AuditLogger;
+use App\Services\QuestionDuplicateDetector;
 use App\Services\StimulusImageService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -31,6 +35,8 @@ class QuestionController extends Controller
             ->whereNull('superseded_by_id')
             ->where(function ($query) {
                 $query->whereNull('questions.story_generation_id')
+                    ->orWhereHas('storyGeneration', fn ($generation) => $generation
+                        ->where('request_payload->format', 'direct'))
                     ->orWhereNotExists(function ($subquery) {
                         $subquery->selectRaw('1')
                             ->from('questions as earlier_bundle_questions')
@@ -56,17 +62,25 @@ class QuestionController extends Controller
                 $query->where(fn ($nested) => $nested
                     ->where('questions.title', 'like', "%{$search}%")
                     ->orWhere('questions.prompt', 'like', "%{$search}%")
-                    ->orWhereHas('bundleQuestions', fn ($bundleQuestion) => $bundleQuestion
-                        ->where('title', 'like', "%{$search}%")
-                        ->orWhere('prompt', 'like', "%{$search}%")));
+                    ->orWhere(fn ($storyBundle) => $storyBundle
+                        ->whereHas('storyGeneration', fn ($generation) => $generation
+                            ->where('request_payload->format', '!=', 'direct'))
+                        ->whereHas('bundleQuestions', fn ($bundleQuestion) => $bundleQuestion
+                            ->where('title', 'like', "%{$search}%")
+                            ->orWhere('prompt', 'like', "%{$search}%"))));
             })
             ->when($request->string('status')->toString(), function ($query, string $status) {
                 $query->where(fn ($filtered) => $filtered
                     ->where(fn ($standalone) => $standalone
-                        ->whereNull('questions.story_generation_id')
+                        ->where(fn ($source) => $source
+                            ->whereNull('questions.story_generation_id')
+                            ->orWhereHas('storyGeneration', fn ($generation) => $generation
+                                ->where('request_payload->format', 'direct')))
                         ->where('questions.status', $status))
                     ->orWhere(fn ($bundle) => $bundle
                         ->whereNotNull('questions.story_generation_id')
+                        ->whereHas('storyGeneration', fn ($generation) => $generation
+                            ->where('request_payload->format', '!=', 'direct'))
                         ->whereHas('bundleQuestions', fn ($bundleQuestion) => $bundleQuestion->where('status', $status))));
             })
             ->when($request->integer('subject_id'), fn ($query, int $subjectId) => $query
@@ -84,9 +98,16 @@ class QuestionController extends Controller
 
     public function create(Request $request): Response
     {
+        $subjects = $this->subjects($request);
+        $selectedSubjectId = $subjects->contains('id', $request->integer('subject_id'))
+            ? $request->integer('subject_id')
+            : null;
+
         return Inertia::render('Questions/Create', [
-            'subjects' => $this->subjects($request),
+            'subjects' => $subjects,
             'competencies' => $this->competencies($request),
+            'questionBlueprints' => $this->questionBlueprints($request),
+            'selectedSubjectId' => $selectedSubjectId,
         ]);
     }
 
@@ -123,6 +144,7 @@ class QuestionController extends Controller
         $question->load([
             'competency:id,subject_id,code,domain,name',
             'competency.subject:id,code,name',
+            'questionBlueprint:id,code,name',
             'author:id,name',
             'approver:id,name',
             'options',
@@ -134,11 +156,16 @@ class QuestionController extends Controller
 
         return Inertia::render('Questions/Show', [
             'question' => $question,
-            'latestGeneration' => AiGeneration::query()
+            'latestGeneration' => ($latestGeneration = AiGeneration::query()
                 ->where('source_question_id', $question->id)
                 ->where('type', AiGenerationType::QuestionVariants)
                 ->latest()
-                ->first(),
+                ->first()) ? [
+                    'status' => $latestGeneration->status,
+                    'error' => $latestGeneration->status === AiGenerationStatus::Failed
+                        ? 'Variasi soal belum berhasil dibuat. Silakan coba kembali.'
+                        : null,
+                ] : null,
         ]);
     }
 
@@ -147,11 +174,17 @@ class QuestionController extends Controller
         $this->ensureSameSchool($request, $question);
         abort_if($question->superseded_by_id !== null, 409, 'Versi soal ini sudah digantikan oleh revisi yang lebih baru.');
         $question->load('options');
+        $returnGeneration = $this->returnGeneration($request, $question);
 
         return Inertia::render('Questions/Create', [
             'subjects' => $this->subjects($request),
             'competencies' => $this->competencies($request),
+            'questionBlueprints' => $this->questionBlueprints($request),
             'question' => $question,
+            'returnGeneration' => $returnGeneration ? [
+                'id' => $returnGeneration->id,
+                'format' => data_get($returnGeneration->request_payload, 'format') === 'direct' ? 'direct' : 'story',
+            ] : null,
         ]);
     }
 
@@ -159,6 +192,7 @@ class QuestionController extends Controller
     {
         $this->ensureSameSchool($request, $question);
         abort_if($question->superseded_by_id !== null, 409, 'Versi soal ini sudah digantikan oleh revisi yang lebih baru.');
+        $returnGeneration = $this->returnGeneration($request, $question);
         $data = $this->validatedData($request);
         $illustration = $this->storeStimulusImage($request, $data, $imageService);
         $metadata = $this->withStimulusImage($question->metadata ?? [], $data, $illustration);
@@ -202,12 +236,111 @@ class QuestionController extends Controller
             'revision_of_id' => $createRevision ? $question->id : null,
         ]);
 
-        return to_route('questions.show', $savedQuestion)->with(
+        $redirect = $returnGeneration
+            ? to_route(
+                data_get($returnGeneration->request_payload, 'format') === 'direct' ? 'ai-questions.show' : 'story-questions.show',
+                $returnGeneration,
+            )
+            : to_route('questions.show', $savedQuestion);
+
+        return $redirect->with(
             'success',
             $createRevision
                 ? "Revisi versi {$savedQuestion->version} disimpan sebagai draft. Versi lama tetap aman untuk paket yang sudah terbit."
                 : 'Perubahan disimpan sebagai draft dan perlu diterbitkan ulang.',
         );
+    }
+
+    public function inlineUpdate(
+        Request $request,
+        AiGeneration $generation,
+        Question $question,
+        AuditLogger $auditLogger,
+    ): RedirectResponse {
+        $this->ensureSameSchool($request, $question);
+        abort_unless(
+            $generation->school_id === $request->user()->school_id
+            && $generation->type === AiGenerationType::StoryQuestions
+            && $question->story_generation_id === $generation->id
+            && in_array($question->id, data_get($generation->result_payload, 'question_ids', []), true),
+            404,
+        );
+        abort_unless($question->status === QuestionStatus::Draft, 409, 'Hanya soal draft yang dapat diedit langsung dari paket AI.');
+
+        $question->loadMissing('competency');
+        $irrelevantAnswerFields = match ($question->type) {
+            QuestionType::SingleChoice, QuestionType::MultipleChoice => ['matching_pairs', 'matching_distractors', 'matrix_columns', 'matrix_rows'],
+            QuestionType::ShortAnswer => ['options', 'matching_pairs', 'matching_distractors', 'matrix_columns', 'matrix_rows'],
+            QuestionType::Matching => ['options', 'accepted_answers', 'matrix_columns', 'matrix_rows'],
+            QuestionType::CategoryMatrix => ['options', 'accepted_answers', 'matching_pairs', 'matching_distractors'],
+        };
+        foreach ($irrelevantAnswerFields as $field) {
+            $request->request->remove($field);
+        }
+        $request->merge([
+            'subject_id' => $question->competency->subject_id,
+            'competency_id' => $question->competency_id,
+            'question_blueprint_id' => $question->question_blueprint_id,
+            'type' => $question->type->value,
+            'title' => $question->title,
+            'difficulty' => $question->difficulty,
+            'grade_level' => $question->grade_level,
+            'cognitive_level' => $question->cognitive_level,
+        ]);
+        $data = $this->validatedData($request);
+
+        DB::transaction(function () use ($question, $data): void {
+            $question->update([
+                ...$this->attributes($data, $question->metadata ?? []),
+                'approved_by' => null,
+                'approved_at' => null,
+            ]);
+            $this->syncOptions($question, $data['options'] ?? []);
+        });
+
+        $auditLogger->log($request, 'question.inline_updated', $question, [
+            'story_generation_id' => $generation->id,
+        ]);
+
+        return back()->with('success', 'Soal, jawaban, dan pembahasan berhasil diperbarui.');
+    }
+
+    public function destroyGenerated(
+        Request $request,
+        AiGeneration $generation,
+        Question $question,
+        AuditLogger $auditLogger,
+    ): RedirectResponse {
+        $this->ensureGeneratedQuestion($request, $generation, $question);
+        abort_unless($question->status === QuestionStatus::Draft, 409, 'Hanya soal draft yang dapat dihapus.');
+        abort_if($question->assessments()->exists(), 409, 'Soal yang sudah digunakan pada paket ujian tidak dapat dihapus.');
+
+        DB::transaction(function () use ($generation, $question, $request, $auditLogger): void {
+            $auditLogger->log($request, 'question.deleted_from_generation', $question, [
+                'story_generation_id' => $generation->id,
+            ]);
+            $resultPayload = $generation->result_payload ?? [];
+            $resultPayload['question_ids'] = collect(data_get($resultPayload, 'question_ids', []))
+                ->reject(fn ($id): bool => (int) $id === $question->id)
+                ->values()
+                ->all();
+            $resultPayload['question_count'] = count($resultPayload['question_ids']);
+            $generation->update(['result_payload' => $resultPayload]);
+            $question->delete();
+        });
+
+        return back()->with('success', 'Soal dihapus dari hasil pembuatan AI.');
+    }
+
+    public function duplicateCheck(Request $request, Question $question, QuestionDuplicateDetector $detector): JsonResponse
+    {
+        $this->ensureSameSchool($request, $question);
+        $candidates = $detector->candidates($question);
+
+        return response()->json([
+            'blocking' => $candidates->contains('blocking', true),
+            'candidates' => $candidates,
+        ]);
     }
 
     public function duplicate(Request $request, Question $question, AuditLogger $auditLogger): RedirectResponse
@@ -253,10 +386,19 @@ class QuestionController extends Controller
         return to_route('questions.index')->with('success', 'Soal dipindahkan ke arsip.');
     }
 
-    public function approve(Request $request, Question $question, AuditLogger $auditLogger): RedirectResponse
-    {
+    public function approve(
+        Request $request,
+        Question $question,
+        AuditLogger $auditLogger,
+        QuestionDuplicateDetector $duplicateDetector,
+    ): RedirectResponse {
         $this->ensureSameSchool($request, $question);
         abort_if($question->superseded_by_id !== null, 409, 'Versi soal ini sudah digantikan.');
+        if ($duplicateDetector->hasBlockingDuplicate($question)) {
+            throw ValidationException::withMessages([
+                'duplicate' => 'Soal belum dapat diverifikasi karena ditemukan soal lain yang sangat mirip. Edit atau hapus salah satunya terlebih dahulu.',
+            ]);
+        }
 
         DB::transaction(function () use ($question, $request): void {
             if ($question->revision_of_id) {
@@ -286,8 +428,10 @@ class QuestionController extends Controller
     private function validatedData(Request $request): array
     {
         $data = $request->validate([
+            'return_generation_id' => ['nullable', 'integer'],
             'subject_id' => ['required', 'integer'],
             'competency_id' => ['required', 'integer'],
+            'question_blueprint_id' => ['nullable', 'integer'],
             'type' => ['required', Rule::enum(QuestionType::class)],
             'title' => ['nullable', 'string', 'max:255'],
             'stimulus' => ['nullable', 'string', 'max:20000'],
@@ -297,7 +441,7 @@ class QuestionController extends Controller
             'prompt' => ['required', 'string', 'max:10000'],
             'explanation' => ['nullable', 'string', 'max:10000'],
             'difficulty' => ['required', 'integer', 'between:1,3'],
-            'grade_level' => ['required', 'integer', Rule::in([5, 8, 11])],
+            'grade_level' => ['required', 'integer', Rule::in([6, 9, 12])],
             'cognitive_level' => ['nullable', 'string', 'max:100'],
             'options' => ['array'],
             'options.*.content' => ['required_with:options', 'string', 'max:3000'],
@@ -351,6 +495,22 @@ class QuestionController extends Controller
             throw ValidationException::withMessages([
                 'grade_level' => 'Jenjang soal harus sama dengan jenjang kompetensi.',
             ]);
+        }
+
+        $blueprintId = (int) ($data['question_blueprint_id'] ?? 0);
+        if ($blueprintId > 0) {
+            $blueprintExists = QuestionBlueprint::query()
+                ->whereKey($blueprintId)
+                ->where('subject_id', $competency->subject_id)
+                ->where(fn ($query) => $query
+                    ->whereNull('school_id')
+                    ->orWhere('school_id', $request->user()->school_id))
+                ->exists();
+            if (! $blueprintExists) {
+                throw ValidationException::withMessages([
+                    'question_blueprint_id' => 'Tipe soal tidak tersedia untuk kompetensi ini.',
+                ]);
+            }
         }
 
         $type = QuestionType::from($data['type']);
@@ -411,6 +571,32 @@ class QuestionController extends Controller
         return $data;
     }
 
+    private function returnGeneration(Request $request, Question $question): ?AiGeneration
+    {
+        $generationId = $request->integer('return_generation_id');
+        if ($generationId === 0 || $question->story_generation_id !== $generationId) {
+            return null;
+        }
+
+        return AiGeneration::query()
+            ->whereKey($generationId)
+            ->where('school_id', $request->user()->school_id)
+            ->where('type', AiGenerationType::StoryQuestions)
+            ->first();
+    }
+
+    private function ensureGeneratedQuestion(Request $request, AiGeneration $generation, Question $question): void
+    {
+        $this->ensureSameSchool($request, $question);
+        abort_unless(
+            $generation->school_id === $request->user()->school_id
+            && $generation->type === AiGenerationType::StoryQuestions
+            && $question->story_generation_id === $generation->id
+            && in_array($question->id, data_get($generation->result_payload, 'question_ids', []), true),
+            404,
+        );
+    }
+
     private function attributes(array $data, array $existingMetadata = []): array
     {
         $type = QuestionType::from($data['type']);
@@ -454,6 +640,7 @@ class QuestionController extends Controller
 
         return [
             'competency_id' => $data['competency_id'],
+            'question_blueprint_id' => $data['question_blueprint_id'] ?? null,
             'type' => $type,
             'title' => $data['title'] ?? null,
             'stimulus' => $data['stimulus'] ?? null,
@@ -533,7 +720,22 @@ class QuestionController extends Controller
                 ->whereNull('school_id')
                 ->orWhere('school_id', $request->user()->school_id))
             ->orderBy('name')
-            ->get(['id', 'code', 'name']);
+            ->get(['id', 'code', 'name', 'ai_question_format']);
+    }
+
+    private function questionBlueprints(Request $request)
+    {
+        return QuestionBlueprint::query()
+            ->where(fn ($query) => $query
+                ->whereNull('school_id')
+                ->orWhere('school_id', $request->user()->school_id))
+            ->with('competencies:id')
+            ->orderBy('name')
+            ->get(['id', 'subject_id', 'code', 'name'])
+            ->map(fn (QuestionBlueprint $blueprint): array => [
+                ...$blueprint->only(['id', 'subject_id', 'code', 'name']),
+                'competency_ids' => $blueprint->competencies->pluck('id'),
+            ]);
     }
 
     private function ensureSameSchool(Request $request, Question $question): void

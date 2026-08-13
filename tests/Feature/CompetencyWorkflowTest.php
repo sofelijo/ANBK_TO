@@ -26,16 +26,16 @@ class CompetencyWorkflowTest extends TestCase
         $this->actingAs($teacher)
             ->post(route('competencies.store'), [
                 'subject_id' => $subject->id,
-                'code' => ' lit5-main ',
+                'code' => ' lit6-main ',
                 'domain' => '  Literasi   Membaca ',
                 'name' => '  Memahami   isi teks ',
                 'description' => 'Kemampuan memahami isi bacaan.',
-                'grade_level' => 5,
+                'grade_level' => 6,
                 'parent_id' => null,
             ])
             ->assertRedirect(route('competencies.index'));
 
-        $competency = Competency::query()->where('code', 'LIT5-MAIN')->firstOrFail();
+        $competency = Competency::query()->where('code', 'LIT6-MAIN')->firstOrFail();
         $this->assertSame($teacher->school_id, $competency->school_id);
         $this->assertSame('Literasi Membaca', $competency->domain);
         $this->assertSame('Memahami isi teks', $competency->name);
@@ -46,7 +46,7 @@ class CompetencyWorkflowTest extends TestCase
         ]);
 
         $this->actingAs($teacher)
-            ->get(route('competencies.index', ['search' => 'LIT5']))
+            ->get(route('competencies.index', ['search' => 'LIT6']))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('Competencies/Index')
                 ->has('competencies', 1)
@@ -55,11 +55,11 @@ class CompetencyWorkflowTest extends TestCase
         $this->actingAs($teacher)
             ->put(route('competencies.update', $competency), [
                 'subject_id' => $subject->id,
-                'code' => 'LIT5-MAIN',
+                'code' => 'LIT6-MAIN',
                 'domain' => 'Literasi',
                 'name' => 'Memahami informasi utama',
                 'description' => null,
-                'grade_level' => 5,
+                'grade_level' => 6,
                 'parent_id' => null,
             ])
             ->assertRedirect(route('competencies.index'));
@@ -84,7 +84,7 @@ class CompetencyWorkflowTest extends TestCase
     public function test_used_competency_cannot_be_deleted(): void
     {
         [$teacher] = $this->users();
-        $competency = $this->competency($teacher, 'LIT5-USED');
+        $competency = $this->competency($teacher, 'LIT6-USED');
         Question::create([
             'school_id' => $teacher->school_id,
             'author_id' => $teacher->id,
@@ -93,7 +93,7 @@ class CompetencyWorkflowTest extends TestCase
             'status' => QuestionStatus::Draft,
             'prompt' => 'Pertanyaan yang menggunakan kompetensi ini?',
             'difficulty' => 1,
-            'grade_level' => 5,
+            'grade_level' => 6,
         ]);
 
         $this->actingAs($teacher)
@@ -103,17 +103,39 @@ class CompetencyWorkflowTest extends TestCase
         $this->assertDatabaseHas('competencies', ['id' => $competency->id]);
     }
 
+    public function test_legacy_grade_is_normalized_when_competency_is_updated(): void
+    {
+        [$teacher] = $this->users();
+        $competency = $this->competency($teacher, 'NUM5-BILANGAN');
+        $competency->update(['grade_level' => 5]);
+
+        $this->actingAs($teacher)
+            ->put(route('competencies.update', $competency), [
+                'subject_id' => $competency->subject_id,
+                'code' => $competency->code,
+                'domain' => $competency->domain,
+                'name' => $competency->name,
+                'description' => $competency->description,
+                'grade_level' => 5,
+                'parent_id' => null,
+            ])
+            ->assertRedirect(route('competencies.index'))
+            ->assertSessionHasNoErrors();
+
+        $this->assertSame(6, $competency->fresh()->grade_level);
+    }
+
     public function test_teacher_cannot_manage_global_or_other_school_competency(): void
     {
         [$teacher, , $otherTeacher] = $this->users();
         $global = Competency::create([
             'school_id' => null,
-            'code' => 'GLOBAL-5',
+            'code' => 'GLOBAL-6',
             'domain' => 'Literasi',
             'name' => 'Kompetensi Global',
-            'grade_level' => 5,
+            'grade_level' => 6,
         ]);
-        $other = $this->competency($otherTeacher, 'OTHER-5');
+        $other = $this->competency($otherTeacher, 'OTHER-6');
 
         $this->actingAs($teacher)->get(route('competencies.edit', $global))->assertNotFound();
         $this->actingAs($teacher)->get(route('competencies.edit', $other))->assertNotFound();
@@ -132,23 +154,23 @@ class CompetencyWorkflowTest extends TestCase
     public function test_competency_parent_must_share_grade_and_cannot_create_cycle(): void
     {
         [$teacher] = $this->users();
-        $parent = $this->competency($teacher, 'PARENT-5');
+        $parent = $this->competency($teacher, 'PARENT-6');
         $gradeEight = Competency::create([
             'school_id' => $teacher->school_id,
             'subject_id' => $parent->subject_id,
-            'code' => 'PARENT-8',
+            'code' => 'PARENT-9',
             'domain' => 'Literasi',
-            'name' => 'Induk Kelas 8',
-            'grade_level' => 8,
+            'name' => 'Induk Kelas 9',
+            'grade_level' => 9,
         ]);
 
         $this->actingAs($teacher)
             ->post(route('competencies.store'), [
                 'subject_id' => $parent->subject_id,
-                'code' => 'CHILD-5',
+                'code' => 'CHILD-6',
                 'domain' => 'Literasi',
-                'name' => 'Turunan Kelas 5',
-                'grade_level' => 5,
+                'name' => 'Turunan Kelas 6',
+                'grade_level' => 6,
                 'parent_id' => $gradeEight->id,
             ])
             ->assertSessionHasErrors('parent_id');
@@ -157,10 +179,10 @@ class CompetencyWorkflowTest extends TestCase
             'school_id' => $teacher->school_id,
             'subject_id' => $parent->subject_id,
             'parent_id' => $parent->id,
-            'code' => 'CHILD-OK-5',
+            'code' => 'CHILD-OK-6',
             'domain' => 'Literasi',
             'name' => 'Turunan Valid',
-            'grade_level' => 5,
+            'grade_level' => 6,
         ]);
 
         $this->actingAs($teacher)
@@ -169,7 +191,7 @@ class CompetencyWorkflowTest extends TestCase
                 'code' => $parent->code,
                 'domain' => $parent->domain,
                 'name' => $parent->name,
-                'grade_level' => 5,
+                'grade_level' => 6,
                 'parent_id' => $child->id,
             ])
             ->assertSessionHasErrors('parent_id');
@@ -178,7 +200,7 @@ class CompetencyWorkflowTest extends TestCase
     public function test_teacher_can_create_subcompetency_but_cannot_create_a_third_level(): void
     {
         [$teacher] = $this->users();
-        $parent = $this->competency($teacher, 'LIT5-READ');
+        $parent = $this->competency($teacher, 'LIT6-READ');
 
         $this->actingAs($teacher)
             ->get(route('competencies.create', ['parent_id' => $parent->id]))
@@ -189,24 +211,24 @@ class CompetencyWorkflowTest extends TestCase
         $this->actingAs($teacher)
             ->post(route('competencies.store'), [
                 'subject_id' => $parent->subject_id,
-                'code' => 'LIT5-READ-INFO',
+                'code' => 'LIT6-READ-INFO',
                 'domain' => 'Literasi',
                 'name' => 'Menemukan informasi dalam teks',
-                'grade_level' => 5,
+                'grade_level' => 6,
                 'parent_id' => $parent->id,
             ])
             ->assertRedirect(route('competencies.index'));
 
-        $subcompetency = Competency::query()->where('code', 'LIT5-READ-INFO')->firstOrFail();
+        $subcompetency = Competency::query()->where('code', 'LIT6-READ-INFO')->firstOrFail();
         $this->assertSame($parent->id, $subcompetency->parent_id);
 
         $this->actingAs($teacher)
             ->post(route('competencies.store'), [
                 'subject_id' => $parent->subject_id,
-                'code' => 'LIT5-READ-INFO-DEEP',
+                'code' => 'LIT6-READ-INFO-DEEP',
                 'domain' => 'Literasi',
                 'name' => 'Tingkat ketiga tidak valid',
-                'grade_level' => 5,
+                'grade_level' => 6,
                 'parent_id' => $subcompetency->id,
             ])
             ->assertSessionHasErrors('parent_id');
@@ -232,7 +254,7 @@ class CompetencyWorkflowTest extends TestCase
             'password' => 'password',
             'role' => $role,
             'student_identifier' => $role === UserRole::Student ? '0012345000' : null,
-            'grade_level' => $role === UserRole::Student ? 5 : null,
+            'grade_level' => $role === UserRole::Student ? 6 : null,
             'email_verified_at' => now(),
         ]);
     }
@@ -245,7 +267,7 @@ class CompetencyWorkflowTest extends TestCase
             'code' => $code,
             'domain' => 'Literasi',
             'name' => "Kompetensi {$code}",
-            'grade_level' => 5,
+            'grade_level' => 6,
         ]);
     }
 

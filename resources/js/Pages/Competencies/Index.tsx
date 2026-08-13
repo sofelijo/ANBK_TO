@@ -69,12 +69,7 @@ export default function Index({
                             Kompetensi & Subkompetensi
                         </h1>
                     </div>
-                    <Link
-                        href={route('competencies.create')}
-                        className="inline-flex justify-center rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white hover:bg-emerald-500"
-                    >
-                        Tambah kompetensi
-                    </Link>
+                    <div className="flex flex-wrap gap-2"><Link href={route('question-types.index')} className="inline-flex justify-center rounded-xl border border-indigo-200 bg-white px-5 py-3 text-sm font-bold text-indigo-700">Tipe Soal B. Indonesia</Link><Link href={route('competencies.create')} className="inline-flex justify-center rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white hover:bg-emerald-500">Tambah kompetensi</Link></div>
                 </div>
             }
         >
@@ -102,9 +97,9 @@ export default function Index({
                         className="rounded-xl border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500"
                     >
                         <option value="">Semua kelas</option>
-                        <option value="5">Kelas 5</option>
-                        <option value="8">Kelas 8</option>
-                        <option value="11">Kelas 11</option>
+                        <option value="6">Kelas 6</option>
+                        <option value="9">Kelas 9</option>
+                        <option value="12">Kelas 12</option>
                     </select>
                     <div className="flex gap-2">
                         <button
@@ -205,7 +200,7 @@ export default function Index({
                                             <td className="px-5 py-4">
                                                 {competency.can_manage ? (
                                                     <div className="flex justify-end gap-2">
-                                                        {!competency.parent && (
+                                                        {!competency.parent && competency.subject?.code !== 'BIND' && (
                                                             <Link
                                                                 href={route('competencies.create', { parent_id: competency.id })}
                                                                 className="rounded-lg border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"

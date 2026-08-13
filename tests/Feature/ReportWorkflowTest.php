@@ -85,21 +85,21 @@ class ReportWorkflowTest extends TestCase
             'password' => 'password',
             'role' => UserRole::Student,
             'student_identifier' => 'R-001',
-            'grade_level' => 5,
+            'grade_level' => 6,
             'email_verified_at' => now(),
         ]);
         $competency = Competency::create([
             'school_id' => $school->id,
-            'code' => 'LIT5-REPORT',
+            'code' => 'LIT6-REPORT',
             'domain' => 'Literasi',
             'name' => 'Kompetensi laporan',
-            'grade_level' => 5,
+            'grade_level' => 6,
         ]);
         $assessment = Assessment::create([
             'school_id' => $school->id,
             'created_by' => $teacher->id,
             'title' => 'Paket Laporan',
-            'grade_level' => 5,
+            'grade_level' => 6,
             'duration_minutes' => 30,
             'status' => AssessmentStatus::Published,
         ]);
@@ -138,16 +138,16 @@ class ReportWorkflowTest extends TestCase
         ]);
         $competency = Competency::create([
             'school_id' => $school->id,
-            'code' => 'LIT5-ANALYSIS',
+            'code' => 'LIT6-ANALYSIS',
             'domain' => 'Literasi',
             'name' => 'Analisis kualitas soal',
-            'grade_level' => 5,
+            'grade_level' => 6,
         ]);
         $assessment = Assessment::create([
             'school_id' => $school->id,
             'created_by' => $teacher->id,
             'title' => 'Paket Analisis Butir',
-            'grade_level' => 5,
+            'grade_level' => 6,
             'duration_minutes' => 30,
             'status' => AssessmentStatus::Published,
         ]);
@@ -165,7 +165,7 @@ class ReportWorkflowTest extends TestCase
                 'title' => $data['title'],
                 'prompt' => 'Pilih jawaban yang tepat.',
                 'difficulty' => $data['difficulty'],
-                'grade_level' => 5,
+                'grade_level' => 6,
             ]);
             $question->options()->createMany([
                 ['label' => 'A', 'content' => 'Jawaban benar', 'is_correct' => true, 'position' => 1],
@@ -187,7 +187,7 @@ class ReportWorkflowTest extends TestCase
                 'password' => 'password',
                 'role' => UserRole::Student,
                 'student_identifier' => sprintf('A-%03d', $index),
-                'grade_level' => 5,
+                'grade_level' => 6,
                 'email_verified_at' => now(),
             ]);
             $attempt = Attempt::create([

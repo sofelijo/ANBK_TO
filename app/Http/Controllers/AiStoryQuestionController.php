@@ -7,7 +7,9 @@ use App\Enums\AiGenerationType;
 use App\Enums\QuestionStatus;
 use App\Jobs\GenerateStoryQuestions;
 use App\Models\AiGeneration;
+use App\Models\Competency;
 use App\Models\Question;
+use App\Models\QuestionBlueprint;
 use App\Models\Subject;
 use App\Services\AI\AiManager;
 use App\Services\AI\StoryIllustrationService;
@@ -15,22 +17,57 @@ use App\Services\AuditLogger;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class AiStoryQuestionController extends Controller
 {
-    public function create(Request $request): Response
+    public function create(Request $request): Response|RedirectResponse
     {
+        $subjects = Subject::query()
+            ->where(fn ($query) => $query
+                ->whereNull('school_id')
+                ->orWhere('school_id', $request->user()->school_id))
+            ->whereHas('competencies')
+            ->orderBy('name')
+            ->get(['id', 'code', 'name', 'ai_question_format']);
+        $selectedSubjectId = $subjects->contains('id', $request->integer('subject_id'))
+            ? $request->integer('subject_id')
+            : null;
+        $selectedSubject = $subjects->firstWhere('id', $selectedSubjectId);
+
+        if ($selectedSubject && $request->routeIs('story-questions.create') && $selectedSubject->ai_question_format === 'direct') {
+            return to_route('ai-questions.create', ['subject_id' => $selectedSubject->id]);
+        }
+
         return Inertia::render('Questions/StoryCreate', [
-            'subjects' => Subject::query()
+            'subjects' => $subjects,
+            'selectedSubjectId' => $selectedSubjectId,
+            'generationFormat' => $selectedSubject?->ai_question_format ?? 'direct',
+            'competencies' => Competency::query()
                 ->where(fn ($query) => $query
                     ->whereNull('school_id')
                     ->orWhere('school_id', $request->user()->school_id))
-                ->whereHas('competencies')
+                ->whereIn('subject_id', $subjects->pluck('id'))
+                ->orderBy('grade_level')
+                ->orderByRaw('COALESCE(parent_id, id)')
+                ->orderBy('parent_id')
+                ->orderBy('code')
+                ->get(['id', 'subject_id', 'parent_id', 'code', 'name', 'grade_level']),
+            'questionBlueprints' => QuestionBlueprint::query()
+                ->where(fn ($query) => $query
+                    ->whereNull('school_id')
+                    ->orWhere('school_id', $request->user()->school_id))
+                ->whereIn('subject_id', $subjects->pluck('id'))
+                ->with('competencies:id')
                 ->orderBy('name')
-                ->get(['id', 'code', 'name']),
+                ->get(['id', 'subject_id', 'code', 'name', 'description'])
+                ->map(fn (QuestionBlueprint $blueprint): array => [
+                    ...$blueprint->only(['id', 'subject_id', 'code', 'name', 'description']),
+                    'competency_ids' => $blueprint->competencies->pluck('id'),
+                ]),
             'recentGenerations' => AiGeneration::query()
                 ->where('school_id', $request->user()->school_id)
                 ->where('requested_by', $request->user()->id)
@@ -45,9 +82,16 @@ class AiStoryQuestionController extends Controller
     {
         $data = $request->validate([
             'subject_id' => ['required', 'integer'],
-            'theme' => ['required', 'string', 'max:255'],
-            'paragraph_count' => ['required', 'integer', 'between:1,5'],
-            'question_count' => ['required', 'integer', 'between:2,4'],
+            'root_competency_id' => ['nullable', 'integer'],
+            'competency_id' => ['nullable', 'integer'],
+            'question_blueprint_ids' => ['array'],
+            'question_blueprint_ids.*' => ['integer', 'distinct'],
+            'theme' => ['nullable', 'string', 'max:5000'],
+            'question_style' => ['nullable', Rule::in(['direct', 'reasoning'])],
+            'answer_format' => ['nullable', Rule::in(['single_choice', 'true_false', 'multiple_choice', 'mixed'])],
+            'use_illustration' => ['nullable', 'boolean'],
+            'paragraph_count' => ['nullable', 'integer', 'between:1,5'],
+            'question_count' => ['required', 'integer', 'between:1,9'],
         ]);
         $subject = Subject::query()
             ->whereKey($data['subject_id'])
@@ -62,7 +106,37 @@ class AiStoryQuestionController extends Controller
                 'subject_id' => 'Mata pelajaran belum memiliki kompetensi yang dapat dipakai.',
             ]);
         }
-        $theme = trim($data['theme']);
+        $selectedCompetency = $this->selectedCompetency($request, $subject, $data);
+        $questionBlueprints = QuestionBlueprint::query()
+            ->whereIn('id', $data['question_blueprint_ids'] ?? [])
+            ->where('subject_id', $subject->id)
+            ->where(fn ($query) => $query
+                ->whereNull('school_id')
+                ->orWhere('school_id', $request->user()->school_id))
+            ->get(['id', 'code', 'name', 'description']);
+        if ($questionBlueprints->count() !== count($data['question_blueprint_ids'] ?? [])) {
+            throw ValidationException::withMessages([
+                'question_blueprint_ids' => 'Ada tipe soal yang tidak tersedia.',
+            ]);
+        }
+        $generationFormat = $subject->ai_question_format === 'story' ? 'story' : 'direct';
+        if ($generationFormat === 'story' && ! in_array((int) $data['question_count'], [2, 3, 4], true)) {
+            throw ValidationException::withMessages([
+                'question_count' => 'Paket cerita hanya mendukung 2–4 soal.',
+            ]);
+        }
+        $theme = trim($data['theme'] ?? '');
+        if ($generationFormat === 'story' && $theme === '') {
+            throw ValidationException::withMessages(['theme' => 'Tema cerita wajib diisi.']);
+        }
+        $questionStyle = $generationFormat === 'direct' ? ($data['question_style'] ?? 'direct') : 'reasoning';
+        $answerFormat = $generationFormat === 'direct' ? ($data['answer_format'] ?? 'single_choice') : 'mixed';
+        if ($answerFormat === 'mixed' && (int) $data['question_count'] < 2) {
+            throw ValidationException::withMessages([
+                'answer_format' => 'Format campuran membutuhkan minimal 2 soal.',
+            ]);
+        }
+        $useIllustration = $generationFormat === 'story' || (bool) ($data['use_illustration'] ?? false);
 
         $dailyUsage = AiGeneration::query()
             ->where('requested_by', $request->user()->id)
@@ -80,8 +154,18 @@ class AiStoryQuestionController extends Controller
         $payload = [
             'subject_id' => $subject->id,
             'subject_name' => $subject->name,
-            'theme' => $theme,
-            'paragraph_count' => (int) $data['paragraph_count'],
+            'format' => $generationFormat,
+            'root_competency_id' => $selectedCompetency?->parent_id ?: $selectedCompetency?->id,
+            'competency_id' => $selectedCompetency?->id,
+            'competency_code' => $selectedCompetency?->code,
+            'competency_name' => $selectedCompetency?->name,
+            'question_blueprints' => $questionBlueprints->map->only(['id', 'code', 'name', 'description'])->values()->all(),
+            'theme' => $theme !== '' ? $theme : ($selectedCompetency?->name ?? $subject->name),
+            'example_question' => $generationFormat === 'direct' && $theme !== '' ? $theme : null,
+            'question_style' => $questionStyle,
+            'answer_format' => $answerFormat,
+            'use_illustration' => $useIllustration,
+            'paragraph_count' => $generationFormat === 'story' ? (int) ($data['paragraph_count'] ?? 3) : 0,
             'question_count' => (int) $data['question_count'],
         ];
         $generation = AiGeneration::create([
@@ -98,8 +182,62 @@ class AiStoryQuestionController extends Controller
         $auditLogger->log($request, 'story_questions.requested', $generation, $payload);
         GenerateStoryQuestions::dispatch($generation->id);
 
-        return to_route('story-questions.show', $generation)
-            ->with('success', 'Tema diterima. AI sedang membuat cerita dan 2–4 soal draft.');
+        return to_route($generationFormat === 'story' ? 'story-questions.show' : 'ai-questions.show', $generation)
+            ->with('success', $generationFormat === 'story'
+                ? 'Tema diterima. AI sedang membuat cerita dan 2–4 soal draft.'
+                : 'Topik diterima. AI sedang membuat soal draft tanpa mewajibkan cerita.');
+    }
+
+    private function selectedCompetency(Request $request, Subject $subject, array $data): ?Competency
+    {
+        $rootId = (int) ($data['root_competency_id'] ?? 0);
+        if ($rootId === 0) {
+            return null;
+        }
+
+        $available = fn ($query) => $query
+            ->whereNull('school_id')
+            ->orWhere('school_id', $request->user()->school_id);
+        $root = Competency::query()
+            ->whereKey($rootId)
+            ->where('subject_id', $subject->id)
+            ->whereNull('parent_id')
+            ->where($available)
+            ->first();
+
+        if (! $root) {
+            throw ValidationException::withMessages([
+                'root_competency_id' => 'Kompetensi tidak tersedia untuk mata pelajaran yang dipilih.',
+            ]);
+        }
+
+        if ($subject->code === 'BIND') {
+            return $root;
+        }
+
+        $selectedId = (int) ($data['competency_id'] ?? $root->id);
+        $selected = Competency::query()
+            ->whereKey($selectedId)
+            ->where('subject_id', $subject->id)
+            ->where($available)
+            ->where(fn ($query) => $query
+                ->whereKey($root->id)
+                ->orWhere('parent_id', $root->id))
+            ->first();
+
+        if (! $selected) {
+            throw ValidationException::withMessages([
+                'competency_id' => 'Subkompetensi tidak berada di bawah kompetensi yang dipilih.',
+            ]);
+        }
+
+        if ($selected->is($root) && $root->children()->exists()) {
+            throw ValidationException::withMessages([
+                'competency_id' => 'Pilih subkompetensi yang akan digunakan oleh AI.',
+            ]);
+        }
+
+        return $selected;
     }
 
     public function show(
@@ -137,6 +275,7 @@ class AiStoryQuestionController extends Controller
             ->whereIn('id', $questionIds)
             ->with([
                 'competency:id,code,name,grade_level',
+                'questionBlueprint:id,code,name',
                 'author:id,name',
                 'approver:id,name',
                 'options',
@@ -146,15 +285,19 @@ class AiStoryQuestionController extends Controller
             ->values();
 
         return Inertia::render('Questions/StoryShow', [
-            'generation' => $generation->only([
-                'id', 'status', 'model', 'request_payload', 'result_payload',
-                'input_tokens', 'output_tokens', 'cost_microusd', 'error', 'created_at',
-            ]),
+            'generation' => [
+                ...$generation->only(['id', 'status', 'request_payload', 'result_payload', 'created_at']),
+                'error' => $generation->status === AiGenerationStatus::Failed
+                    ? 'Soal belum berhasil dibuat. Silakan coba proses kembali.'
+                    : null,
+            ],
             'questions' => $questions,
-            'illustration' => $illustration?->only([
-                'id', 'status', 'model', 'result_payload',
-                'cost_microusd', 'error', 'created_at',
-            ]),
+            'illustration' => $illustration ? [
+                ...$illustration->only(['id', 'status', 'created_at']),
+                'error' => $illustration->status === AiGenerationStatus::Failed
+                    ? 'Ilustrasi belum berhasil dibuat. Silakan coba kembali.'
+                    : null,
+            ] : null,
         ]);
     }
 
@@ -195,6 +338,12 @@ class AiStoryQuestionController extends Controller
         AuditLogger $auditLogger,
     ): RedirectResponse {
         $this->ensureAccessible($request, $generation);
+
+        if (data_get($generation->request_payload, 'format') === 'direct') {
+            throw ValidationException::withMessages([
+                'generation' => 'Soal langsung tidak menggunakan bundle. Verifikasi setiap soal secara terpisah.',
+            ]);
+        }
 
         if ($generation->status !== AiGenerationStatus::Completed) {
             throw ValidationException::withMessages([

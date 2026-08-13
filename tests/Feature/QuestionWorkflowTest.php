@@ -26,6 +26,27 @@ class QuestionWorkflowTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_teacher_can_open_manual_and_ai_question_creation_flows(): void
+    {
+        [$teacher, $competency] = $this->teacherAndCompetency();
+
+        $this->actingAs($teacher)
+            ->get(route('questions.index'))
+            ->assertInertia(fn (Assert $page) => $page->component('Questions/Index'));
+
+        $this->actingAs($teacher)
+            ->get(route('questions.create', ['subject_id' => $competency->subject_id]))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Questions/Create')
+                ->where('selectedSubjectId', $competency->subject_id));
+
+        $this->actingAs($teacher)
+            ->get(route('story-questions.create', ['subject_id' => $competency->subject_id]))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Questions/StoryCreate')
+                ->where('selectedSubjectId', $competency->subject_id));
+    }
+
     public function test_teacher_can_create_and_publish_a_question(): void
     {
         [$teacher, $competency] = $this->teacherAndCompetency();
@@ -39,7 +60,7 @@ class QuestionWorkflowTest extends TestCase
             'prompt' => 'Pukul berapa perpustakaan tutup?',
             'explanation' => 'Informasi tertulis langsung pada stimulus.',
             'difficulty' => 1,
-            'grade_level' => 5,
+            'grade_level' => 6,
             'cognitive_level' => 'menemukan informasi',
             'options' => [
                 ['content' => 'Pukul satu', 'is_correct' => false],
@@ -66,6 +87,7 @@ class QuestionWorkflowTest extends TestCase
             'school_id' => $teacher->school_id,
             'code' => 'MAT',
             'name' => 'Matematika',
+            'ai_question_format' => 'direct',
         ]);
 
         $this->actingAs($teacher)
@@ -121,7 +143,7 @@ class QuestionWorkflowTest extends TestCase
                 ->component('Questions/Show')
                 ->where('question.author.name', 'Guru')
                 ->where('question.approver.name', 'Guru')
-                ->where('question.illustration_url', fn ($url): bool => is_string($url) && str_contains($url, $imagePath)));
+                ->where('question.illustration_url', "/storage/{$imagePath}"));
     }
 
     public function test_teacher_can_create_a_matching_question_with_distractor(): void
@@ -137,7 +159,7 @@ class QuestionWorkflowTest extends TestCase
             'prompt' => 'Pasangkan penjelasan dengan tokoh yang tepat.',
             'explanation' => 'Setiap penjelasan memiliki satu pasangan tokoh.',
             'difficulty' => 2,
-            'grade_level' => 5,
+            'grade_level' => 6,
             'cognitive_level' => 'interpretasi',
             'options' => [],
             'accepted_answers' => [],
@@ -184,7 +206,7 @@ class QuestionWorkflowTest extends TestCase
             'prompt' => 'Pilih Perlu atau Tidak Perlu untuk setiap pernyataan.',
             'explanation' => 'Setiap pernyataan memiliki tepat satu kategori jawaban.',
             'difficulty' => 2,
-            'grade_level' => 5,
+            'grade_level' => 6,
             'cognitive_level' => 'interpretasi',
             'options' => [],
             'accepted_answers' => [],
@@ -279,12 +301,336 @@ class QuestionWorkflowTest extends TestCase
             ->assertOk();
     }
 
+    public function test_bahasa_indonesia_ai_uses_the_main_competency_instead_of_subcompetency(): void
+    {
+        config()->set('ai.driver', 'fake');
+        config()->set('queue.default', 'sync');
+        [$teacher, $subcompetency] = $this->teacherAndCompetency();
+        $rootCompetency = Competency::create([
+            'school_id' => $teacher->school_id,
+            'subject_id' => $subcompetency->subject_id,
+            'code' => 'LIT6-ROOT',
+            'domain' => 'Literasi',
+            'name' => 'Memahami teks',
+            'grade_level' => 6,
+        ]);
+        $subcompetency->update(['parent_id' => $rootCompetency->id]);
+
+        $this->actingAs($teacher)
+            ->get(route('story-questions.create', ['subject_id' => $subcompetency->subject_id]))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Questions/StoryCreate')
+                ->has('competencies', 2));
+
+        $this->actingAs($teacher)->post(route('story-questions.store'), [
+            'subject_id' => $subcompetency->subject_id,
+            'root_competency_id' => $rootCompetency->id,
+            'competency_id' => $subcompetency->id,
+            'theme' => 'membaca informasi jadwal perpustakaan',
+            'paragraph_count' => 2,
+            'question_count' => 3,
+        ])->assertRedirect();
+
+        $generation = AiGeneration::firstOrFail();
+        $this->assertSame($rootCompetency->id, $generation->request_payload['root_competency_id']);
+        $this->assertSame($rootCompetency->id, $generation->request_payload['competency_id']);
+        $this->assertSame($rootCompetency->name, $generation->request_payload['competency_name']);
+        $this->assertTrue(Question::query()
+            ->whereIn('id', $generation->result_payload['question_ids'])
+            ->get()
+            ->every(fn (Question $question): bool => $question->competency_id === $rootCompetency->id));
+    }
+
+    public function test_mathematics_ai_creates_direct_questions_without_forcing_a_story(): void
+    {
+        config()->set('ai.driver', 'fake');
+        config()->set('ai.image.disk', 'public');
+        config()->set('queue.default', 'sync');
+        Storage::fake('public');
+        [$teacher] = $this->teacherAndCompetency();
+        $subject = Subject::create([
+            'school_id' => $teacher->school_id,
+            'code' => 'MAT',
+            'name' => 'Matematika',
+            'ai_question_format' => 'direct',
+        ]);
+        $competency = Competency::create([
+            'school_id' => $teacher->school_id,
+            'subject_id' => $subject->id,
+            'code' => 'NUM6-BIL',
+            'domain' => 'Bilangan',
+            'name' => 'Operasi hitung bilangan',
+            'grade_level' => 6,
+        ]);
+
+        $this->actingAs($teacher)
+            ->get(route('story-questions.create', ['subject_id' => $subject->id]))
+            ->assertRedirect(route('ai-questions.create', ['subject_id' => $subject->id]));
+
+        $this->actingAs($teacher)
+            ->get(route('ai-questions.create', ['subject_id' => $subject->id]))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Questions/StoryCreate')
+                ->where('generationFormat', 'direct')
+                ->where('selectedSubjectId', $subject->id));
+
+        $response = $this->actingAs($teacher)->post(route('ai-questions.store'), [
+            'subject_id' => $subject->id,
+            'root_competency_id' => $competency->id,
+            'competency_id' => $competency->id,
+            'theme' => 'Jika 3 kotak masing-masing berisi 4 pensil, berapa jumlah seluruh pensil?',
+            'question_style' => 'reasoning',
+            'use_illustration' => true,
+            'question_count' => 1,
+        ]);
+
+        $generation = AiGeneration::query()->latest('id')->firstOrFail();
+        $response->assertRedirect(route('ai-questions.show', $generation));
+        $this->assertSame('direct', $generation->request_payload['format']);
+        $this->assertSame(0, $generation->request_payload['paragraph_count']);
+        $this->assertSame('reasoning', $generation->request_payload['question_style']);
+        $this->assertTrue($generation->request_payload['use_illustration']);
+        $this->assertSame('Jika 3 kotak masing-masing berisi 4 pensil, berapa jumlah seluruh pensil?', $generation->request_payload['example_question']);
+        $this->assertSame('direct', $generation->result_payload['format']);
+        $this->assertSame(1, $generation->result_payload['question_count']);
+        $this->assertNull($generation->result_payload['story']);
+        $this->assertNotEmpty($generation->result_payload['visual_description']);
+        $this->assertTrue(Question::query()
+            ->whereIn('id', $generation->result_payload['question_ids'])
+            ->get()
+            ->every(fn (Question $question): bool => $question->competency_id === $competency->id
+                && $question->metadata['generation_format'] === 'direct'));
+
+        $this->actingAs($teacher)
+            ->post(route('ai-questions.illustration.store', $generation))
+            ->assertRedirect();
+
+        $illustration = AiGeneration::query()
+            ->where('type', AiGenerationType::StoryIllustration)
+            ->firstOrFail();
+        $this->assertSame(AiGenerationStatus::Completed, $illustration->status);
+        $this->assertSame('direct', $illustration->request_payload['format']);
+        $this->assertTrue(Question::query()
+            ->whereIn('id', $generation->result_payload['question_ids'])
+            ->get()
+            ->every(fn (Question $question): bool => filled(data_get($question->metadata, 'illustration.path'))));
+
+        $this->actingAs($teacher)
+            ->get(route('ai-questions.show', $generation))
+            ->assertInertia(fn (Assert $page) => $page
+                ->missing('generation.model')
+                ->missing('generation.input_tokens')
+                ->missing('generation.output_tokens')
+                ->missing('generation.cost_microusd')
+                ->missing('illustration.provider')
+                ->missing('illustration.model')
+                ->missing('illustration.cost_microusd'));
+
+        $generatedQuestion = Question::query()->findOrFail($generation->result_payload['question_ids'][0]);
+        $this->actingAs($teacher)
+            ->from(route('ai-questions.show', $generation))
+            ->put(route('generated-questions.inline-update', [$generation, $generatedQuestion]), [
+                'stimulus' => 'Tiga kelompok masing-masing berisi empat benda.',
+                'prompt' => 'Berapa hasil perhitungan yang sudah diperbaiki?',
+                'explanation' => 'Jumlah benda adalah tiga kali empat, yaitu dua belas.',
+                'options' => [
+                    ['content' => '12', 'is_correct' => true],
+                    ['content' => '7', 'is_correct' => false],
+                ],
+                'accepted_answers' => [],
+                'matching_pairs' => [],
+                'matching_distractors' => [],
+                'matrix_columns' => [],
+                'matrix_rows' => [],
+            ])
+            ->assertSessionHasNoErrors()
+            ->assertRedirect(route('ai-questions.show', $generation));
+
+        $generatedQuestion->refresh();
+        $this->assertSame('Berapa hasil perhitungan yang sudah diperbaiki?', $generatedQuestion->prompt);
+        $this->assertSame('Jumlah benda adalah tiga kali empat, yaitu dua belas.', $generatedQuestion->explanation);
+        $this->assertSame('12', $generatedQuestion->options()->where('is_correct', true)->firstOrFail()->content);
+
+        $this->actingAs($teacher)->post(route('ai-questions.store'), [
+            'subject_id' => $subject->id,
+            'root_competency_id' => $competency->id,
+            'competency_id' => $competency->id,
+            'question_style' => 'direct',
+            'use_illustration' => false,
+            'question_count' => 9,
+        ])->assertRedirect();
+
+        $withoutExample = AiGeneration::query()
+            ->where('type', AiGenerationType::StoryQuestions)
+            ->latest('id')
+            ->firstOrFail();
+        $this->assertNull($withoutExample->request_payload['example_question']);
+        $this->assertSame($competency->name, $withoutExample->request_payload['theme']);
+        $this->assertSame(9, $withoutExample->result_payload['question_count']);
+    }
+
+    public function test_teacher_can_choose_ai_answer_format_for_direct_questions(): void
+    {
+        config()->set('ai.driver', 'fake');
+        config()->set('queue.default', 'sync');
+        [$teacher] = $this->teacherAndCompetency();
+        $subject = Subject::create([
+            'school_id' => $teacher->school_id,
+            'code' => 'MAT-FORMAT',
+            'name' => 'Matematika Format',
+            'ai_question_format' => 'direct',
+        ]);
+        $competency = Competency::create([
+            'school_id' => $teacher->school_id,
+            'subject_id' => $subject->id,
+            'code' => 'NUM6-FORMAT',
+            'domain' => 'Bilangan',
+            'name' => 'Operasi bilangan',
+            'grade_level' => 6,
+        ]);
+
+        $formats = [
+            'single_choice' => ['single_choice'],
+            'true_false' => ['category_matrix'],
+            'multiple_choice' => ['multiple_choice'],
+            'mixed' => ['single_choice', 'multiple_choice', 'category_matrix'],
+        ];
+
+        foreach ($formats as $answerFormat => $expectedTypes) {
+            $questionCount = $answerFormat === 'mixed' ? 3 : 1;
+            $this->actingAs($teacher)->post(route('ai-questions.store'), [
+                'subject_id' => $subject->id,
+                'root_competency_id' => $competency->id,
+                'competency_id' => $competency->id,
+                'question_style' => 'direct',
+                'answer_format' => $answerFormat,
+                'use_illustration' => false,
+                'question_count' => $questionCount,
+            ])->assertSessionHasNoErrors()->assertRedirect();
+
+            $generation = AiGeneration::query()->latest('id')->firstOrFail();
+            $actualTypes = Question::query()
+                ->whereIn('id', $generation->result_payload['question_ids'])
+                ->orderBy('id')
+                ->get(['id', 'type'])
+                ->pluck('type')
+                ->map(fn ($type): string => $type->value)
+                ->all();
+
+            $this->assertSame($answerFormat, $generation->request_payload['answer_format']);
+            $this->assertSame($expectedTypes, $actualTypes);
+        }
+
+        $this->actingAs($teacher)->post(route('ai-questions.store'), [
+            'subject_id' => $subject->id,
+            'root_competency_id' => $competency->id,
+            'competency_id' => $competency->id,
+            'answer_format' => 'mixed',
+            'question_count' => 1,
+        ])->assertSessionHasErrors('answer_format');
+    }
+
+    public function test_direct_ai_questions_are_listed_and_verified_individually(): void
+    {
+        config()->set('ai.driver', 'fake');
+        config()->set('queue.default', 'sync');
+        [$teacher] = $this->teacherAndCompetency();
+        $subject = Subject::create([
+            'school_id' => $teacher->school_id,
+            'code' => 'MAT-MANDIRI',
+            'name' => 'Matematika Mandiri',
+            'ai_question_format' => 'direct',
+        ]);
+        $competency = Competency::create([
+            'school_id' => $teacher->school_id,
+            'subject_id' => $subject->id,
+            'code' => 'NUM6-MANDIRI',
+            'domain' => 'Bilangan',
+            'name' => 'Operasi hitung',
+            'grade_level' => 6,
+        ]);
+
+        $this->actingAs($teacher)->post(route('ai-questions.store'), [
+            'subject_id' => $subject->id,
+            'root_competency_id' => $competency->id,
+            'competency_id' => $competency->id,
+            'answer_format' => 'single_choice',
+            'question_count' => 3,
+        ])->assertSessionHasNoErrors();
+
+        $generation = AiGeneration::query()->latest('id')->firstOrFail();
+        $questionIds = $generation->result_payload['question_ids'];
+
+        $this->actingAs($teacher)
+            ->get(route('questions.index', ['subject_id' => $subject->id]))
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('questions.data', 3)
+                ->where('questions.data', fn ($questions): bool => collect($questions)
+                    ->pluck('id')
+                    ->sort()
+                    ->values()
+                    ->all() === collect($questionIds)->sort()->values()->all()));
+
+        $firstQuestion = Question::query()->findOrFail($questionIds[0]);
+        $this->actingAs($teacher)
+            ->from(route('ai-questions.show', $generation))
+            ->post(route('questions.approve', $firstQuestion))
+            ->assertRedirect(route('ai-questions.show', $generation));
+
+        $this->assertSame(QuestionStatus::Published, $firstQuestion->fresh()->status);
+        $this->assertSame(2, Question::query()->whereIn('id', $questionIds)->where('status', QuestionStatus::Draft)->count());
+
+        $deletedQuestion = Question::query()->findOrFail($questionIds[1]);
+        $this->actingAs($teacher)
+            ->from(route('ai-questions.show', $generation))
+            ->delete(route('generated-questions.destroy', [$generation, $deletedQuestion]))
+            ->assertRedirect(route('ai-questions.show', $generation));
+        $this->assertDatabaseMissing('questions', ['id' => $deletedQuestion->id]);
+        $this->assertNotContains($deletedQuestion->id, $generation->fresh()->result_payload['question_ids']);
+        $this->assertSame(2, $generation->fresh()->result_payload['question_count']);
+
+        $this->actingAs($teacher)
+            ->post(route('ai-questions.publish', $generation))
+            ->assertSessionHasErrors('generation');
+    }
+
+    public function test_duplicate_check_blocks_verification_of_a_highly_similar_question(): void
+    {
+        [$teacher, $competency] = $this->teacherAndCompetency();
+        $source = $this->question($teacher, $competency);
+        $duplicate = $this->question($teacher, $competency);
+        $duplicate->update([
+            'status' => QuestionStatus::Draft,
+            'title' => 'Soal duplikat',
+            'prompt' => $source->prompt,
+            'stimulus' => $source->stimulus,
+        ]);
+
+        $this->actingAs($teacher)
+            ->postJson(route('questions.duplicate-check', $duplicate))
+            ->assertOk()
+            ->assertJsonPath('blocking', true)
+            ->assertJsonPath('candidates.0.id', $source->id)
+            ->assertJsonPath('candidates.0.similarity', 100);
+
+        $this->actingAs($teacher)
+            ->post(route('questions.approve', $duplicate))
+            ->assertSessionHasErrors('duplicate');
+
+        $this->assertSame(QuestionStatus::Draft, $duplicate->fresh()->status);
+    }
+
     public function test_story_question_request_requires_a_theme(): void
     {
         [$teacher, $competency] = $this->teacherAndCompetency();
 
         $this->actingAs($teacher)
-            ->post(route('story-questions.store'), ['subject_id' => $competency->subject_id, 'theme' => ''])
+            ->post(route('story-questions.store'), [
+                'subject_id' => $competency->subject_id,
+                'theme' => '',
+                'paragraph_count' => 3,
+                'question_count' => 3,
+            ])
             ->assertSessionHasErrors('theme');
     }
 
@@ -429,11 +775,21 @@ class QuestionWorkflowTest extends TestCase
             fn (Question $question): bool => data_get($question->metadata, 'illustration.path') === $path
                 && $question->illustration_url !== null,
         ));
+
+        $this->actingAs($teacher)
+            ->get(route('story-questions.show', $storyGeneration))
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('questions', 3)
+                ->where('questions', fn ($questions): bool => collect($questions)->every(
+                    fn (array $question): bool => filled($question['illustration_url'] ?? null),
+                )));
     }
 
     public function test_gemini_batch_response_is_saved_as_a_shared_illustration(): void
     {
         config()->set('ai.driver', 'gemini');
+        config()->set('ai.cloudflare.account_id', null);
+        config()->set('ai.cloudflare.api_token', null);
         config()->set('ai.gemini.api_key', 'test-key');
         config()->set('ai.image.disk', 'public');
         config()->set('ai.image.model', 'gemini-3.1-flash-lite-image');
@@ -501,6 +857,143 @@ class QuestionWorkflowTest extends TestCase
         Http::assertSentCount(2);
     }
 
+    public function test_cloudflare_free_image_is_used_before_gemini(): void
+    {
+        config()->set('ai.driver', 'gemini');
+        config()->set('ai.cloudflare.account_id', 'cloudflare-account');
+        config()->set('ai.cloudflare.api_token', 'cloudflare-token');
+        config()->set('ai.cloudflare.image_model', '@cf/black-forest-labs/flux-1-schnell');
+        config()->set('ai.image.disk', 'public');
+        Storage::fake('public');
+        [$teacher, $competency] = $this->teacherAndCompetency();
+        $question = $this->question($teacher, $competency);
+        $image = UploadedFile::fake()->image('cloudflare.jpg', 1024, 576);
+        $generation = AiGeneration::create([
+            'school_id' => $teacher->school_id,
+            'requested_by' => $teacher->id,
+            'source_question_id' => $question->id,
+            'type' => AiGenerationType::StoryIllustration,
+            'status' => AiGenerationStatus::Pending,
+            'provider' => 'image-router',
+            'model' => '@cf/black-forest-labs/flux-1-schnell',
+            'input_hash' => hash('sha256', 'cloudflare-image-test'),
+            'request_payload' => [
+                'question_ids' => [$question->id],
+                'theme' => 'pecahan buah',
+                'prompt' => 'Buat ilustrasi matematika dengan kelompok buah.',
+            ],
+        ]);
+
+        Http::fake([
+            'api.cloudflare.com/*' => Http::response([
+                'success' => true,
+                'result' => ['image' => base64_encode(file_get_contents($image->getPathname()))],
+            ]),
+        ]);
+
+        app(StoryIllustrationService::class)->submit($generation);
+        $generation->refresh();
+        $question->refresh();
+
+        $this->assertSame(AiGenerationStatus::Completed, $generation->status);
+        $this->assertSame('cloudflare', $generation->provider);
+        $this->assertSame(0, $generation->cost_microusd);
+        $this->assertFalse($generation->result_payload['fallback_used']);
+        Storage::disk('public')->assertExists($generation->result_payload['image_path']);
+        $this->assertSame($generation->result_payload['image_path'], data_get($question->metadata, 'illustration.path'));
+        Http::assertSentCount(1);
+    }
+
+    public function test_precise_math_diagram_is_rendered_locally_before_cloudflare(): void
+    {
+        config()->set('ai.driver', 'gemini');
+        config()->set('ai.cloudflare.account_id', 'cloudflare-account');
+        config()->set('ai.cloudflare.api_token', 'cloudflare-token');
+        config()->set('ai.image.disk', 'public');
+        Storage::fake('public');
+        Http::fake();
+        [$teacher, $competency] = $this->teacherAndCompetency();
+        $question = $this->question($teacher, $competency);
+        $generation = AiGeneration::create([
+            'school_id' => $teacher->school_id,
+            'requested_by' => $teacher->id,
+            'source_question_id' => $question->id,
+            'type' => AiGenerationType::StoryIllustration,
+            'status' => AiGenerationStatus::Pending,
+            'provider' => 'image-router',
+            'model' => '@cf/black-forest-labs/flux-1-schnell',
+            'input_hash' => hash('sha256', 'precise-math-diagram-test'),
+            'request_payload' => [
+                'question_ids' => [$question->id],
+                'theme' => 'pecahan senilai',
+                'visual_spec' => [
+                    'type' => 'fraction_models',
+                    'items' => [
+                        ['shape' => 'circle', 'total_parts' => 4, 'shaded_parts' => 2],
+                        ['shape' => 'circle', 'total_parts' => 8, 'shaded_parts' => 4],
+                    ],
+                ],
+            ],
+        ]);
+
+        app(StoryIllustrationService::class)->submit($generation);
+        $generation->refresh();
+        $question->refresh();
+
+        $this->assertSame(AiGenerationStatus::Completed, $generation->status);
+        $this->assertSame('local-svg', $generation->provider);
+        $this->assertSame('deterministic-math-svg-v1', $generation->model);
+        $this->assertSame('image/svg+xml', $generation->result_payload['mime_type']);
+        $this->assertSame(0, $generation->cost_microusd);
+        Storage::disk('public')->assertExists($generation->result_payload['image_path']);
+        $svg = Storage::disk('public')->get($generation->result_payload['image_path']);
+        $this->assertSame(12, substr_count($svg, '<path'));
+        $this->assertSame($generation->result_payload['image_path'], data_get($question->metadata, 'illustration.path'));
+        Http::assertNothingSent();
+    }
+
+    public function test_gemini_is_used_when_cloudflare_free_request_fails(): void
+    {
+        config()->set('ai.driver', 'gemini');
+        config()->set('ai.cloudflare.account_id', 'cloudflare-account');
+        config()->set('ai.cloudflare.api_token', 'cloudflare-token');
+        config()->set('ai.gemini.api_key', 'gemini-key');
+        config()->set('ai.image.model', 'gemini-3.1-flash-lite-image');
+        [$teacher, $competency] = $this->teacherAndCompetency();
+        $question = $this->question($teacher, $competency);
+        $generation = AiGeneration::create([
+            'school_id' => $teacher->school_id,
+            'requested_by' => $teacher->id,
+            'source_question_id' => $question->id,
+            'type' => AiGenerationType::StoryIllustration,
+            'status' => AiGenerationStatus::Pending,
+            'provider' => 'image-router',
+            'model' => '@cf/black-forest-labs/flux-1-schnell',
+            'input_hash' => hash('sha256', 'cloudflare-fallback-test'),
+            'request_payload' => [
+                'question_ids' => [$question->id],
+                'theme' => 'pecahan buah',
+                'prompt' => 'Buat ilustrasi matematika dengan kelompok buah.',
+            ],
+        ]);
+
+        Http::fakeSequence()
+            ->push(['success' => false, 'errors' => [['message' => 'Free allocation exhausted']]], 429)
+            ->push([
+                'name' => 'batches/gemini-fallback',
+                'metadata' => ['state' => 'JOB_STATE_PENDING'],
+            ]);
+
+        app(StoryIllustrationService::class)->submit($generation);
+        $generation->refresh();
+
+        $this->assertSame(AiGenerationStatus::Processing, $generation->status);
+        $this->assertSame('gemini', $generation->provider);
+        $this->assertTrue($generation->result_payload['fallback_used']);
+        $this->assertSame('batches/gemini-fallback', $generation->result_payload['batch_name']);
+        Http::assertSentCount(2);
+    }
+
     public function test_story_question_request_rejects_unsupported_counts(): void
     {
         [$teacher, $competency] = $this->teacherAndCompetency();
@@ -509,10 +1002,28 @@ class QuestionWorkflowTest extends TestCase
             ->post(route('story-questions.store'), [
                 'subject_id' => $competency->subject_id,
                 'theme' => 'kegiatan sekolah',
-                'paragraph_count' => 6,
+                'paragraph_count' => 3,
                 'question_count' => 5,
             ])
-            ->assertSessionHasErrors(['paragraph_count', 'question_count']);
+            ->assertSessionHasErrors('question_count');
+
+        $this->actingAs($teacher)
+            ->post(route('story-questions.store'), [
+                'subject_id' => $competency->subject_id,
+                'theme' => 'kegiatan sekolah',
+                'paragraph_count' => 6,
+                'question_count' => 3,
+            ])
+            ->assertSessionHasErrors('paragraph_count');
+
+        $this->actingAs($teacher)
+            ->post(route('story-questions.store'), [
+                'subject_id' => $competency->subject_id,
+                'theme' => 'kegiatan sekolah',
+                'paragraph_count' => 2,
+                'question_count' => 1,
+            ])
+            ->assertSessionHasErrors('question_count');
     }
 
     public function test_teacher_can_retry_a_failed_story_question_request(): void
@@ -608,7 +1119,7 @@ class QuestionWorkflowTest extends TestCase
         [$teacher] = $this->teacherAndCompetency();
         $csv = implode("\n", [
             'competency_code,type,title,stimulus,prompt,explanation,difficulty,grade_level,cognitive_level,option_a,option_b,option_c,option_d,option_e,option_f,correct_answers,accepted_answers',
-            'LIT5-INFO,single_choice,Soal impor,Stimulus impor,Pertanyaan dari impor?,Pembahasan,1,5,informasi,Jawaban A,Jawaban B,,,,,B,',
+            'LIT6-INFO,single_choice,Soal impor,Stimulus impor,Pertanyaan dari impor?,Pembahasan,1,6,informasi,Jawaban A,Jawaban B,,,,,B,',
         ]);
 
         $this->actingAs($teacher)
@@ -633,7 +1144,7 @@ class QuestionWorkflowTest extends TestCase
             'email' => 'murid-test@example.com',
             'password' => 'password',
             'role' => UserRole::Student,
-            'grade_level' => 5,
+            'grade_level' => 6,
             'email_verified_at' => now(),
         ]);
 
@@ -657,11 +1168,12 @@ class QuestionWorkflowTest extends TestCase
                 'school_id' => $school->id,
                 'code' => 'BIND',
                 'name' => 'Bahasa Indonesia',
+                'ai_question_format' => 'story',
             ])->id,
-            'code' => 'LIT5-INFO',
+            'code' => 'LIT6-INFO',
             'domain' => 'Literasi',
             'name' => 'Menemukan informasi',
-            'grade_level' => 5,
+            'grade_level' => 6,
         ]);
 
         return [$teacher, $competency];
@@ -679,7 +1191,7 @@ class QuestionWorkflowTest extends TestCase
             'stimulus' => 'Sebuah stimulus singkat.',
             'prompt' => 'Manakah jawaban yang benar?',
             'difficulty' => 1,
-            'grade_level' => 5,
+            'grade_level' => 6,
         ]);
         $question->options()->createMany([
             ['label' => 'A', 'content' => 'Benar', 'is_correct' => true, 'position' => 1],
@@ -700,7 +1212,7 @@ class QuestionWorkflowTest extends TestCase
             'prompt' => $prompt,
             'explanation' => 'Pembahasan diperbarui.',
             'difficulty' => 2,
-            'grade_level' => 5,
+            'grade_level' => 6,
             'cognitive_level' => 'menemukan informasi',
             'options' => [
                 ['content' => 'Jawaban benar', 'is_correct' => true],

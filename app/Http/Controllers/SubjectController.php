@@ -32,6 +32,7 @@ class SubjectController extends Controller
                 'code' => $subject->code,
                 'name' => $subject->name,
                 'description' => $subject->description,
+                'ai_question_format' => $subject->ai_question_format,
                 'competencies_count' => $subject->competencies_count,
                 'questions_count' => $subject->questions_count,
                 'can_manage' => $subject->school_id === $schoolId,
@@ -103,6 +104,7 @@ class SubjectController extends Controller
             ],
             'name' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:2000'],
+            'ai_question_format' => ['required', Rule::in(['direct', 'story'])],
         ], [
             'code.regex' => 'Kode hanya boleh berisi huruf kapital, angka, titik, garis bawah, dan tanda hubung.',
         ]);

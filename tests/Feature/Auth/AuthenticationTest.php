@@ -81,7 +81,7 @@ class AuthenticationTest extends TestCase
         $response->assertRedirect(route('dashboard', absolute: false));
         $this->assertSame('Budi Santoso', $student->name);
         $this->assertSame(UserRole::Student, $student->role);
-        $this->assertSame(5, $student->grade_level);
+        $this->assertSame(6, $student->grade_level);
         $this->assertNotNull($student->email_verified_at);
         $this->assertNotNull($student->last_login_at);
         $this->assertDatabaseHas('audit_logs', [
@@ -103,7 +103,7 @@ class AuthenticationTest extends TestCase
             'school_id' => $school->id,
             'role' => UserRole::Student,
             'student_identifier' => '0012345679',
-            'grade_level' => 5,
+            'grade_level' => 6,
             'is_active' => true,
         ]);
 

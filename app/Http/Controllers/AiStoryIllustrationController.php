@@ -19,9 +19,11 @@ class AiStoryIllustrationController extends Controller
         AiGeneration $generation,
         StoryIllustrationService $service,
     ): RedirectResponse {
+        $format = data_get($generation->request_payload, 'format', 'story');
         abort_unless(
             $generation->school_id === $request->user()->school_id
             && $generation->type === AiGenerationType::StoryQuestions
+            && ($format === 'story' || data_get($generation->request_payload, 'use_illustration') === true)
             && $generation->status === AiGenerationStatus::Completed,
             404,
         );
@@ -61,25 +63,47 @@ class AiStoryIllustrationController extends Controller
             ]);
         }
 
+        $sourceQuestion = Question::query()
+            ->with(['competency.parent:id,code,name', 'competency.subject:id,code,name'])
+            ->findOrFail($questionIds[0]);
         $theme = (string) data_get($generation->request_payload, 'theme');
-        $story = (string) data_get($generation->result_payload, 'story');
-        $prompt = $this->prompt($theme, $story);
+        $content = $format === 'story'
+            ? (string) data_get($generation->result_payload, 'story')
+            : (string) data_get($generation->result_payload, 'visual_description');
+        $subject = $sourceQuestion->competency->subject;
+        $competency = $sourceQuestion->competency;
+        $alt = $format === 'story'
+            ? "Ilustrasi untuk soal cerita {$theme}"
+            : "Ilustrasi untuk soal {$theme}";
+        $prompt = $this->prompt(
+            $theme,
+            $content,
+            $subject?->name ?? 'Umum',
+            $competency->name,
+            $format,
+        );
         $imageGeneration = AiGeneration::create([
             'school_id' => $generation->school_id,
             'requested_by' => $request->user()->id,
             'source_question_id' => $questionIds[0],
             'type' => AiGenerationType::StoryIllustration,
             'status' => AiGenerationStatus::Pending,
-            'provider' => config('ai.driver') === 'fake' ? 'fake' : 'gemini',
-            'model' => config('ai.driver') === 'fake' ? 'deterministic-svg' : config('ai.image.model'),
+            'provider' => config('ai.driver') === 'fake' ? 'fake' : 'image-router',
+            'model' => config('ai.driver') === 'fake' ? 'deterministic-svg' : config('ai.cloudflare.image_model'),
             'input_hash' => hash('sha256', "story-illustration:{$generation->id}"),
             'request_payload' => [
                 'story_generation_id' => $generation->id,
                 'question_ids' => $questionIds,
                 'theme' => $theme,
+                'format' => $format,
+                'subject' => $subject?->name,
+                'competency' => $competency->name,
+                'parent_competency' => $competency->parent?->name,
                 'prompt' => $prompt,
                 'aspect_ratio' => '16:9',
                 'image_size' => '1K',
+                'alt' => $alt,
+                'visual_spec' => data_get($generation->result_payload, 'visual_spec'),
             ],
         ]);
 
@@ -87,24 +111,38 @@ class AiStoryIllustrationController extends Controller
             $service->submit($imageGeneration);
         } catch (Throwable) {
             return back()->withErrors([
-                'illustration' => 'Batch ilustrasi gagal dikirim. Periksa billing Gemini dan coba lagi.',
+                'illustration' => 'Ilustrasi gagal dibuat. Silakan coba lagi beberapa saat lagi.',
             ]);
         }
 
-        return back()->with('success', config('ai.driver') === 'fake'
-            ? 'Ilustrasi simulasi berhasil dibuat.'
-            : 'Ilustrasi masuk Batch API hemat. Hasil akan muncul setelah pemrosesan selesai.');
+        $imageGeneration->refresh();
+
+        return back()->with(
+            'success',
+            $imageGeneration->status === AiGenerationStatus::Completed
+                ? 'Ilustrasi berhasil dibuat.'
+                : 'Ilustrasi sedang diproses.',
+        );
     }
 
-    private function prompt(string $theme, string $story): string
+    private function prompt(string $theme, string $content, string $subject, string $competency, string $format): string
     {
+        $subjectDirection = str_contains(mb_strtolower($subject), 'matematika')
+            ? 'Karena ini soal Matematika, tampilkan objek, kelompok, ukuran, pola, diagram, atau perbandingan secara teratur dan mudah diamati. Semua kuantitas visual harus persis sesuai deskripsi. Jangan menampilkan kunci jawaban.'
+            : 'Gunakan detail visual yang membantu siswa memahami konteks tanpa memperlihatkan kunci jawaban.';
+        $contentLabel = $format === 'story' ? 'Cerita' : 'Deskripsi visual';
+
         return <<<PROMPT
-Buat satu ilustrasi edukatif rasio 16:9 untuk mendampingi soal cerita TKA siswa Indonesia.
+Buat satu ilustrasi edukatif rasio 16:9 untuk mendampingi soal TKA siswa Indonesia.
 
+Mata pelajaran: {$subject}
+Kompetensi atau subkompetensi: {$competency}
 Tema: {$theme}
-Cerita: {$story}
+{$contentLabel}: {$content}
 
-Tampilkan adegan utama cerita dengan komposisi bersih, ramah anak, inklusif, warna natural, dan detail yang membantu memahami konteks. Jangan tampilkan tulisan, huruf, angka, logo, watermark buatan, kunci jawaban, atau informasi tambahan yang tidak ada dalam cerita. Hindari elemen menakutkan dan stereotip. Gambar harus dapat dipakai bersama oleh seluruh soal dalam paket.
+{$subjectDirection}
+
+Tampilkan visual utama dalam format landscape lebar dengan komposisi bersih, ramah anak, inklusif, warna natural, dan detail yang membantu memahami soal. Hindari tulisan, logo, watermark buatan, elemen menakutkan, stereotip, dan informasi tambahan yang tidak diminta. Gambar harus dapat dipakai bersama oleh seluruh soal dalam paket.
 PROMPT;
     }
 }

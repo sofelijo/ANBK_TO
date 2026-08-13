@@ -15,7 +15,7 @@ class SchoolStudentController extends Controller
     {
         $filters = $request->validate([
             'search' => ['nullable', 'string', 'max:100'],
-            'grade' => ['nullable', 'integer', Rule::in([5, 8, 11])],
+            'grade' => ['nullable', 'integer', Rule::in([6, 9, 12])],
             'status' => ['nullable', Rule::in(['active', 'inactive'])],
         ]);
         $school = $request->user()->school()->firstOrFail();
