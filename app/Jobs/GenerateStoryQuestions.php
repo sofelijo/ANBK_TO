@@ -9,6 +9,8 @@ use App\Models\AiGeneration;
 use App\Models\Competency;
 use App\Models\Question;
 use App\Services\AI\AiManager;
+use App\Services\AI\GeometrySvgRenderer;
+use App\Services\QuestionDuplicateDetector;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Collection;
@@ -28,7 +30,7 @@ class GenerateStoryQuestions implements ShouldQueue
 
     public function __construct(public readonly int $generationId) {}
 
-    public function handle(AiManager $manager): void
+    public function handle(AiManager $manager, QuestionDuplicateDetector $duplicateDetector, GeometrySvgRenderer $geometryRenderer): void
     {
         $generation = AiGeneration::with('requester')->findOrFail($this->generationId);
         $generation->update(['status' => AiGenerationStatus::Processing, 'error' => null]);
@@ -49,38 +51,54 @@ class GenerateStoryQuestions implements ShouldQueue
                 'name' => $competency->name,
                 'grade_level' => $competency->grade_level,
             ])->values()->all();
+            $recentQuestions = $this->recentQuestionExamples($generation, $competencies);
+            $variationStrategy = $this->variationStrategy($generation->id);
+            $prompt = $format === 'story'
+                ? $this->prompt($theme, $paragraphCount, $questionCount, $competencyContext, $questionBlueprints->all(), $recentQuestions, $variationStrategy)
+                : $this->directPrompt(
+                    (string) data_get($generation->request_payload, 'example_question', ''),
+                    $questionCount,
+                    $competencyContext,
+                    $questionStyle,
+                    $answerFormat,
+                    $useIllustration,
+                    $questionBlueprints->all(),
+                    $recentQuestions,
+                    $variationStrategy,
+                );
+            $provider = $manager->provider();
 
-            $response = $manager->provider()->generateJson(
-                $format === 'story'
-                    ? $this->prompt($theme, $paragraphCount, $questionCount, $competencyContext, $questionBlueprints->all())
-                    : $this->directPrompt(
-                        (string) data_get($generation->request_payload, 'example_question', ''),
-                        $questionCount,
-                        $competencyContext,
-                        $questionStyle,
-                        $answerFormat,
-                        $useIllustration,
-                        $questionBlueprints->all(),
-                    ),
-                [
-                    'task' => 'story_questions',
-                    'format' => $format,
-                    'theme' => $theme,
-                    'paragraph_count' => $paragraphCount,
-                    'question_count' => $questionCount,
-                    'question_style' => $questionStyle,
-                    'answer_format' => $answerFormat,
-                    'use_illustration' => $useIllustration,
-                    'competencies' => $competencyContext,
-                    'question_blueprints' => $questionBlueprints->all(),
-                ],
-            );
+            $context = [
+                'task' => 'story_questions',
+                'format' => $format,
+                'theme' => $theme,
+                'paragraph_count' => $paragraphCount,
+                'question_count' => $questionCount,
+                'question_style' => $questionStyle,
+                'answer_format' => $answerFormat,
+                'use_illustration' => $useIllustration,
+                'competencies' => $competencyContext,
+                'question_blueprints' => $questionBlueprints->all(),
+                'variation_strategy' => $variationStrategy,
+            ];
+            $response = $provider->generateJson($prompt, $context);
+            if ($provider->name() !== 'fake'
+                && $this->hasDuplicatePrompt(data_get($response->data, 'questions', []), $recentQuestions, $duplicateDetector)) {
+                $response = $provider->generateJson(
+                    $prompt."\n\nOUTPUT SEBELUMNYA DITOLAK KARENA TERLALU MIRIP. Buat ulang dari nol dengan objek, angka, informasi yang ditanyakan, dan cara penyelesaian yang berbeda.",
+                    $context,
+                );
+            }
 
             $data = Validator::make($response->data, [
                 'title' => ['required', 'string', 'max:255'],
                 'visual_description' => ['nullable', 'string', 'max:5000'],
                 'visual_spec' => ['nullable', 'array'],
-                'visual_spec.type' => ['required_with:visual_spec', Rule::in(['fraction_models', 'object_groups'])],
+                'visual_spec.type' => ['required_with:visual_spec', Rule::in(['fraction_models', 'object_groups', 'geometry_2d'])],
+                'visual_spec.shape' => ['required_if:visual_spec.type,geometry_2d', Rule::in(GeometrySvgRenderer::SHAPES)],
+                'visual_spec.unit' => ['nullable', 'string', 'max:20'],
+                'visual_spec.dimensions' => ['required_if:visual_spec.type,geometry_2d', 'array'],
+                'visual_spec.dimensions.*' => ['numeric', 'gt:0'],
                 'visual_spec.items' => ['required_if:visual_spec.type,fraction_models', 'array', 'between:1,6'],
                 'visual_spec.items.*.shape' => ['required', Rule::in(['circle', 'rectangle'])],
                 'visual_spec.items.*.total_parts' => ['required', 'integer', 'between:1,20'],
@@ -115,6 +133,11 @@ class GenerateStoryQuestions implements ShouldQueue
                 'questions.*.matrix_rows.*.correct_column_index' => ['required', 'integer', 'between:0,3'],
             ])->validate();
 
+            if (data_get($data, 'visual_spec.type') === 'geometry_2d'
+                && ($geometryError = $geometryRenderer->validationError($data['visual_spec'])) !== null) {
+                throw ValidationException::withMessages(['visual_spec' => $geometryError]);
+            }
+
             if ($format === 'direct' && $useIllustration && trim((string) ($data['visual_description'] ?? '')) === '') {
                 throw ValidationException::withMessages([
                     'visual_description' => 'AI tidak memberikan deskripsi visual untuk ilustrasi yang diminta.',
@@ -144,6 +167,12 @@ class GenerateStoryQuestions implements ShouldQueue
             }
 
             $this->validateQuestionSet($data['questions'], $competencies);
+            if ($provider->name() !== 'fake'
+                && $this->hasDuplicatePrompt($data['questions'], $recentQuestions, $duplicateDetector)) {
+                throw ValidationException::withMessages([
+                    'questions' => 'AI masih menghasilkan soal yang terlalu mirip dengan soal lain. Silakan proses ulang.',
+                ]);
+            }
             if ($format === 'direct') {
                 $this->validateAnswerFormat($data['questions'], $answerFormat);
             }
@@ -408,13 +437,14 @@ class GenerateStoryQuestions implements ShouldQueue
     private function supportsPrecisionVisualSpec(mixed $spec): bool
     {
         return is_array($spec)
-            && in_array(data_get($spec, 'type'), ['fraction_models', 'object_groups'], true);
+            && in_array(data_get($spec, 'type'), ['fraction_models', 'object_groups', 'geometry_2d'], true);
     }
 
-    private function prompt(string $theme, int $paragraphCount, int $questionCount, array $competencies, array $questionBlueprints): string
+    private function prompt(string $theme, int $paragraphCount, int $questionCount, array $competencies, array $questionBlueprints, array $recentQuestions, string $variationStrategy): string
     {
         $competencyJson = json_encode($competencies, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
         $blueprintDirection = $this->questionBlueprintDirection($questionBlueprints);
+        $duplicateDirection = $this->duplicateDirection($recentQuestions, $variationStrategy);
 
         return <<<PROMPT
 Anda membantu guru membuat paket soal cerita try out TKA berbahasa Indonesia.
@@ -425,6 +455,8 @@ Gunakan variasi tingkat kesulitan dan proses kognitif. Soal boleh berbentuk sing
 
 {$blueprintDirection}
 
+{$duplicateDirection}
+
 Kembalikan JSON saja dengan struktur:
 {"title":"Judul cerita","story_paragraphs":["Paragraf pertama","Paragraf berikutnya"],"questions":[{"competency_code":"KODE_DARI_DAFTAR","type":"single_choice","title":"Judul internal soal","prompt":"Pertanyaan","explanation":"Pembahasan","difficulty":1,"cognitive_level":"menemukan informasi","options":[{"content":"Pilihan","is_correct":true}],"accepted_answers":[],"matching_pairs":[],"matching_distractors":[],"matrix_columns":[],"matrix_rows":[]}]}
 
@@ -433,7 +465,7 @@ Daftar kompetensi yang boleh dipilih:
 PROMPT;
     }
 
-    private function directPrompt(string $exampleQuestion, int $questionCount, array $competencies, string $questionStyle, string $answerFormat, bool $useIllustration, array $questionBlueprints): string
+    private function directPrompt(string $exampleQuestion, int $questionCount, array $competencies, string $questionStyle, string $answerFormat, bool $useIllustration, array $questionBlueprints, array $recentQuestions, string $variationStrategy): string
     {
         $competencyJson = json_encode($competencies, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
         $exampleDirection = trim($exampleQuestion) !== ''
@@ -453,6 +485,7 @@ PROMPT;
             default => 'FORMAT JAWABAN WAJIB: Semua soal harus bertipe single_choice.',
         };
         $blueprintDirection = $this->questionBlueprintDirection($questionBlueprints);
+        $duplicateDirection = $this->duplicateDirection($recentQuestions, $variationStrategy);
 
         return <<<PROMPT
 Anda membantu guru membuat soal try out TKA berbahasa Indonesia.
@@ -465,14 +498,16 @@ Buat tepat {$questionCount} variasi soal. Soal harus mengukur kompetensi yang di
 
 {$answerFormatDirection}
 
-{$illustrationDirection} Jika visual berupa model pecahan atau kelompok objek, isi visual_spec agar sistem dapat menggambar diagram secara presisi. Gunakan type fraction_models dengan items berisi shape (circle atau rectangle), total_parts, dan shaded_parts. Untuk perkalian kelompok objek, gunakan type object_groups dengan groups dan objects_per_group. Untuk visual dekoratif yang tidak membutuhkan jumlah presisi, isi visual_spec dengan null.
+{$illustrationDirection} Untuk diagram Matematika, visual_spec WAJIB terstruktur agar sistem menggambar SVG presisi. Gunakan type geometry_2d dengan shape square, rectangle, triangle, circle, trapezoid, parallelogram, rhombus, kite, atau regular_polygon; unit; dan dimensions. Nama dimensions: square=side; rectangle=length,width; triangle/parallelogram=base,height dan side opsional; circle=radius atau diameter; trapezoid=top_base,bottom_base,height dan leg opsional; rhombus/kite=diagonal_1,diagonal_2 dan side opsional; regular_polygon=sides,side. Pastikan semua ukuran konsisten secara geometris. Untuk model pecahan gunakan type fraction_models dengan items berisi shape (circle atau rectangle), total_parts, dan shaded_parts. Untuk kelompok objek gunakan type object_groups dengan groups dan objects_per_group. Untuk visual nonmatematika isi visual_spec dengan null.
 
 {$blueprintDirection}
+
+{$duplicateDirection}
 
 Gunakan variasi tingkat kesulitan dan proses kognitif. Soal boleh berbentuk single_choice, multiple_choice, short_answer, matching, atau category_matrix. Untuk single_choice berikan 4 opsi dengan tepat satu jawaban benar. Untuk multiple_choice berikan 4 opsi dan minimal satu jawaban benar. Untuk short_answer kosongkan options dan isi accepted_answers. Untuk matching kosongkan options dan accepted_answers, lalu isi matching_pairs dengan 2–5 objek left/right serta matching_distractors dengan 0–2 pilihan kanan pengecoh. Untuk category_matrix kosongkan options, isi matrix_columns dengan 2–4 label kategori, lalu isi matrix_rows dengan 2–6 pernyataan dan correct_column_index berbasis indeks mulai dari 0.
 
 Kembalikan JSON saja dengan struktur:
-{"title":"Judul paket","visual_description":"Deskripsi ilustrasi atau string kosong","visual_spec":{"type":"fraction_models","items":[{"shape":"circle","total_parts":4,"shaded_parts":2}]},"story_paragraphs":[],"questions":[{"competency_code":"KODE_DARI_DAFTAR","type":"single_choice","title":"Judul internal soal","stimulus":"Stimulus singkat atau kosong","prompt":"Pertanyaan","explanation":"Pembahasan langkah demi langkah","difficulty":1,"cognitive_level":"penerapan","options":[{"content":"Pilihan","is_correct":true}],"accepted_answers":[],"matching_pairs":[],"matching_distractors":[],"matrix_columns":[],"matrix_rows":[]}]}
+{"title":"Judul paket","visual_description":"Deskripsi ilustrasi atau string kosong","visual_spec":{"type":"geometry_2d","shape":"trapezoid","unit":"cm","dimensions":{"top_base":10,"bottom_base":20,"height":8}},"story_paragraphs":[],"questions":[{"competency_code":"KODE_DARI_DAFTAR","type":"single_choice","title":"Judul internal soal","stimulus":"Stimulus singkat atau kosong","prompt":"Pertanyaan","explanation":"Pembahasan langkah demi langkah","difficulty":1,"cognitive_level":"penerapan","options":[{"content":"Pilihan","is_correct":true}],"accepted_answers":[],"matching_pairs":[],"matching_distractors":[],"matrix_columns":[],"matrix_rows":[]}]}
 
 Kompetensi atau subkompetensi yang wajib digunakan:
 {$competencyJson}
@@ -488,5 +523,74 @@ PROMPT;
         $blueprintJson = json_encode($questionBlueprints, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
 
         return "Gunakan tipe soal berikut secara bergiliran sesuai urutan untuk setiap soal. Isi pertanyaan harus benar-benar mengukur fokus tipe soal tersebut:\n{$blueprintJson}";
+    }
+
+    private function recentQuestionExamples(AiGeneration $generation, Collection $competencies): array
+    {
+        return Question::query()
+            ->where('school_id', $generation->school_id)
+            ->whereIn('competency_id', $competencies->pluck('id'))
+            ->where('status', '!=', QuestionStatus::Archived)
+            ->latest('id')
+            ->limit(20)
+            ->pluck('prompt')
+            ->filter(fn (?string $prompt): bool => filled($prompt))
+            ->values()
+            ->all();
+    }
+
+    private function variationStrategy(int $generationId): string
+    {
+        $strategies = [
+            'Gunakan objek atau konteks yang belum dipakai dan angka yang berbeda dari soal terdahulu.',
+            'Ukur aspek lain dalam kompetensi yang sama; jangan hanya mengganti susunan kata.',
+            'Gunakan pertanyaan balik: berikan hasil dan minta siswa menemukan salah satu informasi awal.',
+            'Gunakan perbandingan dua objek atau dua kondisi yang berbeda.',
+            'Gunakan penerapan sehari-hari dengan data baru dan target pertanyaan yang berbeda.',
+            'Gunakan representasi atau bentuk lain yang masih tepat untuk kompetensi tersebut.',
+        ];
+
+        return $strategies[$generationId % count($strategies)];
+    }
+
+    private function duplicateDirection(array $recentQuestions, string $variationStrategy): string
+    {
+        $examples = json_encode($recentQuestions, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+
+        return <<<PROMPT
+ATURAN ANTI-DUPLIKASI WAJIB:
+- {$variationStrategy}
+- Setiap soal dalam output harus memiliki informasi yang ditanyakan dan cara penyelesaian yang berbeda.
+- Jangan membuat ulang soal lama hanya dengan mengganti beberapa kata.
+- Untuk Matematika, ubah kombinasi bentuk/objek, angka, operasi, atau informasi yang dicari secara bermakna.
+- Jika memakai satu ilustrasi bersama, tiap soal tetap harus menanyakan aspek yang berbeda dari ilustrasi itu.
+
+Soal yang sudah ada dan DILARANG dibuat ulang atau diparafrasekan:
+{$examples}
+PROMPT;
+    }
+
+    private function hasDuplicatePrompt(array $questions, array $recentQuestions, QuestionDuplicateDetector $detector): bool
+    {
+        $prompts = collect($questions)
+            ->pluck('prompt')
+            ->filter(fn (mixed $prompt): bool => is_string($prompt) && trim($prompt) !== '')
+            ->values();
+
+        foreach ($prompts as $index => $prompt) {
+            foreach ($recentQuestions as $recentPrompt) {
+                if ($detector->similarity($prompt, $recentPrompt) >= 0.82) {
+                    return true;
+                }
+            }
+
+            foreach ($prompts->slice($index + 1) as $otherPrompt) {
+                if ($detector->similarity($prompt, $otherPrompt) >= 0.82) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 }

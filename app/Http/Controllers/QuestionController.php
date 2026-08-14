@@ -4,9 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Enums\AiGenerationStatus;
 use App\Enums\AiGenerationType;
+use App\Enums\AssessmentStatus;
 use App\Enums\QuestionStatus;
 use App\Enums\QuestionType;
 use App\Models\AiGeneration;
+use App\Models\Assessment;
 use App\Models\Competency;
 use App\Models\Question;
 use App\Models\QuestionBlueprint;
@@ -107,6 +109,7 @@ class QuestionController extends Controller
             'subjects' => $subjects,
             'competencies' => $this->competencies($request),
             'questionBlueprints' => $this->questionBlueprints($request),
+            'assessments' => $this->assessmentsForQuestion($request),
             'selectedSubjectId' => $selectedSubjectId,
         ]);
     }
@@ -134,6 +137,9 @@ class QuestionController extends Controller
             throw $exception;
         }
         $auditLogger->log($request, 'question.created', $question);
+
+        // Attach question to target assessment if specified
+        $this->attachToAssessment($request, $question);
 
         return to_route('questions.show', $question)->with('success', 'Soal berhasil disimpan sebagai draft.');
     }
@@ -180,6 +186,7 @@ class QuestionController extends Controller
             'subjects' => $this->subjects($request),
             'competencies' => $this->competencies($request),
             'questionBlueprints' => $this->questionBlueprints($request),
+            'assessments' => $this->assessmentsForQuestion($request),
             'question' => $question,
             'returnGeneration' => $returnGeneration ? [
                 'id' => $returnGeneration->id,
@@ -235,6 +242,9 @@ class QuestionController extends Controller
         $auditLogger->log($request, $createRevision ? 'question.revision_created' : 'question.updated', $savedQuestion, [
             'revision_of_id' => $createRevision ? $question->id : null,
         ]);
+
+        // Attach (revised) question to target assessment if specified
+        $this->attachToAssessment($request, $savedQuestion);
 
         $redirect = $returnGeneration
             ? to_route(
@@ -463,6 +473,7 @@ class QuestionController extends Controller
             'matrix_rows.*.id' => ['nullable', 'uuid', 'distinct'],
             'matrix_rows.*.statement' => ['required_if:type,category_matrix', 'string', 'max:1000'],
             'matrix_rows.*.correct_column_index' => ['required_if:type,category_matrix', 'integer', 'between:0,3'],
+            'target_assessment_id' => ['nullable', 'integer', 'exists:assessments,id'],
         ]);
 
         $subjectExists = Subject::query()
@@ -736,6 +747,57 @@ class QuestionController extends Controller
                 ...$blueprint->only(['id', 'subject_id', 'code', 'name']),
                 'competency_ids' => $blueprint->competencies->pluck('id'),
             ]);
+    }
+    private function assessmentsForQuestion(Request $request): \Illuminate\Support\Collection
+    {
+        return Assessment::query()
+            ->where('school_id', $request->user()->school_id)
+            ->whereIn('status', [AssessmentStatus::Draft, AssessmentStatus::Published])
+            ->with(['questions:id,competency_id', 'questions.competency:id,parent_id,code,name'])
+            ->oldest() // oldest first — so frontend can suggest the earliest package that still needs coverage
+            ->get(['id', 'title', 'grade_level', 'subject_id', 'created_at'])
+            ->map(fn (Assessment $a): array => [
+                'id' => $a->id,
+                'title' => $a->title,
+                'grade_level' => $a->grade_level,
+                'subject_id' => $a->subject_id,
+                'created_at' => $a->created_at,
+                // competency_id (sub-competency) => count of questions already in this assessment
+                'competency_coverage' => $a->questions
+                    ->pluck('competency')
+                    ->filter()
+                    ->filter(fn ($c) => $c->parent_id !== null)
+                    ->groupBy('id')
+                    ->map->count()
+                    ->toArray(),
+            ]);
+    }
+
+    private function attachToAssessment(Request $request, Question $question): void
+    {
+        $assessmentId = (int) ($request->input('target_assessment_id') ?? 0);
+        if ($assessmentId === 0) {
+            return;
+        }
+
+        $assessment = Assessment::query()
+            ->where('school_id', $request->user()->school_id)
+            ->whereIn('status', [AssessmentStatus::Draft, AssessmentStatus::Published])
+            ->find($assessmentId);
+
+        if (! $assessment) {
+            return;
+        }
+
+        // Only attach if not already in the assessment
+        if (! $assessment->questions()->whereKey($question->id)->exists()) {
+            $nextPosition = $assessment->questions()->count() + 1;
+            $assessment->questions()->attach($question->id, [
+                'position' => $nextPosition,
+                'points' => 1,
+                'snapshot' => null,
+            ]);
+        }
     }
 
     private function ensureSameSchool(Request $request, Question $question): void

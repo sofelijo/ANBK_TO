@@ -44,12 +44,12 @@ class StudentChatController extends Controller
         }
         if ($chatService->dailyMessageCount($request->user()) >= (int) config('ai.daily_chat_limit', 20)) {
             throw ValidationException::withMessages([
-                'content' => 'Kuota chat hari ini sudah habis. Silakan lanjutkan besok.',
+                'content' => 'Kuota percakapan ASKA AI hari ini (maksimal '.(int) config('ai.daily_chat_limit', 20).' pesan/hari) sudah habis. Kuota akan direset otomatis besok pukul 00.00 WIB (tengah malam).',
             ]);
         }
 
         $room = $chatService->roomFor($request->user());
-        $sensitiveResponse = $chatService->sensitiveResponse($data['content']);
+        $sensitiveResponse = $chatService->sensitiveResponse($data['content'], $request->user());
 
         DB::transaction(function () use ($room, $request, $data, $sensitiveResponse, $manager): void {
             $room->messages()->create([

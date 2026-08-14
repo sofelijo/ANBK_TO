@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\AiGenerationStatus;
 use App\Enums\AiGenerationType;
 use App\Enums\QuestionStatus;
+use App\Enums\QuestionType;
 use App\Enums\UserRole;
 use App\Models\AiGeneration;
 use App\Models\AuditLog;
@@ -530,6 +531,91 @@ class QuestionWorkflowTest extends TestCase
         ])->assertSessionHasErrors('answer_format');
     }
 
+    public function test_real_ai_retries_when_generated_question_is_too_similar(): void
+    {
+        config()->set('ai.driver', 'gemini');
+        config()->set('ai.gemini.api_key', 'test-key');
+        config()->set('ai.groq.api_key', null);
+        config()->set('queue.default', 'sync');
+        [$teacher] = $this->teacherAndCompetency();
+        $subject = Subject::create([
+            'school_id' => $teacher->school_id,
+            'code' => 'MAT-UNIK',
+            'name' => 'Matematika',
+            'ai_question_format' => 'direct',
+        ]);
+        $competency = Competency::create([
+            'school_id' => $teacher->school_id,
+            'subject_id' => $subject->id,
+            'code' => 'LUAS-UNIK',
+            'domain' => 'Pengukuran',
+            'name' => 'Keliling dan luas bangun datar',
+            'grade_level' => 6,
+        ]);
+        Question::create([
+            'school_id' => $teacher->school_id,
+            'author_id' => $teacher->id,
+            'competency_id' => $competency->id,
+            'type' => QuestionType::SingleChoice,
+            'status' => QuestionStatus::Draft,
+            'prompt' => 'Sebuah persegi panjang memiliki panjang 12 cm dan lebar 8 cm. Berapakah luas bangun tersebut?',
+            'difficulty' => 1,
+            'grade_level' => 6,
+        ]);
+
+        $response = fn (string $prompt): array => [
+            'candidates' => [[
+                'content' => ['parts' => [['text' => json_encode([
+                    'title' => 'Paket unik',
+                    'visual_description' => '',
+                    'visual_spec' => null,
+                    'story_paragraphs' => [],
+                    'questions' => [[
+                        'competency_code' => $competency->code,
+                        'type' => 'single_choice',
+                        'title' => 'Soal luas',
+                        'stimulus' => '',
+                        'prompt' => $prompt,
+                        'explanation' => 'Pembahasan benar.',
+                        'difficulty' => 1,
+                        'cognitive_level' => 'penerapan',
+                        'options' => [
+                            ['content' => 'A', 'is_correct' => true],
+                            ['content' => 'B', 'is_correct' => false],
+                            ['content' => 'C', 'is_correct' => false],
+                            ['content' => 'D', 'is_correct' => false],
+                        ],
+                        'accepted_answers' => [],
+                        'matching_pairs' => [],
+                        'matching_distractors' => [],
+                        'matrix_columns' => [],
+                        'matrix_rows' => [],
+                    ]],
+                ], JSON_UNESCAPED_UNICODE)]]],
+            ]],
+            'usageMetadata' => ['promptTokenCount' => 10, 'candidatesTokenCount' => 20],
+        ];
+        Http::fakeSequence()
+            ->push($response('Sebuah persegi panjang mempunyai panjang 12 cm dan lebar 8 cm. Berapakah luas bangun tersebut?'))
+            ->push($response('Sebuah segitiga memiliki alas 16 cm dan tinggi 9 cm. Berapakah luas segitiga tersebut?'));
+
+        $this->actingAs($teacher)->post(route('ai-questions.store'), [
+            'subject_id' => $subject->id,
+            'root_competency_id' => $competency->id,
+            'competency_id' => $competency->id,
+            'question_style' => 'direct',
+            'answer_format' => 'single_choice',
+            'use_illustration' => false,
+            'question_count' => 1,
+        ])->assertSessionHasNoErrors()->assertRedirect();
+
+        $generation = AiGeneration::query()->latest('id')->firstOrFail();
+        $generated = Question::query()->findOrFail($generation->result_payload['question_ids'][0]);
+        $this->assertStringContainsString('segitiga', mb_strtolower($generated->prompt));
+        Http::assertSentCount(2);
+        Http::assertSent(fn ($request): bool => str_contains($request['contents'][0]['parts'][0]['text'], 'DILARANG dibuat ulang'));
+    }
+
     public function test_direct_ai_questions_are_listed_and_verified_individually(): void
     {
         config()->set('ai.driver', 'fake');
@@ -949,6 +1035,61 @@ class QuestionWorkflowTest extends TestCase
         $svg = Storage::disk('public')->get($generation->result_payload['image_path']);
         $this->assertSame(12, substr_count($svg, '<path'));
         $this->assertSame($generation->result_payload['image_path'], data_get($question->metadata, 'illustration.path'));
+        Http::assertNothingSent();
+    }
+
+    public function test_geometry_diagram_uses_specific_visual_description_without_revealing_answer(): void
+    {
+        config()->set('ai.driver', 'gemini');
+        config()->set('ai.image.disk', 'public');
+        Storage::fake('public');
+        Http::fake();
+        [$teacher, $competency] = $this->teacherAndCompetency();
+        $question = $this->question($teacher, $competency);
+        $storyGeneration = AiGeneration::create([
+            'school_id' => $teacher->school_id,
+            'requested_by' => $teacher->id,
+            'type' => AiGenerationType::StoryQuestions,
+            'status' => AiGenerationStatus::Completed,
+            'provider' => 'gemini',
+            'model' => 'test-model',
+            'input_hash' => hash('sha256', 'geometry-source-test'),
+            'request_payload' => [],
+            'result_payload' => [
+                'visual_description' => 'Sebuah persegi panjang dengan panjang 12 cm dan lebar 8 cm.',
+                'question_ids' => [$question->id],
+            ],
+        ]);
+        $generation = AiGeneration::create([
+            'school_id' => $teacher->school_id,
+            'requested_by' => $teacher->id,
+            'source_question_id' => $question->id,
+            'type' => AiGenerationType::StoryIllustration,
+            'status' => AiGenerationStatus::Pending,
+            'provider' => 'image-router',
+            'model' => 'test-model',
+            'input_hash' => hash('sha256', 'geometry-image-test'),
+            'request_payload' => [
+                'story_generation_id' => $storyGeneration->id,
+                'question_ids' => [$question->id],
+                'theme' => 'Keliling dan luas bangun datar (segitiga, segiempat, dan segi banyak)',
+                'subject' => 'Matematika',
+                'competency' => 'Keliling dan luas bangun datar',
+            ],
+        ]);
+
+        app(StoryIllustrationService::class)->submit($generation);
+        $generation->refresh();
+        $svg = Storage::disk('public')->get($generation->result_payload['image_path']);
+
+        $this->assertSame('local-svg', $generation->provider);
+        $this->assertSame('deterministic-geometry-svg-v3', $generation->model);
+        $this->assertStringContainsString('Persegi Panjang', $svg);
+        $this->assertStringContainsString('Panjang = 12 cm', $svg);
+        $this->assertStringContainsString('Lebar = 8 cm', $svg);
+        $this->assertStringNotContainsString('Segitiga', $svg);
+        $this->assertStringNotContainsString('Perhitungan', $svg);
+        $this->assertStringNotContainsString('96 cm', $svg);
         Http::assertNothingSent();
     }
 

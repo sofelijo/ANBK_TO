@@ -46,7 +46,7 @@ export default function ChatThread({ roomId, initialMessages, teacherView = fals
                     <div key={message.id} className={`flex ${student ? 'justify-end' : 'justify-start'}`}>
                         <div className={`max-w-[88%] rounded-2xl px-4 py-3 sm:max-w-[75%] ${student ? 'rounded-br-md bg-emerald-600 text-white' : message.type === 'attempt_summary' ? 'border border-indigo-200 bg-indigo-50 text-indigo-950' : message.type === 'safety' ? 'border border-amber-300 bg-amber-50 text-amber-950' : 'rounded-bl-md bg-slate-100 text-slate-800'}`}>
                             <div className="mb-1 flex flex-wrap items-center gap-2 text-xs font-semibold opacity-75">
-                                <span>{student ? (teacherView ? 'Siswa' : 'Kamu') : 'Teman Belajar AI'}</span>
+                                <span>{student ? (teacherView ? 'Siswa' : 'Kamu') : 'ASKA'}</span>
                                 {message.type === 'attempt_summary' && <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-indigo-700">Ringkasan tes</span>}
                                 {message.metadata?.needs_teacher_attention && teacherView && <span className="rounded-full bg-amber-200 px-2 py-0.5 text-amber-900">Perlu perhatian</span>}
                             </div>

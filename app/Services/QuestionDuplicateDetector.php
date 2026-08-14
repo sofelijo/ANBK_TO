@@ -57,7 +57,7 @@ class QuestionDuplicateDetector
         return $this->candidates($question)->contains('blocking', true);
     }
 
-    private function similarity(?string $left, ?string $right): float
+    public function similarity(?string $left, ?string $right): float
     {
         $leftTokens = $this->tokens($left);
         $rightTokens = $this->tokens($right);

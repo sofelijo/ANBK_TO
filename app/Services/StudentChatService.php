@@ -138,15 +138,60 @@ class StudentChatService
         return $room;
     }
 
-    public function sensitiveResponse(string $message): ?string
+    public function sensitiveResponse(string $message, ?User $user = null): ?string
     {
         $normalized = mb_strtolower($message);
+
+        // 1. Crisis / Safety Phrases
         foreach (['bunuh diri', 'mengakhiri hidup', 'menyakiti diri', 'tidak ingin hidup'] as $phrase) {
             if (str_contains($normalized, $phrase)) {
-                return 'Aku ikut prihatin kamu sedang menghadapi hal yang berat. Tolong segera ceritakan ini kepada orang dewasa yang kamu percaya, seperti orang tua, wali, guru, atau konselor sekolah. Jika kamu merasa dalam bahaya sekarang, jangan sendirian dan segera minta bantuan langsung dari orang di sekitarmu.';
+                return 'Menurut ASKA, keselamatan dan kesehatanmu adalah hal utama. ASKA ikut prihatin kamu sedang menghadapi hal yang berat. Tolong segera ceritakan ini kepada orang dewasa yang kamu percaya, seperti orang tua, wali, guru, atau konselor sekolah. Jika kamu merasa dalam bahaya sekarang, jangan sendirian dan segera minta bantuan langsung dari orang di sekitarmu.';
             }
         }
 
-        return null;
+        // 2. Censored Words Match
+        $schoolId = $user?->school_id;
+        $censoredWords = \App\Models\CensoredWord::query()
+            ->where(function ($query) use ($schoolId) {
+                $query->whereNull('school_id');
+                if ($schoolId) {
+                    $query->orWhere('school_id', $schoolId);
+                }
+            })
+            ->pluck('word');
+
+        $matched = false;
+        foreach ($censoredWords as $word) {
+            $targetWord = mb_strtolower(trim($word));
+            if ($targetWord !== '' && str_contains($normalized, $targetWord)) {
+                $matched = true;
+                break;
+            }
+        }
+
+        if (! $matched) {
+            return null;
+        }
+
+        // 3. Pick a random active response from the CensoredResponse pool
+        $randomResponse = \App\Models\CensoredResponse::query()
+            ->where('is_active', true)
+            ->where(function ($query) use ($schoolId) {
+                $query->whereNull('school_id');
+                if ($schoolId) {
+                    $query->orWhere('school_id', $schoolId);
+                }
+            })
+            ->inRandomOrder()
+            ->first();
+
+        if ($randomResponse && ! empty($randomResponse->response_text)) {
+            $text = trim($randomResponse->response_text);
+            return str_contains(mb_strtolower($text), 'aska')
+                ? $text
+                : "Menurut ASKA, {$text}";
+        }
+
+        return 'Menurut ASKA, itu kata-kata yang kurang sopan. Yuk gunakan bahasa yang ramah, positif, dan santun saat belajar ya!';
     }
 }

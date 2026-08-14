@@ -215,17 +215,25 @@ export default function StoryShow({ generation, questions, illustration }: { gen
                         </div>
 
                         {illustrationRequested && <section className="flex flex-col justify-between gap-4 rounded-xl border border-sky-200 bg-sky-50 p-5 sm:flex-row sm:items-center">
-                            <div>
-                                <h2 className="font-semibold text-sky-950">Ilustrasi soal AI</h2>
-                                <p className="mt-1 text-sm text-sky-800">
-                                    Sistem membuat ilustrasi yang sesuai dengan stimulus dan kebutuhan soal.
+                            <div className="space-y-2 flex-1">
+                                <h2 className="font-semibold text-sky-950 flex items-center gap-2">
+                                    <span>🎨 Ilustrasi & Diagram Visual Soal AI</span>
+                                </h2>
+                                {generation.result_payload?.visual_description && (
+                                    <div className="rounded-lg border border-sky-200 bg-white p-3 text-xs text-slate-800 leading-relaxed">
+                                        <span className="font-bold text-sky-900 block mb-1">Acuan Visual AI:</span>
+                                        {generation.result_payload.visual_description}
+                                    </div>
+                                )}
+                                <p className="text-xs text-sky-800">
+                                    Sistem membuat ilustrasi / diagram yang presisi sesuai dengan materi dan kebutuhan soal.
                                 </p>
                                 {illustration && (
-                                    <p className="mt-2 text-xs text-sky-700">
-                                        Status: {illustration.status === 'completed' ? 'selesai' : illustration.status === 'failed' ? 'gagal' : 'sedang diproses'}
+                                    <p className="text-xs text-sky-700 font-medium">
+                                        Status: {illustration.status === 'completed' ? '✓ Ilustrasi/Diagram Selesai' : illustration.status === 'failed' ? 'Gagal' : 'Sedang diproses…'}
                                     </p>
                                 )}
-                                {illustration?.error && <p className="mt-2 text-xs text-rose-700">{illustration.error}</p>}
+                                {illustration?.error && <p className="text-xs text-rose-700">{illustration.error}</p>}
                             </div>
                             <button
                                 type="button"

@@ -21,7 +21,7 @@ export default function AuthenticatedLayout({
     const studentNavigation: NavigationItem[] = [
         dashboard,
         { label: 'Try Out', href: route('assessments.index'), active: 'assessments.*' },
-        { label: 'Teman Belajar', href: route('student-chat.show'), active: 'student-chat.*' },
+        { label: 'Teman Belajar ASKA', href: route('student-chat.show'), active: 'student-chat.*' },
     ];
     const academicGroups: NavigationGroup[] = [
         {
@@ -49,6 +49,7 @@ export default function AuthenticatedLayout({
             label: 'Pemantauan',
             items: [
                 { label: 'Chat Siswa', href: route('teacher-chat.index'), active: 'teacher-chat.*' },
+                { label: 'Kata Sensor ASKA', href: route('censored-words.index'), active: 'censored-words.*' },
                 { label: 'Laporan', href: route('reports.index'), active: 'reports.*' },
             ],
         },
@@ -59,6 +60,7 @@ export default function AuthenticatedLayout({
                       { label: 'Data Sekolah', href: route('school.edit'), active: 'school.edit' },
                       { label: 'Data Siswa', href: route('school.students.index'), active: 'school.students.*' },
                       { label: 'Pengguna', href: route('admin.users.index'), active: 'admin.users.*' },
+                      { label: 'Kuota AI Guru', href: route('admin.ai-quotas.edit'), active: 'admin.ai-quotas.*' },
                   ],
               }]
             : []),

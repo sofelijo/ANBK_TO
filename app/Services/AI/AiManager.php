@@ -8,15 +8,44 @@ class AiManager
 {
     public function provider(): AiProvider
     {
-        return match (config('ai.driver')) {
-            'fake' => new FakeAiProvider,
-            'gemini' => new GeminiAiProvider(
+        $driver = config('ai.driver');
+
+        if ($driver === 'fake') {
+            return new FakeAiProvider;
+        }
+
+        if ($driver === 'groq') {
+            return $this->groqProvider();
+        }
+
+        if ($driver === 'gemini') {
+            $gemini = new GeminiAiProvider(
                 apiKey: (string) config('ai.gemini.api_key'),
                 modelName: (string) config('ai.gemini.model'),
                 baseUrl: rtrim((string) config('ai.gemini.base_url'), '/'),
-            ),
-            default => throw new InvalidArgumentException('AI driver tidak didukung.'),
-        };
+            );
+
+            $groqApiKey = (string) config('ai.groq.api_key');
+            if ($groqApiKey !== '') {
+                return new FallbackAiProvider(
+                    primary: $gemini,
+                    fallback: $this->groqProvider(),
+                );
+            }
+
+            return $gemini;
+        }
+
+        throw new InvalidArgumentException('AI driver tidak didukung.');
+    }
+
+    private function groqProvider(): GroqAiProvider
+    {
+        return new GroqAiProvider(
+            apiKey: (string) config('ai.groq.api_key'),
+            modelName: (string) config('ai.groq.model', 'llama-3.3-70b-versatile'),
+            baseUrl: rtrim((string) config('ai.groq.base_url', 'https://api.groq.com/openai/v1'), '/'),
+        );
     }
 
     public function costMicrousd(AiResponse $response): int

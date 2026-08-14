@@ -30,4 +30,10 @@ return [
         'input_usd_per_million' => (float) env('GEMINI_INPUT_USD_PER_MILLION', 0.25),
         'output_usd_per_million' => (float) env('GEMINI_OUTPUT_USD_PER_MILLION', 1.50),
     ],
+
+    'groq' => [
+        'api_key' => env('GROQ_API_KEY'),
+        'model' => env('GROQ_MODEL', 'llama-3.3-70b-versatile'),
+        'base_url' => env('GROQ_BASE_URL', 'https://api.groq.com/openai/v1'),
+    ],
 ];

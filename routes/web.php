@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Admin\AiQuotaController;
 use App\Http\Controllers\Admin\UserController as AdminUserController;
 use App\Http\Controllers\AiQuestionController;
 use App\Http\Controllers\AiQuestionReviewController;
@@ -10,12 +11,13 @@ use App\Http\Controllers\AssessmentMonitoringController;
 use App\Http\Controllers\AssessmentScheduleController;
 use App\Http\Controllers\AttemptController;
 use App\Http\Controllers\AttemptEventController;
+use App\Http\Controllers\CensoredWordController;
 use App\Http\Controllers\ChatMessageController;
 use App\Http\Controllers\CompetencyController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\ProfileController;
-use App\Http\Controllers\QuestionController;
 use App\Http\Controllers\QuestionBlueprintController;
+use App\Http\Controllers\QuestionController;
 use App\Http\Controllers\QuestionImportController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\SchoolProfileController;
@@ -46,6 +48,13 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::middleware('role:admin,teacher')->group(function () {
         Route::get('/student-chats', [TeacherChatController::class, 'index'])->name('teacher-chat.index');
         Route::get('/student-chats/{student}', [TeacherChatController::class, 'show'])->name('teacher-chat.show');
+        Route::get('/censored-words', [CensoredWordController::class, 'index'])->name('censored-words.index');
+        Route::post('/censored-words', [CensoredWordController::class, 'store'])->name('censored-words.store');
+        Route::delete('/censored-words/{censoredWord}', [CensoredWordController::class, 'destroy'])->name('censored-words.destroy');
+        Route::post('/censored-words/responses', [CensoredWordController::class, 'storeResponse'])->name('censored-words.responses.store');
+        Route::put('/censored-words/responses/{censoredResponse}', [CensoredWordController::class, 'updateResponse'])->name('censored-words.responses.update');
+        Route::delete('/censored-words/responses/{censoredResponse}', [CensoredWordController::class, 'destroyResponse'])->name('censored-words.responses.destroy');
+        Route::post('/censored-words/test', [CensoredWordController::class, 'test'])->name('censored-words.test');
         Route::get('/reports', [ReportController::class, 'index'])->name('reports.index');
         Route::get('/reports/export', [ReportController::class, 'export'])->name('reports.export');
         Route::get('/questions/import', [QuestionImportController::class, 'create'])->name('questions.import.create');
@@ -80,9 +89,13 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
         Route::get('/assessments/create', [AssessmentController::class, 'create'])->name('assessments.create');
         Route::post('/assessments', [AssessmentController::class, 'store'])->name('assessments.store');
+        Route::get('/assessments/{assessment}', [AssessmentController::class, 'show'])->name('assessments.show');
         Route::get('/assessments/{assessment}/edit', [AssessmentController::class, 'edit'])->name('assessments.edit');
         Route::put('/assessments/{assessment}', [AssessmentController::class, 'update'])->name('assessments.update');
         Route::post('/assessments/{assessment}/publish', [AssessmentController::class, 'publish'])->name('assessments.publish');
+        Route::delete('/assessments/{assessment}/questions/{question}', [AssessmentController::class, 'removeQuestion'])->name('assessments.questions.remove');
+        Route::post('/assessments/{assessment}/questions/swap', [AssessmentController::class, 'swapQuestion'])->name('assessments.questions.swap');
+        Route::post('/assessments/{assessment}/questions/attach', [AssessmentController::class, 'attachQuestion'])->name('assessments.questions.attach');
     });
 
     Route::middleware('role:admin,operator')->group(function () {
@@ -96,6 +109,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
     });
 
     Route::middleware('role:admin')->group(function () {
+        Route::get('/admin/ai-quotas', [AiQuotaController::class, 'edit'])->name('admin.ai-quotas.edit');
+        Route::patch('/admin/ai-quotas', [AiQuotaController::class, 'update'])->name('admin.ai-quotas.update');
         Route::get('/admin/users', [AdminUserController::class, 'index'])->name('admin.users.index');
         Route::post('/admin/users', [AdminUserController::class, 'store'])->name('admin.users.store');
         Route::patch('/admin/users/{user}/approve', [AdminUserController::class, 'approve'])->name('admin.users.approve');

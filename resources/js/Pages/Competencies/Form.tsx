@@ -1,6 +1,4 @@
 import InputError from '@/Components/InputError';
-import InputLabel from '@/Components/InputLabel';
-import TextInput from '@/Components/TextInput';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, Link, useForm } from '@inertiajs/react';
 import { FormEvent } from 'react';
@@ -101,7 +99,7 @@ export default function Form({
                     className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8"
                 >
                     <div>
-                        <InputLabel htmlFor="subject_id" value="Mata pelajaran" />
+                        <label htmlFor="subject_id" className="block text-sm font-medium text-slate-700">Mata pelajaran</label>
                         <select id="subject_id" value={data.subject_id} onChange={(event) => setData((current) => ({ ...current, subject_id: event.target.value, parent_id: '', question_blueprint_ids: [] }))} className="mt-1 block w-full rounded-xl border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500">
                             <option value="">Pilih mata pelajaran</option>
                             {subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.code} · {subject.name}</option>)}
@@ -116,62 +114,22 @@ export default function Form({
                         <InputError message={errors.question_blueprint_ids} className="mt-2" />
                     </div>}
 
-                    <div className="grid gap-5 sm:grid-cols-2">
-                        <div>
-                            <InputLabel htmlFor="code" value={data.parent_id ? 'Kode subkompetensi' : 'Kode kompetensi'} />
-                            <TextInput
-                                id="code"
-                                value={data.code}
-                                onChange={(event) =>
-                                    setData(
-                                        'code',
-                                        event.target.value.toUpperCase(),
-                                    )
-                                }
-                                placeholder="Contoh: LIT6-INFER"
-                                className="mt-1 block w-full font-mono uppercase"
-                                isFocused
-                            />
-                            <InputError
-                                message={errors.code}
-                                className="mt-2"
-                            />
-                        </div>
-
-                        <div>
-                            <InputLabel htmlFor="domain" value="Domain" />
-                            <TextInput
-                                id="domain"
-                                value={data.domain}
-                                onChange={(event) =>
-                                    setData('domain', event.target.value)
-                                }
-                                placeholder="Literasi atau Numerasi"
-                                className="mt-1 block w-full"
-                            />
-                            <InputError
-                                message={errors.domain}
-                                className="mt-2"
-                            />
-                        </div>
-                    </div>
-
                     <div className="mt-5">
-                        <InputLabel htmlFor="name" value={data.parent_id ? 'Nama subkompetensi' : 'Nama kompetensi'} />
-                        <TextInput
+                        <label htmlFor="name" className="block text-sm font-medium text-slate-700">{data.parent_id ? 'Nama subkompetensi' : 'Nama kompetensi'}</label>
+                        <input
                             id="name"
+                            type="text"
                             value={data.name}
-                            onChange={(event) =>
-                                setData('name', event.target.value)
-                            }
+                            onChange={(event) => setData('name', event.target.value)}
                             placeholder="Contoh: Membuat inferensi"
-                            className="mt-1 block w-full"
+                            autoFocus
+                            className="mt-1 block w-full rounded-xl border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500"
                         />
                         <InputError message={errors.name} className="mt-2" />
                     </div>
 
                     <div className="mt-5">
-                        <InputLabel htmlFor="description" value="Deskripsi" />
+                        <label htmlFor="description" className="block text-sm font-medium text-slate-700">Deskripsi <span className="font-normal text-slate-400">(opsional)</span></label>
                         <textarea
                             id="description"
                             rows={4}
@@ -190,7 +148,7 @@ export default function Form({
 
                     <div className="mt-5 grid gap-5 sm:grid-cols-2">
                         <div>
-                            <InputLabel htmlFor="grade_level" value="Jenjang kelas" />
+                            <label htmlFor="grade_level" className="block text-sm font-medium text-slate-700">Jenjang kelas</label>
                             <select
                                 id="grade_level"
                                 value={data.grade_level}
@@ -214,10 +172,7 @@ export default function Form({
                         </div>
 
                         <div>
-                            <InputLabel
-                                htmlFor="parent_id"
-                                value="Jenis dan kompetensi induk"
-                            />
+                            <label htmlFor="parent_id" className="block text-sm font-medium text-slate-700">Jenis dan kompetensi induk</label>
                             <select
                                 id="parent_id"
                                 value={data.parent_id}

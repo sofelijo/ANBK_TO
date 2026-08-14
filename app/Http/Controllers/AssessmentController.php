@@ -10,6 +10,7 @@ use App\Models\Assessment;
 use App\Models\AssessmentSchedule;
 use App\Models\Competency;
 use App\Models\Question;
+use App\Models\Subject;
 use App\Services\QuestionSnapshotService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -45,13 +46,40 @@ class AssessmentController extends Controller
                     ->with(['schedules' => fn ($schedules) => $schedules->where('school_npsn', $schoolNpsn)]))
                 ->with(['attempts' => fn ($attempts) => $attempts->where('user_id', $user->id)]);
         } else {
-            $query->where('school_id', $user->school_id)->withCount('schedules');
+            $query->where('school_id', $user->school_id)
+                ->withCount('schedules')
+                ->with(['questions:id,competency_id', 'questions.competency:id,parent_id,code,name']);
+        }
+
+        $assessments = $query->get();
+
+        // Build sub-competency coverage per assessment for the manage view
+        $subCompetencies = [];
+        if ($user->hasRole(UserRole::Admin, UserRole::Teacher)) {
+            $subCompetencies = Competency::query()
+                ->where(fn ($q) => $q->whereNull('school_id')->orWhere('school_id', $user->school_id))
+                ->whereNotNull('parent_id')
+                ->get(['id', 'parent_id', 'code', 'name', 'grade_level', 'subject_id'])
+                ->keyBy('id');
         }
 
         return Inertia::render('Assessments/Index', [
-            'assessments' => $query->get(),
+            'assessments' => $assessments->map(fn (Assessment $a) => [
+                ...$a->toArray(),
+                'competency_coverage' => $user->hasRole(UserRole::Admin, UserRole::Teacher)
+                    ? $a->questions
+                        ->pluck('competency')
+                        ->filter()
+                        ->filter(fn ($c) => $c->parent_id !== null) // only sub-competencies
+                        ->groupBy('id')
+                        ->map->count()
+                    : null,
+            ]),
             'canManage' => $user->hasRole(UserRole::Admin, UserRole::Teacher),
             'bookingRequired' => $bookingRequired,
+            'subCompetencies' => $user->hasRole(UserRole::Admin, UserRole::Teacher)
+                ? $subCompetencies->values()
+                : [],
         ]);
     }
 
@@ -81,16 +109,193 @@ class AssessmentController extends Controller
         return to_route('assessments.index')->with('success', "Paket {$assessment->title} berhasil dibuat.");
     }
 
+    public function show(Request $request, Assessment $assessment): Response
+    {
+        $this->ensureSameSchool($request, $assessment);
+
+        $assessment->load([
+            'subject:id,code,name',
+            'questions' => function ($q) {
+                $q->with(['competency:id,parent_id,code,name,grade_level', 'competency.parent:id,name']);
+            },
+        ]);
+
+        $slots = $assessment->competency_slots ?? [];
+        $questions = $assessment->questions;
+
+        // Sub-competencies coverage count
+        $coverageMap = $questions
+            ->pluck('competency')
+            ->filter()
+            ->filter(fn ($c) => $c->parent_id !== null)
+            ->groupBy('id')
+            ->map->count();
+
+        // Relevant sub-competencies for this subject and grade level
+        $subCompetencies = Competency::query()
+            ->whereNotNull('parent_id')
+            ->where('grade_level', $assessment->grade_level)
+            ->when($assessment->subject_id, fn ($q) => $q->where('subject_id', $assessment->subject_id))
+            ->with('parent:id,name')
+            ->orderBy('name')
+            ->get()
+            ->map(fn ($comp) => [
+                'id' => $comp->id,
+                'name' => $comp->name,
+                'code' => $comp->code,
+                'parent_name' => $comp->parent?->name ?? '',
+                'is_selected_slot' => in_array($comp->id, $slots),
+                'question_count' => $coverageMap[$comp->id] ?? 0,
+            ]);
+
+        $attachedQuestionIds = $questions->pluck('id')->all();
+
+        $availableBankQuestions = Question::query()
+            ->where('school_id', $request->user()->school_id)
+            ->where('grade_level', $assessment->grade_level)
+            ->where('status', QuestionStatus::Published)
+            ->when($assessment->subject_id, function ($q) use ($assessment) {
+                $q->whereHas('competency', fn ($c) => $c->where('subject_id', $assessment->subject_id));
+            })
+            ->whereNotIn('id', $attachedQuestionIds)
+            ->with(['competency:id,name', 'options'])
+            ->latest()
+            ->limit(100)
+            ->get()
+            ->map(fn ($q) => [
+                'id' => $q->id,
+                'prompt' => $q->prompt,
+                'stimulus' => $q->stimulus,
+                'explanation' => $q->explanation,
+                'type' => $q->type,
+                'difficulty' => $q->difficulty,
+                'competency_name' => $q->competency?->name ?? '-',
+                'options' => $q->options->map(fn ($opt) => [
+                    'id' => $opt->id,
+                    'label' => $opt->label,
+                    'content' => $opt->content,
+                    'option_text' => $opt->content ?? $opt->label ?? '',
+                    'is_correct' => (bool) $opt->is_correct,
+                ]),
+            ]);
+
+        return Inertia::render('Assessments/Show', [
+            'assessment' => [
+                'id' => $assessment->id,
+                'title' => $assessment->title,
+                'description' => $assessment->description,
+                'grade_level' => $assessment->grade_level,
+                'duration_minutes' => $assessment->duration_minutes,
+                'status' => $assessment->status,
+                'starts_at' => $assessment->starts_at?->translatedFormat('d M Y H:i'),
+                'ends_at' => $assessment->ends_at?->translatedFormat('d M Y H:i'),
+                'subject' => $assessment->subject ? [
+                    'id' => $assessment->subject->id,
+                    'name' => $assessment->subject->name,
+                    'code' => $assessment->subject->code,
+                ] : null,
+                'questions_count' => $questions->count(),
+                'attempts_count' => $assessment->attempts()->count(),
+                'competency_slots' => $slots,
+            ],
+            'questions' => $questions->map(fn ($q) => [
+                'id' => $q->id,
+                'title' => $q->title,
+                'prompt' => $q->prompt,
+                'stimulus' => $q->stimulus,
+                'explanation' => $q->explanation,
+                'type' => $q->type,
+                'difficulty' => $q->difficulty,
+                'competency' => $q->competency ? [
+                    'id' => $q->competency->id,
+                    'name' => $q->competency->name,
+                    'code' => $q->competency->code,
+                    'parent_name' => $q->competency->parent?->name ?? '',
+                ] : null,
+                'options' => $q->options ? $q->options->map(fn ($opt) => [
+                    'id' => $opt->id,
+                    'label' => $opt->label,
+                    'content' => $opt->content,
+                    'option_text' => $opt->content ?? $opt->label ?? '',
+                    'is_correct' => (bool) $opt->is_correct,
+                ]) : [],
+            ]),
+            'subCompetencies' => $subCompetencies,
+            'availableBankQuestions' => $availableBankQuestions,
+        ]);
+    }
+
+    public function removeQuestion(Request $request, Assessment $assessment, Question $question): RedirectResponse
+    {
+        $this->ensureSameSchool($request, $assessment);
+
+        $assessment->questions()->detach($question->id);
+
+        $remaining = $assessment->questions()->get();
+        $assessment->questions()->sync(
+            $remaining->values()->mapWithKeys(fn ($q, $index) => [
+                $q->id => ['position' => $index + 1, 'points' => 1],
+            ])->all()
+        );
+
+        return back()->with('success', 'Soal berhasil dihapus dari paket ini.');
+    }
+
+    public function swapQuestion(Request $request, Assessment $assessment): RedirectResponse
+    {
+        $this->ensureSameSchool($request, $assessment);
+
+        $data = $request->validate([
+            'old_question_id' => ['required', 'integer'],
+            'new_question_id' => ['required', 'integer', 'exists:questions,id'],
+        ]);
+
+        $pivot = DB::table('assessment_question')
+            ->where('assessment_id', $assessment->id)
+            ->where('question_id', $data['old_question_id'])
+            ->first();
+
+        $position = $pivot?->position ?? 1;
+
+        $assessment->questions()->detach($data['old_question_id']);
+        $assessment->questions()->attach($data['new_question_id'], [
+            'position' => $position,
+            'points' => 1,
+        ]);
+
+        return back()->with('success', 'Soal berhasil diganti.');
+    }
+
+    public function attachQuestion(Request $request, Assessment $assessment): RedirectResponse
+    {
+        $this->ensureSameSchool($request, $assessment);
+
+        $data = $request->validate([
+            'question_id' => ['required', 'integer', 'exists:questions,id'],
+        ]);
+
+        if (! $assessment->questions()->where('question_id', $data['question_id'])->exists()) {
+            $nextPos = $assessment->questions()->count() + 1;
+            $assessment->questions()->attach($data['question_id'], [
+                'position' => $nextPos,
+                'points' => 1,
+            ]);
+        }
+
+        return back()->with('success', 'Soal berhasil ditambahkan ke paket.');
+    }
+
     public function edit(Request $request, Assessment $assessment): Response
     {
         $this->ensureEditable($request, $assessment);
-        $assessment->load('questions:id');
+        $assessment->load(['questions:id,competency_id', 'questions.competency:id,parent_id']);
         $settings = $assessment->settings ?? [];
 
         return Inertia::render('Assessments/Create', [
             ...$this->formProps($request, $assessment->questions->pluck('id')->all()),
             'assessment' => [
                 'id' => $assessment->id,
+                'subject_id' => $assessment->subject_id,
                 'title' => $assessment->title,
                 'description' => $assessment->description ?? '',
                 'grade_level' => $assessment->grade_level,
@@ -104,12 +309,20 @@ class AssessmentController extends Controller
                 'question_ids' => $assessment->questions->pluck('id')->all(),
                 'competency_rows' => data_get($settings, 'competency_rows', []),
                 'blueprint_rows' => data_get($settings, 'blueprint_rows', []),
+                'competency_slots' => $assessment->competency_slots ?? [],
                 'starts_at' => $assessment->starts_at?->format('Y-m-d\TH:i') ?? '',
                 'ends_at' => $assessment->ends_at?->format('Y-m-d\TH:i') ?? '',
                 'shuffle_questions' => (bool) data_get($settings, 'shuffle_questions', false),
                 'shuffle_options' => (bool) data_get($settings, 'shuffle_options', false),
                 'show_navigation' => (bool) data_get($settings, 'show_navigation', true),
                 'require_all_answers' => (bool) data_get($settings, 'require_all_answers', false),
+                // coverage: sub-competency_id => count of questions in this assessment
+                'competency_coverage' => $assessment->questions
+                    ->pluck('competency')
+                    ->filter()
+                    ->filter(fn ($c) => $c->parent_id !== null)
+                    ->groupBy('id')
+                    ->map->count(),
             ],
         ]);
     }
@@ -158,7 +371,18 @@ class AssessmentController extends Controller
 
     private function validatedData(Request $request): array
     {
+        $request->merge([
+            'subject_id' => $request->input('subject_id') ? (int) $request->input('subject_id') : null,
+            'starts_at' => $request->input('starts_at') ?: null,
+            'ends_at' => $request->input('ends_at') ?: null,
+            'custom_type_name' => $request->input('custom_type_name') ?: null,
+            'description' => $request->input('description') ?: null,
+        ]);
+
         $data = $request->validate([
+            'subject_id' => ['nullable', 'integer', 'exists:subjects,id'],
+            'competency_slots' => ['nullable', 'array'],
+            'competency_slots.*' => ['integer', 'exists:competencies,id'],
             'title' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:3000'],
             'grade_level' => ['required', 'integer', Rule::in([6, 9, 12])],
@@ -169,10 +393,10 @@ class AssessmentController extends Controller
             'question_count' => ['required', 'integer', 'between:1,100'],
             'question_ids' => ['nullable', 'required_if:selection_mode,manual', 'array', 'max:100'],
             'question_ids.*' => ['integer', 'distinct'],
-            'competency_rows' => ['nullable', 'required_if:selection_mode,competency', 'array', 'between:1,30'],
+            'competency_rows' => ['nullable', 'array', 'max:30'],
             'competency_rows.*.competency_id' => ['required_if:selection_mode,competency', 'integer'],
             'competency_rows.*.count' => ['required_if:selection_mode,competency', 'integer', 'between:1,100'],
-            'blueprint_rows' => ['nullable', 'required_if:selection_mode,blueprint', 'array', 'between:1,30'],
+            'blueprint_rows' => ['nullable', 'array', 'max:30'],
             'blueprint_rows.*.competency_id' => ['required_if:selection_mode,blueprint', 'integer'],
             'blueprint_rows.*.type' => ['required_if:selection_mode,blueprint', Rule::enum(QuestionType::class)],
             'blueprint_rows.*.difficulty' => ['required_if:selection_mode,blueprint', 'integer', 'between:1,3'],
@@ -183,10 +407,27 @@ class AssessmentController extends Controller
             'shuffle_options' => ['required', 'boolean'],
             'show_navigation' => ['required', 'boolean'],
             'require_all_answers' => ['required', 'boolean'],
+        ], [
+            'title.required' => 'Judul paket ujian wajib diisi.',
+            'title.max' => 'Judul paket tidak boleh lebih dari 255 karakter.',
+            'grade_level.required' => 'Jenjang kelas wajib dipilih.',
+            'grade_level.in' => 'Jenjang kelas harus 6, 9, atau 12.',
+            'duration_minutes.required' => 'Durasi pengerjaan wajib diisi.',
+            'duration_minutes.between' => 'Durasi pengerjaan harus antara 5 sampai 480 menit.',
+            'question_count.required' => 'Jumlah soal wajib diisi.',
+            'question_count.between' => 'Jumlah soal harus antara 1 sampai 100.',
+            'custom_type_name.required_if' => 'Nama jenis try out khusus wajib diisi.',
+            'ends_at.after' => 'Waktu ditutup harus setelah waktu mulai tersedia.',
         ]);
 
         if ($data['selection_mode'] === 'competency') {
             $rows = collect($data['competency_rows']);
+
+            if ($rows->isEmpty()) {
+                throw ValidationException::withMessages([
+                    'competency_rows' => 'Tabel aturan kompetensi wajib diisi minimal 1 baris.',
+                ]);
+            }
 
             if ($rows->sum('count') !== (int) $data['question_count']) {
                 throw ValidationException::withMessages([
@@ -201,6 +442,12 @@ class AssessmentController extends Controller
             }
         } elseif ($data['selection_mode'] === 'blueprint') {
             $rows = collect($data['blueprint_rows']);
+
+            if ($rows->isEmpty()) {
+                throw ValidationException::withMessages([
+                    'blueprint_rows' => 'Tabel aturan blueprint wajib diisi minimal 1 baris.',
+                ]);
+            }
             $signatures = $rows->map(fn (array $row): string => implode(':', [
                 $row['competency_id'],
                 $row['type'],
@@ -227,7 +474,10 @@ class AssessmentController extends Controller
     {
         $questionQuery = Question::query()
             ->where('school_id', $request->user()->school_id)
-            ->where('grade_level', $data['grade_level']);
+            ->where('grade_level', $data['grade_level'])
+            ->when(! empty($data['subject_id']), function ($q) use ($data) {
+                $q->whereHas('competency', fn ($comp) => $comp->where('subject_id', $data['subject_id']));
+            });
 
         if ($data['selection_mode'] === 'manual') {
             if (count($data['question_ids']) !== (int) $data['question_count']) {
@@ -316,7 +566,9 @@ class AssessmentController extends Controller
                 ->get();
         }
 
-        if ($questions->count() !== (int) $data['question_count']) {
+        // Enforce full target question count check only when publishing or published.
+        // Draft assessments can be created and updated freely while building the question bank.
+        if ($assessment?->status === AssessmentStatus::Published && $questions->count() !== (int) $data['question_count']) {
             throw ValidationException::withMessages([
                 'question_ids' => $data['selection_mode'] === 'manual'
                     ? 'Ada soal yang tidak tersedia, belum diterbitkan, atau berbeda jenjang.'
@@ -348,6 +600,8 @@ class AssessmentController extends Controller
             : config("assessment.types.{$data['assessment_type']}");
 
         return [
+            'subject_id' => $data['subject_id'] ?? null,
+            'competency_slots' => array_values(array_map('intval', $data['competency_slots'] ?? [])) ?: null,
             'title' => $data['title'],
             'description' => $data['description'] ?? null,
             'grade_level' => $data['grade_level'],
@@ -384,6 +638,9 @@ class AssessmentController extends Controller
         $query = Question::query()
             ->where('school_id', $request->user()->school_id)
             ->where('grade_level', $data['grade_level'])
+            ->when(! empty($data['subject_id']), function ($q) use ($data) {
+                $q->whereHas('competency', fn ($comp) => $comp->where('subject_id', $data['subject_id']));
+            })
             ->where(fn ($questions) => $questions
                 ->where('status', QuestionStatus::Published)
                 ->when($assessment, fn ($existing) => $existing->orWhereIn('id',
@@ -426,19 +683,25 @@ class AssessmentController extends Controller
                 QuestionType::Matching->value => 'Menjodohkan',
                 QuestionType::CategoryMatrix->value => 'Pilihan kategori (tabel)',
             ],
+            'subjects' => Subject::query()
+                ->where(fn ($query) => $query
+                    ->whereNull('school_id')
+                    ->orWhere('school_id', $request->user()->school_id))
+                ->orderBy('name')
+                ->get(['id', 'code', 'name']),
             'competencies' => Competency::query()
                 ->where(fn ($query) => $query
                     ->whereNull('school_id')
                     ->orWhere('school_id', $request->user()->school_id))
                 ->orderBy('grade_level')
                 ->orderBy('code')
-                ->get(['id', 'code', 'name', 'grade_level']),
+                ->get(['id', 'parent_id', 'code', 'name', 'grade_level', 'subject_id']),
             'questions' => Question::query()
                 ->where('school_id', $request->user()->school_id)
                 ->where(fn ($query) => $query
                     ->where('status', QuestionStatus::Published)
                     ->when($includedQuestionIds !== [], fn ($nested) => $nested->orWhereIn('id', $includedQuestionIds)))
-                ->with('competency:id,code,name')
+                ->with('competency:id,code,name,subject_id,parent_id')
                 ->orderBy('grade_level')
                 ->latest()
                 ->get(['id', 'competency_id', 'type', 'title', 'prompt', 'grade_level', 'difficulty']),
@@ -453,6 +716,5 @@ class AssessmentController extends Controller
     private function ensureEditable(Request $request, Assessment $assessment): void
     {
         $this->ensureSameSchool($request, $assessment);
-        abort_if($assessment->attempts()->exists(), 409, 'Paket tidak dapat diedit karena sudah memiliki peserta.');
     }
 }

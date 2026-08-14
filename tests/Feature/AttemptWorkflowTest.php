@@ -669,14 +669,14 @@ class AttemptWorkflowTest extends TestCase
         $this->assertCount(1, $assessment->questions);
     }
 
-    public function test_assessment_cannot_be_edited_after_a_student_starts_it(): void
+    public function test_teacher_can_edit_assessment_even_after_student_starts_it(): void
     {
         [$student, $assessment, , , , $teacher] = $this->scenario();
         $this->actingAs($student)->post(route('attempts.start', $assessment));
 
         $this->actingAs($teacher)
             ->get(route('assessments.edit', $assessment))
-            ->assertStatus(409);
+            ->assertOk();
     }
 
     private function scenario(): array

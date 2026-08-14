@@ -1,7 +1,7 @@
 import InputError from '@/Components/InputError';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, Link, useForm } from '@inertiajs/react';
-import { FormEvent } from 'react';
+import { FormEvent, useMemo } from 'react';
 
 type Competency = {
     id: number;
@@ -18,6 +18,13 @@ type MatchingDistractor = { id?: string; content: string };
 type MatrixColumn = { id?: string; label: string };
 type MatrixRow = { id?: string; statement: string; correct_column_index: number };
 type QuestionBlueprint = { id: number; subject_id: number; code: string; name: string; competency_ids: number[] };
+type Assessment = {
+    id: number;
+    title: string;
+    grade_level: number;
+    subject_id: number | null;
+    competency_coverage: Record<number, number>; // sub-competency_id => count
+};
 
 type QuestionForm = {
     return_generation_id: number | null;
@@ -42,6 +49,7 @@ type QuestionForm = {
     matching_distractors: MatchingDistractor[];
     matrix_columns: MatrixColumn[];
     matrix_rows: MatrixRow[];
+    target_assessment_id: number | '';
 };
 
 type ExistingQuestion = {
@@ -70,7 +78,7 @@ type ExistingQuestion = {
     };
 };
 
-export default function Create({ subjects, competencies, questionBlueprints, question, selectedSubjectId, returnGeneration }: { subjects: { id: number; code: string; name: string }[]; competencies: Competency[]; questionBlueprints: QuestionBlueprint[]; question?: ExistingQuestion; selectedSubjectId?: number | null; returnGeneration?: { id: number; format: 'direct' | 'story' } | null }) {
+export default function Create({ subjects, competencies, questionBlueprints, assessments, question, selectedSubjectId, returnGeneration }: { subjects: { id: number; code: string; name: string }[]; competencies: Competency[]; questionBlueprints: QuestionBlueprint[]; assessments: Assessment[]; question?: ExistingQuestion; selectedSubjectId?: number | null; returnGeneration?: { id: number; format: 'direct' | 'story' } | null }) {
     const defaultOptions = [
             { content: '', is_correct: true },
             { content: '', is_correct: false },
@@ -118,6 +126,7 @@ export default function Create({ subjects, competencies, questionBlueprints, que
         matching_distractors: question?.metadata?.matching_distractors || [],
         matrix_columns: initialMatrixColumns,
         matrix_rows: initialMatrixRows,
+        target_assessment_id: '',
     });
     const availableCompetencies = competencies.filter(
         (competency) => competency.subject_id === Number(data.subject_id) && !competency.parent_id,
@@ -129,6 +138,28 @@ export default function Create({ subjects, competencies, questionBlueprints, que
     const usesQuestionBlueprints = selectedSubject?.code === 'BIND';
     const availableQuestionBlueprints = questionBlueprints.filter((item) => item.subject_id === Number(data.subject_id));
     const defaultQuestionBlueprints = availableQuestionBlueprints.filter((item) => item.competency_ids.includes(Number(data.competency_id)));
+
+    // Determine the active sub-competency id (the final competency_id if it has a parent)
+    const activeSubCompetencyId = useMemo(() => {
+        const cid = Number(data.competency_id);
+        if (!cid) return null;
+        const comp = competencies.find((c) => c.id === cid);
+        return comp?.parent_id ? cid : null; // only sub-competencies (those with a parent)
+    }, [data.competency_id, competencies]);
+
+    // Pre-select assessment: oldest that doesn't have this sub-competency, or fewest questions if all have it
+    const suggestedAssessmentId = useMemo((): number | '' => {
+        if (!activeSubCompetencyId || !data.grade_level) return '';
+        const gradeMatched = assessments.filter((a) => a.grade_level === Number(data.grade_level));
+        if (gradeMatched.length === 0) return '';
+        // First: find oldest (first in list, already sorted oldest first) that has 0 coverage for this sub-competency
+        const withoutCoverage = gradeMatched.filter((a) => !(a.competency_coverage[activeSubCompetencyId] > 0));
+        if (withoutCoverage.length > 0) return withoutCoverage[0].id;
+        // Fall back: pick the one with fewest questions for this sub-competency
+        return gradeMatched.sort((a, b) =>
+            (a.competency_coverage[activeSubCompetencyId] ?? 0) - (b.competency_coverage[activeSubCompetencyId] ?? 0),
+        )[0].id;
+    }, [activeSubCompetencyId, assessments, data.grade_level]);
 
     const submit = (event: FormEvent) => {
         event.preventDefault();
@@ -196,11 +227,14 @@ export default function Create({ subjects, competencies, questionBlueprints, que
                                 className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500"
                             >
                                 <option value="">Pilih kompetensi</option>
-                                {availableCompetencies.map((competency) => (
-                                    <option key={competency.id} value={competency.id}>
-                                        Kelas {competency.grade_level} · {competency.code} · {competency.name}
-                                    </option>
-                                ))}
+                                {availableCompetencies.map((competency) => {
+                                    const displayName = competency.name.length > 70 ? competency.name.substring(0, 70) + '…' : competency.name;
+                                    return (
+                                        <option key={competency.id} value={competency.id}>
+                                            Kelas {competency.grade_level} · {displayName}
+                                        </option>
+                                    );
+                                })}
                             </select>
                             {data.subject_id && availableCompetencies.length === 0 && <p className="mt-1 text-xs text-amber-700">Mapel ini belum memiliki kompetensi. <Link href={route('competencies.create')} className="font-bold underline">Tambahkan kompetensi</Link>.</p>}
                             <InputError message={errors.competency_id} className="mt-1" />
@@ -209,19 +243,75 @@ export default function Create({ subjects, competencies, questionBlueprints, que
                             Subkompetensi <span className="font-normal text-slate-500">(opsional)</span>
                             <select
                                 value={availableSubcompetencies.some((item) => item.id === Number(data.competency_id)) ? data.competency_id : ''}
-                                onChange={(event) => setData('competency_id', event.target.value || data.root_competency_id)}
+                                onChange={(event) => {
+                                    const newCompId = event.target.value || data.root_competency_id;
+                                    // When sub-competency changes, auto-suggest a new assessment
+                                    const cid = Number(newCompId);
+                                    const comp = competencies.find((c) => c.id === cid);
+                                    const isSubComp = !!comp?.parent_id;
+                                    let newTargetId: number | '' = '';
+                                    if (isSubComp) {
+                                        const gradeMatched = assessments.filter((a) => a.grade_level === Number(data.grade_level));
+                                        const without = gradeMatched.filter((a) => !(a.competency_coverage[cid] > 0));
+                                        if (without.length > 0) newTargetId = without[0].id;
+                                        else if (gradeMatched.length > 0) {
+                                            newTargetId = [...gradeMatched].sort((a, b) =>
+                                                (a.competency_coverage[cid] ?? 0) - (b.competency_coverage[cid] ?? 0)
+                                            )[0].id;
+                                        }
+                                    }
+                                    setData((current) => ({ ...current, competency_id: newCompId, target_assessment_id: newTargetId }));
+                                }}
                                 disabled={!data.root_competency_id || availableSubcompetencies.length === 0}
                                 className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500 disabled:bg-slate-100"
                             >
                                 <option value="">{availableSubcompetencies.length === 0 ? 'Belum ada subkompetensi' : 'Gunakan kompetensi utama'}</option>
-                                {availableSubcompetencies.map((competency) => (
-                                    <option key={competency.id} value={competency.id}>
-                                        {competency.code} · {competency.name}
-                                    </option>
-                                ))}
+                                {availableSubcompetencies.map((competency) => {
+                                    const displayName = competency.name.length > 70 ? competency.name.substring(0, 70) + '…' : competency.name;
+                                    return (
+                                        <option key={competency.id} value={competency.id}>
+                                            {displayName}
+                                        </option>
+                                    );
+                                })}
                             </select>
                             {data.root_competency_id && availableSubcompetencies.length === 0 && <p className="mt-1 text-xs text-slate-500">Soal akan diklasifikasikan langsung ke kompetensi utama.</p>}
                         </label>}
+
+                        {/* ── Dropdown: Masukkan ke paket ── */}
+                        {activeSubCompetencyId && assessments.length > 0 && (
+                            <label className="text-sm font-medium text-slate-700 sm:col-span-2">
+                                Masukkan ke paket{' '}
+                                <span className="font-normal text-slate-500">(opsional)</span>
+                                <select
+                                    value={data.target_assessment_id === '' ? (suggestedAssessmentId ?? '') : data.target_assessment_id}
+                                    onChange={(e) =>
+                                        setData('target_assessment_id', e.target.value === '' ? '' : Number(e.target.value))
+                                    }
+                                    className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500"
+                                >
+                                    <option value="">— Tidak dimasukkan ke paket —</option>
+                                    {assessments
+                                        .filter((a) => a.grade_level === Number(data.grade_level))
+                                        .map((a) => {
+                                            const count = a.competency_coverage[activeSubCompetencyId] ?? 0;
+                                            const isSuggested = a.id === suggestedAssessmentId;
+                                            return (
+                                                <option key={a.id} value={a.id}>
+                                                    {isSuggested ? '★ ' : ''}{a.title}
+                                                    {count === 0
+                                                        ? ' — belum ada soal sub-kompetensi ini'
+                                                        : ` — sudah ${count} soal`}
+                                                </option>
+                                            );
+                                        })}
+                                </select>
+                                <p className="mt-1 text-xs text-slate-400">
+                                    ★ = disarankan (paket terlama yang belum punya soal sub-kompetensi ini)
+                                </p>
+                            </label>
+                        )}
+
                         {usesQuestionBlueprints && <label className="text-sm font-medium text-slate-700">
                             Tipe soal <span className="font-normal text-slate-500">(dapat disesuaikan)</span>
                             <select value={data.question_blueprint_id} onChange={(event) => setData('question_blueprint_id', event.target.value)} disabled={!data.competency_id} className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500 disabled:bg-slate-100">
@@ -230,6 +320,7 @@ export default function Create({ subjects, competencies, questionBlueprints, que
                             </select>
                             <InputError message={errors.question_blueprint_id} className="mt-1" />
                         </label>}
+
                         <label className="text-sm font-medium text-slate-700">
                             Bentuk soal
                             <select

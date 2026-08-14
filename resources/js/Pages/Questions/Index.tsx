@@ -221,7 +221,7 @@ export default function Index({ questions, subjects, filters }: Props) {
                                                 <p className="mt-1 text-sm text-slate-500">
                                                     {bundled
                                                         ? `${question.bundle_question_count} soal dalam satu bundel · Tema: ${question.story_generation?.request_payload.theme}`
-                                                        : `${question.competency.subject ? `${question.competency.subject.name} · ` : ''}${question.competency.code} · ${question.competency.name}`}
+                                                        : `${question.competency.subject ? `${question.competency.subject.name} · ` : ''}${question.competency.name}`}
                                                 </p>
                                             </div>
                                             <div className={`shrink-0 text-sm ${bundled ? 'font-semibold text-indigo-700' : 'text-slate-500'}`}>

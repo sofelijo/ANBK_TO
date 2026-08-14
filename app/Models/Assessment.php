@@ -11,8 +11,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable([
-    'school_id', 'created_by', 'title', 'description', 'grade_level',
-    'duration_minutes', 'status', 'starts_at', 'ends_at', 'settings',
+    'school_id', 'subject_id', 'created_by', 'title', 'description', 'grade_level',
+    'duration_minutes', 'status', 'starts_at', 'ends_at', 'settings', 'competency_slots',
 ])]
 class Assessment extends Model
 {
@@ -25,12 +25,18 @@ class Assessment extends Model
             'starts_at' => 'datetime',
             'ends_at' => 'datetime',
             'settings' => 'array',
+            'competency_slots' => 'array',
         ];
     }
 
     public function school(): BelongsTo
     {
         return $this->belongsTo(School::class);
+    }
+
+    public function subject(): BelongsTo
+    {
+        return $this->belongsTo(Subject::class);
     }
 
     public function creator(): BelongsTo

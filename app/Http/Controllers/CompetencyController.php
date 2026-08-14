@@ -152,10 +152,33 @@ class CompetencyController extends Controller
         $gradeLevel = $request->integer('grade_level');
         $normalizedGradeLevel = [5 => 6, 8 => 9, 11 => 12][$gradeLevel] ?? $gradeLevel;
 
+        $rawCode = Str::upper(trim($request->string('code')->toString()));
+        $rawName = Str::squish($request->string('name')->toString());
+
+        // Auto-generate code from name if not provided
+        if ($rawCode === '') {
+            $rawCode = Str::upper(Str::slug(Str::words($rawName, 4, ''), '-'));
+            if ($rawCode === '') {
+                $rawCode = 'KOMP-' . Str::upper(Str::random(4));
+            }
+            // Ensure uniqueness by appending school-scoped counter
+            $base = $rawCode;
+            $suffix = 2;
+            while (
+                Competency::query()
+                    ->where('school_id', $request->user()->school_id)
+                    ->where('code', $rawCode)
+                    ->when($competency, fn ($q) => $q->whereKeyNot($competency->id))
+                    ->exists()
+            ) {
+                $rawCode = $base . '-' . $suffix++;
+            }
+        }
+
         $request->merge([
-            'code' => Str::upper(trim($request->string('code')->toString())),
+            'code' => $rawCode,
             'domain' => Str::squish($request->string('domain')->toString()),
-            'name' => Str::squish($request->string('name')->toString()),
+            'name' => $rawName,
             'grade_level' => $normalizedGradeLevel,
         ]);
 
@@ -170,7 +193,7 @@ class CompetencyController extends Controller
                     ->where('school_id', $request->user()->school_id)
                     ->ignore($competency),
             ],
-            'domain' => ['required', 'string', 'max:100'],
+            'domain' => ['nullable', 'string', 'max:100'],
             'name' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:2000'],
             'grade_level' => ['required', 'integer', Rule::in([6, 9, 12])],

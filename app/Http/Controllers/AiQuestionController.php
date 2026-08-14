@@ -9,13 +9,14 @@ use App\Jobs\GenerateQuestionVariants;
 use App\Models\AiGeneration;
 use App\Models\Question;
 use App\Services\AI\AiManager;
+use App\Services\TeacherAiQuota;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 
 class AiQuestionController extends Controller
 {
-    public function store(Request $request, Question $question, AiManager $manager): RedirectResponse
+    public function store(Request $request, Question $question, AiManager $manager, TeacherAiQuota $quota): RedirectResponse
     {
         abort_unless($question->school_id === $request->user()->school_id, 404);
 
@@ -25,17 +26,7 @@ class AiQuestionController extends Controller
             ]);
         }
 
-        $dailyUsage = AiGeneration::query()
-            ->where('requested_by', $request->user()->id)
-            ->where('type', AiGenerationType::QuestionVariants)
-            ->whereDate('created_at', today())
-            ->count();
-
-        if ($dailyUsage >= config('ai.daily_question_limit')) {
-            throw ValidationException::withMessages([
-                'ai' => 'Kuota pembuatan variasi AI hari ini sudah habis.',
-            ]);
-        }
+        $quota->ensureAvailable($request->user(), AiGenerationType::QuestionVariants, 'ai');
 
         $provider = $manager->provider();
         $payload = ['question_id' => $question->id, 'variant_count' => 3];

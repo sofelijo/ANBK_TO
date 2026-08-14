@@ -14,6 +14,7 @@ use App\Models\Subject;
 use App\Services\AI\AiManager;
 use App\Services\AI\StoryIllustrationService;
 use App\Services\AuditLogger;
+use App\Services\TeacherAiQuota;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -78,7 +79,7 @@ class AiStoryQuestionController extends Controller
         ]);
     }
 
-    public function store(Request $request, AiManager $manager, AuditLogger $auditLogger): RedirectResponse
+    public function store(Request $request, AiManager $manager, AuditLogger $auditLogger, TeacherAiQuota $quota): RedirectResponse
     {
         $data = $request->validate([
             'subject_id' => ['required', 'integer'],
@@ -138,17 +139,7 @@ class AiStoryQuestionController extends Controller
         }
         $useIllustration = $generationFormat === 'story' || (bool) ($data['use_illustration'] ?? false);
 
-        $dailyUsage = AiGeneration::query()
-            ->where('requested_by', $request->user()->id)
-            ->where('type', AiGenerationType::StoryQuestions)
-            ->whereDate('created_at', today())
-            ->count();
-
-        if ($dailyUsage >= config('ai.daily_story_limit')) {
-            throw ValidationException::withMessages([
-                'theme' => 'Kuota pembuatan soal cerita AI hari ini sudah habis.',
-            ]);
-        }
+        $quota->ensureAvailable($request->user(), AiGenerationType::StoryQuestions, 'theme');
 
         $provider = $manager->provider();
         $payload = [

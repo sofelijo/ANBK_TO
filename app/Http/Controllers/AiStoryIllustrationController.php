@@ -7,6 +7,7 @@ use App\Enums\AiGenerationType;
 use App\Models\AiGeneration;
 use App\Models\Question;
 use App\Services\AI\StoryIllustrationService;
+use App\Services\TeacherAiQuota;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -18,6 +19,7 @@ class AiStoryIllustrationController extends Controller
         Request $request,
         AiGeneration $generation,
         StoryIllustrationService $service,
+        TeacherAiQuota $quota,
     ): RedirectResponse {
         $format = data_get($generation->request_payload, 'format', 'story');
         abort_unless(
@@ -40,17 +42,7 @@ class AiStoryIllustrationController extends Controller
             return back()->with('success', 'Ilustrasi untuk cerita ini sudah dibuat atau masih diproses.');
         }
 
-        $dailyUsage = AiGeneration::query()
-            ->where('requested_by', $request->user()->id)
-            ->where('type', AiGenerationType::StoryIllustration)
-            ->whereDate('created_at', today())
-            ->count();
-
-        if ($dailyUsage >= config('ai.daily_image_limit')) {
-            throw ValidationException::withMessages([
-                'illustration' => 'Kuota ilustrasi AI hari ini sudah habis.',
-            ]);
-        }
+        $quota->ensureAvailable($request->user(), AiGenerationType::StoryIllustration, 'illustration');
 
         $questionIds = data_get($generation->result_payload, 'question_ids', []);
         $questionCount = Question::query()
@@ -99,6 +91,7 @@ class AiStoryIllustrationController extends Controller
                 'subject' => $subject?->name,
                 'competency' => $competency->name,
                 'parent_competency' => $competency->parent?->name,
+                'visual_description' => $content,
                 'prompt' => $prompt,
                 'aspect_ratio' => '16:9',
                 'image_size' => '1K',

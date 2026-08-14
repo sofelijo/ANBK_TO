@@ -79,7 +79,7 @@ export default function StoryCreate({ subjects, competencies, questionBlueprints
                         Mata pelajaran
                         <select value={data.subject_id} onChange={(event) => setData((current) => ({ ...current, subject_id: Number(event.target.value), root_competency_id: 0, competency_id: 0, question_blueprint_ids: [] }))} className="mt-2 block w-full rounded-xl border-slate-300 focus:border-indigo-500 focus:ring-indigo-500">
                             <option value={0}>{subjects.length === 0 ? 'Belum ada mapel dengan kompetensi' : 'Pilih mata pelajaran terlebih dahulu'}</option>
-                            {subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.code} · {subject.name}</option>)}
+                            {subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}
                         </select>
                         <InputError message={errors.subject_id} className="mt-1" />
                     </label>
@@ -98,7 +98,7 @@ export default function StoryCreate({ subjects, competencies, questionBlueprints
                                 className="mt-2 block w-full rounded-xl border-slate-300 focus:border-indigo-500 focus:ring-indigo-500"
                             >
                                 <option value={0}>Pilih kompetensi</option>
-                                {availableCompetencies.map((competency) => <option key={competency.id} value={competency.id}>Kelas {competency.grade_level} · {competency.code} · {competency.name}</option>)}
+                                {availableCompetencies.map((competency) => <option key={competency.id} value={competency.id}>Kelas {competency.grade_level} · {competency.name}</option>)}
                             </select>
                             <InputError message={errors.root_competency_id} className="mt-1" />
                         </label>
@@ -112,7 +112,7 @@ export default function StoryCreate({ subjects, competencies, questionBlueprints
                                 className="mt-2 block w-full rounded-xl border-slate-300 focus:border-indigo-500 focus:ring-indigo-500 disabled:bg-slate-100"
                             >
                                 <option value={0}>{needsSubcompetency ? 'Pilih subkompetensi' : 'Gunakan kompetensi utama'}</option>
-                                {availableSubcompetencies.map((competency) => <option key={competency.id} value={competency.id}>{competency.code} · {competency.name}</option>)}
+                                {availableSubcompetencies.map((competency) => <option key={competency.id} value={competency.id}>{competency.name}</option>)}
                             </select>
                             <InputError message={errors.competency_id} className="mt-1" />
                         </label>}
@@ -159,7 +159,7 @@ export default function StoryCreate({ subjects, competencies, questionBlueprints
                                     [true, 'Pakai ilustrasi', 'Satu gambar bersama dibuat otomatis untuk mendukung soal.'],
                                 ] as const).map(([value, label, description]) => (
                                     <label key={String(value)} className={`cursor-pointer rounded-xl border p-3 ${data.use_illustration === value ? 'border-sky-500 bg-sky-50' : 'border-slate-200'}`}>
-                                        <span className="flex items-center gap-2"><input type="radio" checked={data.use_illustration === value} onChange={() => setData((current) => ({ ...current, use_illustration: value, question_count: value ? 1 : current.question_count }))} className="border-slate-300 text-sky-600 focus:ring-sky-500" /><strong className="text-sm text-slate-900">{label}</strong></span>
+                                        <span className="flex items-center gap-2"><input type="radio" checked={data.use_illustration === value} onChange={() => setData('use_illustration', value)} className="border-slate-300 text-sky-600 focus:ring-sky-500" /><strong className="text-sm text-slate-900">{label}</strong></span>
                                         <span className="mt-1 block pl-6 text-xs leading-5 text-slate-500">{description}</span>
                                     </label>
                                 ))}
