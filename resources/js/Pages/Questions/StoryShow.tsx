@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react';
 type Generation = {
     id: number;
     status: 'pending' | 'processing' | 'completed' | 'failed';
-    request_payload: { subject_id?: number; theme: string; format?: 'direct' | 'story'; question_style?: 'direct' | 'reasoning'; use_illustration?: boolean; paragraph_count?: number; question_count?: number };
+    request_payload: { subject_id?: number; theme: string; format?: 'direct' | 'story'; question_style?: 'direct' | 'reasoning'; use_illustration?: boolean; illustration_mode?: 'lite' | 'pro'; paragraph_count?: number; question_count?: number };
     result_payload?: { title: string; format?: 'direct' | 'story'; story?: string; visual_description?: string; paragraph_count?: number; question_count: number };
     error?: string;
 };

@@ -32,6 +32,7 @@ export default function StoryCreate({ subjects, competencies, questionBlueprints
         question_style: 'direct' as 'direct' | 'reasoning',
         answer_format: 'single_choice' as 'single_choice' | 'true_false' | 'multiple_choice' | 'mixed',
         use_illustration: false,
+        illustration_mode: 'lite' as 'lite' | 'pro',
         paragraph_count: 3,
         question_count: 3,
     });
@@ -164,6 +165,15 @@ export default function StoryCreate({ subjects, competencies, questionBlueprints
                                     </label>
                                 ))}
                             </div>
+                            {data.use_illustration && <label className="mt-3 block text-sm font-semibold text-slate-800">
+                                Mode ilustrasi
+                                <select value={data.illustration_mode} onChange={(event) => setData('illustration_mode', event.target.value as 'lite' | 'pro')} className="mt-2 block w-full rounded-xl border-slate-300 focus:border-sky-500 focus:ring-sky-500">
+                                    <option value="lite">Lite · SVG presisi, tanpa biaya gambar</option>
+                                    <option value="pro">Pro · API gambar berbayar</option>
+                                </select>
+                                <span className="mt-1 block text-xs font-normal leading-5 text-slate-500">Lite cocok untuk diagram Matematika; Pro cocok untuk ilustrasi adegan yang kompleks.</span>
+                                <InputError message={errors.illustration_mode} className="mt-1" />
+                            </label>}
                         </fieldset>
                     </div>}
 

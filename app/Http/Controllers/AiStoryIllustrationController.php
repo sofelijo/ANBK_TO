@@ -97,6 +97,7 @@ class AiStoryIllustrationController extends Controller
                 'image_size' => '1K',
                 'alt' => $alt,
                 'visual_spec' => data_get($generation->result_payload, 'visual_spec'),
+                'illustration_mode' => data_get($generation->request_payload, 'illustration_mode', 'lite'),
             ],
         ]);
 

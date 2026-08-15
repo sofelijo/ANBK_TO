@@ -91,6 +91,7 @@ class AiStoryQuestionController extends Controller
             'question_style' => ['nullable', Rule::in(['direct', 'reasoning'])],
             'answer_format' => ['nullable', Rule::in(['single_choice', 'true_false', 'multiple_choice', 'mixed'])],
             'use_illustration' => ['nullable', 'boolean'],
+            'illustration_mode' => ['nullable', Rule::in(['lite', 'pro'])],
             'paragraph_count' => ['nullable', 'integer', 'between:1,5'],
             'question_count' => ['required', 'integer', 'between:1,9'],
         ]);
@@ -138,6 +139,7 @@ class AiStoryQuestionController extends Controller
             ]);
         }
         $useIllustration = $generationFormat === 'story' || (bool) ($data['use_illustration'] ?? false);
+        $illustrationMode = $generationFormat === 'story' ? 'pro' : ($data['illustration_mode'] ?? 'lite');
 
         $quota->ensureAvailable($request->user(), AiGenerationType::StoryQuestions, 'theme');
 
@@ -156,6 +158,7 @@ class AiStoryQuestionController extends Controller
             'question_style' => $questionStyle,
             'answer_format' => $answerFormat,
             'use_illustration' => $useIllustration,
+            'illustration_mode' => $useIllustration ? $illustrationMode : null,
             'paragraph_count' => $generationFormat === 'story' ? (int) ($data['paragraph_count'] ?? 3) : 0,
             'question_count' => (int) $data['question_count'],
         ];

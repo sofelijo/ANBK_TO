@@ -9,7 +9,9 @@ use App\Models\AiGeneration;
 use App\Models\Competency;
 use App\Models\Question;
 use App\Services\AI\AiManager;
+use App\Services\AI\EducationalMathSvgRenderer;
 use App\Services\AI\GeometrySvgRenderer;
+use App\Services\AI\MathIllustrationProfile;
 use App\Services\QuestionDuplicateDetector;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -30,8 +32,13 @@ class GenerateStoryQuestions implements ShouldQueue
 
     public function __construct(public readonly int $generationId) {}
 
-    public function handle(AiManager $manager, QuestionDuplicateDetector $duplicateDetector, GeometrySvgRenderer $geometryRenderer): void
-    {
+    public function handle(
+        AiManager $manager,
+        QuestionDuplicateDetector $duplicateDetector,
+        GeometrySvgRenderer $geometryRenderer,
+        EducationalMathSvgRenderer $educationalMathRenderer,
+        MathIllustrationProfile $illustrationProfile,
+    ): void {
         $generation = AiGeneration::with('requester')->findOrFail($this->generationId);
         $generation->update(['status' => AiGenerationStatus::Processing, 'error' => null]);
 
@@ -44,6 +51,7 @@ class GenerateStoryQuestions implements ShouldQueue
             $questionStyle = (string) data_get($generation->request_payload, 'question_style', 'direct');
             $answerFormat = (string) data_get($generation->request_payload, 'answer_format', 'single_choice');
             $useIllustration = (bool) data_get($generation->request_payload, 'use_illustration', false);
+            $illustrationMode = (string) data_get($generation->request_payload, 'illustration_mode', 'lite');
             $questionBlueprints = collect(data_get($generation->request_payload, 'question_blueprints', []))->values();
             $competencyContext = $competencies->map(fn (Competency $competency): array => [
                 'code' => $competency->code,
@@ -65,6 +73,8 @@ class GenerateStoryQuestions implements ShouldQueue
                     $questionBlueprints->all(),
                     $recentQuestions,
                     $variationStrategy,
+                    $illustrationProfile->promptDirection(array_column($competencyContext, 'code')),
+                    $illustrationMode,
                 );
             $provider = $manager->provider();
 
@@ -77,6 +87,7 @@ class GenerateStoryQuestions implements ShouldQueue
                 'question_style' => $questionStyle,
                 'answer_format' => $answerFormat,
                 'use_illustration' => $useIllustration,
+                'illustration_mode' => $illustrationMode,
                 'competencies' => $competencyContext,
                 'question_blueprints' => $questionBlueprints->all(),
                 'variation_strategy' => $variationStrategy,
@@ -94,17 +105,35 @@ class GenerateStoryQuestions implements ShouldQueue
                 'title' => ['required', 'string', 'max:255'],
                 'visual_description' => ['nullable', 'string', 'max:5000'],
                 'visual_spec' => ['nullable', 'array'],
-                'visual_spec.type' => ['required_with:visual_spec', Rule::in(['fraction_models', 'object_groups', 'geometry_2d'])],
-                'visual_spec.shape' => ['required_if:visual_spec.type,geometry_2d', Rule::in(GeometrySvgRenderer::SHAPES)],
+                'visual_spec.type' => ['required_with:visual_spec', Rule::in(['fraction_models', 'object_groups', 'geometry_2d', ...EducationalMathSvgRenderer::TYPES])],
+                'visual_spec.shape' => ['required_if:visual_spec.type,geometry_2d', Rule::in([...GeometrySvgRenderer::SHAPES, 'cube', 'rectangular_prism'])],
                 'visual_spec.unit' => ['nullable', 'string', 'max:20'],
+                'visual_spec.title' => ['nullable', 'string', 'max:100'],
                 'visual_spec.dimensions' => ['required_if:visual_spec.type,geometry_2d', 'array'],
                 'visual_spec.dimensions.*' => ['numeric', 'gt:0'],
-                'visual_spec.items' => ['required_if:visual_spec.type,fraction_models', 'array', 'between:1,6'],
-                'visual_spec.items.*.shape' => ['required', Rule::in(['circle', 'rectangle'])],
-                'visual_spec.items.*.total_parts' => ['required', 'integer', 'between:1,20'],
-                'visual_spec.items.*.shaded_parts' => ['required', 'integer', 'between:0,20'],
+                'visual_spec.items' => ['required_if:visual_spec.type,fraction_models', 'array', 'between:1,8'],
+                'visual_spec.items.*.shape' => ['nullable', Rule::in(['circle', 'rectangle'])],
+                'visual_spec.items.*.total_parts' => ['nullable', 'integer', 'between:1,20'],
+                'visual_spec.items.*.shaded_parts' => ['nullable', 'integer', 'between:0,20'],
+                'visual_spec.items.*.label' => ['nullable', 'string', 'max:30'],
+                'visual_spec.items.*.value' => ['nullable', 'numeric', 'gte:0'],
                 'visual_spec.groups' => ['required_if:visual_spec.type,object_groups', 'integer', 'between:1,10'],
                 'visual_spec.objects_per_group' => ['required_if:visual_spec.type,object_groups', 'integer', 'between:1,20'],
+                'visual_spec.kind' => ['nullable', Rule::in(['ruler', 'liquid', 'mass'])],
+                'visual_spec.style' => ['nullable', Rule::in(['bar', 'pictogram', 'table'])],
+                'visual_spec.value' => ['nullable', 'numeric', 'gte:0'],
+                'visual_spec.maximum' => ['nullable', 'numeric', 'gt:0'],
+                'visual_spec.legend_value' => ['nullable', 'numeric', 'gt:0'],
+                'visual_spec.hour' => ['nullable', 'integer', 'between:0,23'],
+                'visual_spec.minute' => ['nullable', 'integer', 'between:0,59'],
+                'visual_spec.degrees' => ['nullable', 'numeric', 'gt:0', 'lt:360'],
+                'visual_spec.cubes' => ['nullable', 'array', 'between:1,40'],
+                'visual_spec.cubes.*.x' => ['required_with:visual_spec.cubes', 'integer', 'between:-8,8'],
+                'visual_spec.cubes.*.y' => ['required_with:visual_spec.cubes', 'integer', 'between:-8,8'],
+                'visual_spec.cubes.*.z' => ['required_with:visual_spec.cubes', 'integer', 'between:-8,8'],
+                'visual_spec.points' => ['nullable', 'array', 'between:2,6'],
+                'visual_spec.points.*.label' => ['required_with:visual_spec.points', 'string', 'max:30'],
+                'visual_spec.points.*.distance_from_previous' => ['nullable', 'numeric', 'gt:0'],
                 'story_paragraphs' => [$format === 'story' ? 'required' : 'present', 'array', $format === 'story' ? "size:{$paragraphCount}" : 'size:0'],
                 'story_paragraphs.*' => ['required', 'string', 'max:5000'],
                 'questions' => ['required', 'array', "size:{$questionCount}"],
@@ -137,6 +166,18 @@ class GenerateStoryQuestions implements ShouldQueue
                 && ($geometryError = $geometryRenderer->validationError($data['visual_spec'])) !== null) {
                 throw ValidationException::withMessages(['visual_spec' => $geometryError]);
             }
+            if ($educationalMathRenderer->supports($data['visual_spec'] ?? null)
+                && ($visualError = $educationalMathRenderer->validationError($data['visual_spec'])) !== null) {
+                throw ValidationException::withMessages(['visual_spec' => $visualError]);
+            }
+
+            if (data_get($data, 'visual_spec.type') === 'fraction_models') {
+                foreach ($data['visual_spec']['items'] ?? [] as $index => $item) {
+                    if (! isset($item['shape'], $item['total_parts'], $item['shaded_parts'])) {
+                        throw ValidationException::withMessages(["visual_spec.items.{$index}" => 'Model pecahan membutuhkan shape, total_parts, dan shaded_parts.']);
+                    }
+                }
+            }
 
             if ($format === 'direct' && $useIllustration && trim((string) ($data['visual_description'] ?? '')) === '') {
                 throw ValidationException::withMessages([
@@ -150,15 +191,26 @@ class GenerateStoryQuestions implements ShouldQueue
             );
             if ($format === 'direct'
                 && $useIllustration
+                && $illustrationMode === 'lite'
                 && str_contains($precisionContext, 'matematika')
-                && Str::contains($precisionContext, ['pecahan', 'kelompok', 'perkalian'])
+                && $illustrationProfile->requiresVisual(array_column($competencyContext, 'code'))
                 && ! $this->supportsPrecisionVisualSpec($data['visual_spec'] ?? null)) {
                 throw ValidationException::withMessages([
                     'visual_spec' => 'Soal Matematika ini membutuhkan spesifikasi diagram presisi.',
                 ]);
             }
+            if ($format === 'direct'
+                && $useIllustration
+                && $illustrationMode === 'lite'
+                && str_contains($precisionContext, 'matematika')
+                && $illustrationProfile->requiresVisual(array_column($competencyContext, 'code'))
+                && ! $illustrationProfile->acceptsType(array_column($competencyContext, 'code'), data_get($data, 'visual_spec.type'))) {
+                throw ValidationException::withMessages([
+                    'visual_spec' => 'Jenis SVG tidak sesuai dengan kebutuhan subkompetensi Matematika yang dipilih.',
+                ]);
+            }
 
-            foreach (data_get($data, 'visual_spec.items', []) as $index => $item) {
+            foreach (data_get($data, 'visual_spec.type') === 'fraction_models' ? data_get($data, 'visual_spec.items', []) : [] as $index => $item) {
                 if ($item['shaded_parts'] > $item['total_parts']) {
                     throw ValidationException::withMessages([
                         "visual_spec.items.{$index}.shaded_parts" => 'Jumlah bagian diarsir tidak boleh melebihi jumlah seluruh bagian.',
@@ -437,7 +489,7 @@ class GenerateStoryQuestions implements ShouldQueue
     private function supportsPrecisionVisualSpec(mixed $spec): bool
     {
         return is_array($spec)
-            && in_array(data_get($spec, 'type'), ['fraction_models', 'object_groups', 'geometry_2d'], true);
+            && in_array(data_get($spec, 'type'), ['fraction_models', 'object_groups', 'geometry_2d', ...EducationalMathSvgRenderer::TYPES], true);
     }
 
     private function prompt(string $theme, int $paragraphCount, int $questionCount, array $competencies, array $questionBlueprints, array $recentQuestions, string $variationStrategy): string
@@ -465,7 +517,7 @@ Daftar kompetensi yang boleh dipilih:
 PROMPT;
     }
 
-    private function directPrompt(string $exampleQuestion, int $questionCount, array $competencies, string $questionStyle, string $answerFormat, bool $useIllustration, array $questionBlueprints, array $recentQuestions, string $variationStrategy): string
+    private function directPrompt(string $exampleQuestion, int $questionCount, array $competencies, string $questionStyle, string $answerFormat, bool $useIllustration, array $questionBlueprints, array $recentQuestions, string $variationStrategy, string $illustrationProfileDirection, string $illustrationMode): string
     {
         $competencyJson = json_encode($competencies, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
         $exampleDirection = trim($exampleQuestion) !== ''
@@ -477,6 +529,24 @@ PROMPT;
         $illustrationDirection = $useIllustration
             ? 'Gunakan satu ilustrasi visual bersama untuk seluruh soal. Isi visual_description dengan deskripsi gambar yang presisi, termasuk jumlah objek, posisi, bentuk, ukuran, atau data visual yang dibutuhkan. Semua soal harus konsisten dengan ilustrasi tersebut dan tidak boleh membocorkan jawaban.'
             : 'Soal tidak memakai ilustrasi. Isi visual_description dengan string kosong.';
+        $visualSpecDirection = $illustrationMode === 'pro'
+            ? 'Mode ilustrasi PRO memakai API gambar. Isi visual_spec dengan null. Buat visual_description yang lengkap dan hindari tulisan, rumus, proses hitung, hasil turunan, kunci, atau penanda opsi benar pada gambar.'
+            : <<<DIRECTION
+{$illustrationProfileDirection}
+
+Mode ilustrasi LITE memakai SVG lokal. Untuk diagram Matematika, visual_spec WAJIB terstruktur agar sistem menggambar secara presisi. Pilih tepat satu format berikut:
+- geometry_2d: shape square/rectangle/triangle/circle/trapezoid/parallelogram/rhombus/kite/regular_polygon, unit, dimensions.
+- fraction_models: items berisi shape circle/rectangle, total_parts, shaded_parts.
+- object_groups: groups dan objects_per_group.
+- spatial_cubes: cubes berisi koordinat integer x,y,z untuk setiap kubus.
+- solid_3d: shape cube dengan dimensions.side, atau rectangular_prism dengan length,width,height, serta unit.
+- measurement: kind ruler/liquid/mass, value, maximum, unit. Value hanya mengatur posisi objek/jarum/cairan; jangan tuliskan hasil bacaan sebagai jawaban.
+- clock: hour dan minute; gambar tidak menuliskan waktu digital.
+- angle: degrees untuk menentukan arah garis; gambar tidak menuliskan besar sudut.
+- data_chart: style bar/pictogram/table, title, items berisi label dan value; piktogram juga wajib legend_value dan unit.
+- route: points berisi label dan distance_from_previous (mulai titik kedua), serta unit.
+Masukkan hanya data mentah yang disebut dalam soal. Jangan menaruh rumus, proses hitung, hasil turunan, kunci, atau penanda opsi benar di visual. Untuk visual nonmatematika isi visual_spec dengan null.
+DIRECTION;
         $answerFormatDirection = match ($answerFormat) {
             'single_choice' => 'FORMAT JAWABAN WAJIB: Semua soal harus bertipe single_choice dengan 4 opsi dan tepat 1 jawaban benar.',
             'multiple_choice' => 'FORMAT JAWABAN WAJIB: Semua soal harus bertipe multiple_choice (MCMA) dengan 4 opsi dan minimal 2 jawaban benar. Pertanyaan harus memerintahkan siswa memilih semua jawaban yang benar.',
@@ -498,7 +568,9 @@ Buat tepat {$questionCount} variasi soal. Soal harus mengukur kompetensi yang di
 
 {$answerFormatDirection}
 
-{$illustrationDirection} Untuk diagram Matematika, visual_spec WAJIB terstruktur agar sistem menggambar SVG presisi. Gunakan type geometry_2d dengan shape square, rectangle, triangle, circle, trapezoid, parallelogram, rhombus, kite, atau regular_polygon; unit; dan dimensions. Nama dimensions: square=side; rectangle=length,width; triangle/parallelogram=base,height dan side opsional; circle=radius atau diameter; trapezoid=top_base,bottom_base,height dan leg opsional; rhombus/kite=diagonal_1,diagonal_2 dan side opsional; regular_polygon=sides,side. Pastikan semua ukuran konsisten secara geometris. Untuk model pecahan gunakan type fraction_models dengan items berisi shape (circle atau rectangle), total_parts, dan shaded_parts. Untuk kelompok objek gunakan type object_groups dengan groups dan objects_per_group. Untuk visual nonmatematika isi visual_spec dengan null.
+{$illustrationDirection}
+
+{$visualSpecDirection}
 
 {$blueprintDirection}
 

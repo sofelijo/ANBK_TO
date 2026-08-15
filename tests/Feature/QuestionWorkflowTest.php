@@ -391,6 +391,7 @@ class QuestionWorkflowTest extends TestCase
         $this->assertSame(0, $generation->request_payload['paragraph_count']);
         $this->assertSame('reasoning', $generation->request_payload['question_style']);
         $this->assertTrue($generation->request_payload['use_illustration']);
+        $this->assertSame('lite', $generation->request_payload['illustration_mode']);
         $this->assertSame('Jika 3 kotak masing-masing berisi 4 pensil, berapa jumlah seluruh pensil?', $generation->request_payload['example_question']);
         $this->assertSame('direct', $generation->result_payload['format']);
         $this->assertSame(1, $generation->result_payload['question_count']);
@@ -411,6 +412,7 @@ class QuestionWorkflowTest extends TestCase
             ->firstOrFail();
         $this->assertSame(AiGenerationStatus::Completed, $illustration->status);
         $this->assertSame('direct', $illustration->request_payload['format']);
+        $this->assertSame('lite', $illustration->request_payload['illustration_mode']);
         $this->assertTrue(Question::query()
             ->whereIn('id', $generation->result_payload['question_ids'])
             ->get()
@@ -1035,6 +1037,43 @@ class QuestionWorkflowTest extends TestCase
         $svg = Storage::disk('public')->get($generation->result_payload['image_path']);
         $this->assertSame(12, substr_count($svg, '<path'));
         $this->assertSame($generation->result_payload['image_path'], data_get($question->metadata, 'illustration.path'));
+        Http::assertNothingSent();
+    }
+
+    public function test_lite_clock_spec_is_rendered_as_local_svg_without_printing_digital_time(): void
+    {
+        config()->set('ai.driver', 'gemini');
+        config()->set('ai.image.disk', 'public');
+        Storage::fake('public');
+        Http::fake();
+        [$teacher, $competency] = $this->teacherAndCompetency();
+        $question = $this->question($teacher, $competency);
+        $generation = AiGeneration::create([
+            'school_id' => $teacher->school_id,
+            'requested_by' => $teacher->id,
+            'source_question_id' => $question->id,
+            'type' => AiGenerationType::StoryIllustration,
+            'status' => AiGenerationStatus::Pending,
+            'provider' => 'image-router',
+            'model' => 'lite',
+            'input_hash' => hash('sha256', 'lite-clock-svg-test'),
+            'request_payload' => [
+                'question_ids' => [$question->id],
+                'theme' => 'membaca waktu',
+                'illustration_mode' => 'lite',
+                'visual_spec' => ['type' => 'clock', 'hour' => 8, 'minute' => 25],
+            ],
+        ]);
+
+        app(StoryIllustrationService::class)->submit($generation);
+        $generation->refresh();
+        $svg = Storage::disk('public')->get($generation->result_payload['image_path']);
+
+        $this->assertSame(AiGenerationStatus::Completed, $generation->status);
+        $this->assertSame('local-svg', $generation->provider);
+        $this->assertSame('deterministic-math-svg-v2', $generation->model);
+        $this->assertStringContainsString('Jam Analog', $svg);
+        $this->assertStringNotContainsString('08:25', $svg);
         Http::assertNothingSent();
     }
 

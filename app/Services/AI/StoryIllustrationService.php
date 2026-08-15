@@ -13,23 +13,40 @@ use Throwable;
 
 class StoryIllustrationService
 {
-    public function __construct(private readonly GeometrySvgRenderer $geometryRenderer) {}
+    public function __construct(
+        private readonly GeometrySvgRenderer $geometryRenderer,
+        private readonly EducationalMathSvgRenderer $educationalMathRenderer,
+    ) {}
 
     public function submit(AiGeneration $generation): void
     {
+        if (data_get($generation->request_payload, 'illustration_mode', 'lite') !== 'pro'
+            && $this->supportsDeterministicDiagram(data_get($generation->request_payload, 'visual_spec'))) {
+            $this->completeDeterministicDiagram($generation);
+
+            return;
+        }
+
         if (config('ai.driver') === 'fake') {
             $this->completeFake($generation);
 
             return;
         }
 
-        if ($this->supportsDeterministicDiagram(data_get($generation->request_payload, 'visual_spec'))) {
-            $this->completeDeterministicDiagram($generation);
+        if (data_get($generation->request_payload, 'illustration_mode') === 'pro') {
+            try {
+                $this->submitGemini($generation, 'Mode Pro menggunakan Gemini secara langsung.');
+            } catch (Throwable $exception) {
+                $this->fail($generation, $exception->getMessage());
+
+                throw new RuntimeException($exception->getMessage(), previous: $exception);
+            }
 
             return;
         }
 
-        if ($this->isMathOrDiagramRequest($generation)) {
+        if (data_get($generation->request_payload, 'illustration_mode', 'lite') !== 'pro'
+            && $this->isMathOrDiagramRequest($generation)) {
             $this->completeFake($generation, true);
 
             return;
@@ -488,7 +505,8 @@ SVG;
     {
         return is_array($spec)
             && (in_array(data_get($spec, 'type'), ['fraction_models', 'object_groups'], true)
-                || $this->geometryRenderer->supports($spec));
+                || $this->geometryRenderer->supports($spec)
+                || $this->educationalMathRenderer->supports($spec));
     }
 
     private function completeDeterministicDiagram(AiGeneration $generation): void
@@ -498,6 +516,7 @@ SVG;
             'fraction_models' => $this->fractionModelsSvg(data_get($spec, 'items', [])),
             'object_groups' => $this->objectGroupsSvg((int) data_get($spec, 'groups'), (int) data_get($spec, 'objects_per_group')),
             'geometry_2d' => $this->geometryRenderer->render($spec),
+            default => $this->educationalMathRenderer->render($spec),
         };
         $disk = (string) config('ai.image.disk');
         $path = "question-illustrations/{$generation->school_id}/{$generation->id}.svg";
@@ -508,7 +527,11 @@ SVG;
 
         $generation->update([
             'provider' => 'local-svg',
-            'model' => data_get($spec, 'type') === 'geometry_2d' ? 'deterministic-geometry-svg-v3' : 'deterministic-math-svg-v1',
+            'model' => match (data_get($spec, 'type')) {
+                'geometry_2d' => 'deterministic-geometry-svg-v3',
+                'fraction_models', 'object_groups' => 'deterministic-math-svg-v1',
+                default => 'deterministic-math-svg-v2',
+            },
             'result_payload' => [
                 'image_provider' => 'local-svg',
                 'fallback_used' => false,
