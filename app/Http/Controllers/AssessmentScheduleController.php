@@ -22,6 +22,7 @@ class AssessmentScheduleController extends Controller
         return Inertia::render('Schedules/Index', [
             'assessments' => Assessment::query()
                 ->where('status', AssessmentStatus::Published)
+                ->where('settings->type', Assessment::TYPE_TOGETHER)
                 ->orderBy('title')
                 ->get(['id', 'title', 'grade_level']),
             'schedules' => AssessmentSchedule::query()
@@ -61,6 +62,13 @@ class AssessmentScheduleController extends Controller
         ]);
 
         $date = CarbonImmutable::createFromFormat('Y-m-d', $data['scheduled_date'])->startOfDay();
+        $assessment = Assessment::query()->findOrFail($data['assessment_id']);
+        if (! $assessment->requiresSchoolSchedule()) {
+            throw ValidationException::withMessages([
+                'assessment_id' => 'Jadwal sekolah hanya dapat diambil untuk Try Out Bersama.',
+            ]);
+        }
+
         if (! $date->isWeekday()) {
             throw ValidationException::withMessages([
                 'scheduled_date' => 'Jadwal hanya tersedia hari Senin sampai Jumat.',

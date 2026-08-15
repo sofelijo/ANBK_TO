@@ -1,7 +1,7 @@
-name: tka-cerdas
+name: toa
 
 x-app: &app
-  image: tka-cerdas-app:latest
+  image: toa-app:latest
   build:
     context: .
   env_file:
@@ -86,7 +86,12 @@ services:
 
 volumes:
   app_storage:
+    name: tka-cerdas_app_storage
   caddy_data:
+    name: tka-cerdas_caddy_data
   caddy_config:
+    name: tka-cerdas_caddy_config
   postgres_data:
+    name: tka-cerdas_postgres_data
   redis_data:
+    name: tka-cerdas_redis_data

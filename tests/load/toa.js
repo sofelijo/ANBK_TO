@@ -24,7 +24,7 @@ const password = __ENV.LOAD_PASSWORD || 'load-test-only';
 
 export default function () {
     const suffix = String(__VU).padStart(4, '0');
-    const email = `loadtest+${suffix}@tka.invalid`;
+    const email = `loadtest+${suffix}@toa.invalid`;
     const loginPage = http.get(`${baseUrl}/login`);
     const tokenCookie = loginPage.cookies['XSRF-TOKEN']?.[0]?.value;
 

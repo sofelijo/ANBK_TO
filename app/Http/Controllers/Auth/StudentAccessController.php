@@ -67,7 +67,7 @@ class StudentAccessController extends Controller
             $student = User::create([
                 'school_id' => $school->id,
                 'name' => $name,
-                'email' => "student.{$school->id}.{$nisn}@tka.local",
+                'email' => "student.{$school->id}.{$nisn}@toa.local",
                 'password' => Str::random(40),
                 'role' => UserRole::Student,
                 'student_identifier' => $nisn,

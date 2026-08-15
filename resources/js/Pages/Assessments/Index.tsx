@@ -25,7 +25,7 @@ type Assessment = {
     ends_at?: string;
     schedules_count?: number;
     schedules?: { id: number; school_npsn: string; starts_at: string; ends_at: string; session_number: number }[];
-    settings?: { type_label?: string; selection_mode?: string };
+    settings?: { type?: 'regular' | 'together'; type_label?: string; selection_mode?: string };
     attempts?: { public_id: string; status: string }[];
     competency_coverage?: Record<number, number>;
 };
@@ -33,12 +33,10 @@ type Assessment = {
 export default function Index({
     assessments,
     canManage,
-    bookingRequired,
     subCompetencies,
 }: {
     assessments: Assessment[];
     canManage: boolean;
-    bookingRequired: boolean;
     subCompetencies: SubCompetency[];
 }) {
     return (
@@ -64,28 +62,18 @@ export default function Index({
         >
             <Head title={canManage ? 'Paket Ujian' : 'Try Out'} />
             <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-                {!canManage && (
-                    <div
-                        className={`mb-5 rounded-xl border p-4 text-sm ${bookingRequired ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-emerald-200 bg-emerald-50 text-emerald-900'}`}
-                    >
-                        {bookingRequired
-                            ? 'Saat ini jam operasional sekolah. Try out hanya dapat dikerjakan jika guru sudah mengambil jadwal untuk NPSN sekolahmu.'
-                            : 'Saat ini di luar jam operasional. Semua try out terbit dapat digunakan untuk belajar mandiri di rumah tanpa booking jadwal.'}
-                    </div>
-                )}
                 {assessments.length === 0 ? (
                     <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">
-                        {!canManage && bookingRequired
-                            ? 'Belum ada try out terjadwal untuk sekolahmu. Hubungi guru.'
-                            : 'Belum ada paket yang tersedia.'}
+                        Belum ada paket yang tersedia.
                     </div>
                 ) : (
                     <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
                         {assessments.map((assessment) => {
                             const attempt = assessment.attempts?.[0];
+                            const isTogether = assessment.settings?.type === 'together';
                             const schoolSchedule = assessment.schedules?.[0];
-                            const effectiveStart = schoolSchedule?.starts_at || assessment.starts_at;
-                            const effectiveEnd = schoolSchedule?.ends_at || assessment.ends_at;
+                            const effectiveStart = isTogether ? schoolSchedule?.starts_at : assessment.starts_at;
+                            const effectiveEnd = isTogether ? schoolSchedule?.ends_at : assessment.ends_at;
                             const startsInFuture = effectiveStart && new Date(effectiveStart).getTime() > Date.now();
                             const hasEnded = effectiveEnd && new Date(effectiveEnd).getTime() < Date.now();
 
@@ -119,8 +107,14 @@ export default function Index({
                                         {assessment.settings?.type_label || 'Try Out Reguler'}
                                     </p>
                                     <p className="mt-2 flex-1 text-sm leading-6 text-slate-500">
-                                        {assessment.description || 'Paket try out TKA.'}
+                                        {assessment.description || 'Paket Try Out Adaptif.'}
                                     </p>
+
+                                    {!canManage && isTogether && (
+                                        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900">
+                                            Saat ini jam operasional sekolah. Try out hanya dapat dikerjakan jika guru sudah mengambil jadwal untuk NPSN sekolahmu.
+                                        </div>
+                                    )}
 
                                     {/* Sub-competency coverage badge (manager only) */}
                                     {canManage && hasSlots && (
@@ -212,6 +206,13 @@ export default function Index({
                                                 </button>
                                             )}
                                         </div>
+                                    ) : isTogether && !schoolSchedule ? (
+                                        <button
+                                            disabled
+                                            className="mt-4 rounded-lg bg-amber-100 px-4 py-2 text-sm font-semibold text-amber-800"
+                                        >
+                                            Guru belum mengambil jadwal
+                                        </button>
                                     ) : startsInFuture ? (
                                         <button
                                             disabled

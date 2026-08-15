@@ -69,7 +69,7 @@ export default function Create({ questions, competencies, subjects, assessmentTy
         description: '',
         grade_level: 6,
         duration_minutes: 90,
-        assessment_type: 'tryout',
+        assessment_type: 'regular',
         custom_type_name: '',
         selection_mode: 'automatic',
         question_count: 30,
@@ -234,7 +234,7 @@ export default function Create({ questions, competencies, subjects, assessmentTy
             subject_id: currentData.subject_id ? Number(currentData.subject_id) : null,
             starts_at: scheduleEnabled && currentData.starts_at ? currentData.starts_at : null,
             ends_at: scheduleEnabled && currentData.ends_at ? currentData.ends_at : null,
-            custom_type_name: currentData.assessment_type === 'custom' ? currentData.custom_type_name : null,
+            custom_type_name: null,
             description: currentData.description || null,
         }));
 
@@ -303,7 +303,7 @@ export default function Create({ questions, competencies, subjects, assessmentTy
                             <input
                                 value={data.title}
                                 onChange={(e) => setData('title', e.target.value)}
-                                placeholder="Contoh: Simulasi TKA Semester Ganjil"
+                                placeholder="Contoh: Simulasi Adaptif Semester Ganjil"
                                 className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500"
                             />
                             <InputError message={errors.title} />
@@ -339,17 +339,10 @@ export default function Create({ questions, competencies, subjects, assessmentTy
                             </select>
                         </label>
 
-                        {data.assessment_type === 'custom' && (
-                            <label className="text-sm font-medium text-slate-700 sm:col-span-2">
-                                Nama jenis custom
-                                <input
-                                    value={data.custom_type_name}
-                                    onChange={(e) => setData('custom_type_name', e.target.value)}
-                                    placeholder="Contoh: Seleksi Olimpiade Sekolah"
-                                    className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500"
-                                />
-                                <InputError message={errors.custom_type_name} />
-                            </label>
+                        {data.assessment_type === 'together' && (
+                            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:col-span-2">
+                                Saat ini jam operasional sekolah. Try out hanya dapat dikerjakan jika guru sudah mengambil jadwal untuk NPSN sekolahmu.
+                            </div>
                         )}
 
                         <label className="text-sm font-medium text-slate-700">

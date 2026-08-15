@@ -182,6 +182,7 @@ class AttemptWorkflowTest extends TestCase
         $this->actingAs($student)
             ->get(route('attempts.show', $attempt->public_id))
             ->assertInertia(fn (Assert $page) => $page
+                ->where('attempt.remaining_seconds', fn ($value) => is_int($value))
                 ->where('attempt.questions.0.prompt', 'Pilih jawaban yang tepat.')
                 ->where('attempt.questions.0.options.0.content', 'Jawaban benar'));
 
@@ -373,7 +374,7 @@ class AttemptWorkflowTest extends TestCase
         $this->assertSame(AttemptStatus::Submitted, $attempt->fresh()->status);
     }
 
-    public function test_teacher_can_create_a_custom_automatic_assessment_with_exact_settings(): void
+    public function test_teacher_can_create_a_together_automatic_assessment_with_exact_settings(): void
     {
         [, , , , , $teacher] = $this->scenario();
 
@@ -383,8 +384,7 @@ class AttemptWorkflowTest extends TestCase
                 'description' => 'Paket custom untuk seleksi internal.',
                 'grade_level' => 6,
                 'duration_minutes' => 45,
-                'assessment_type' => 'custom',
-                'custom_type_name' => 'Seleksi Literasi',
+                'assessment_type' => 'together',
                 'selection_mode' => 'automatic',
                 'question_count' => 2,
                 'starts_at' => now()->addDay()->format('Y-m-d H:i:s'),
@@ -399,7 +399,7 @@ class AttemptWorkflowTest extends TestCase
         $assessment = Assessment::query()->where('title', 'Seleksi Literasi Sekolah')->firstOrFail();
         $this->assertCount(2, $assessment->questions);
         $this->assertSame(45, $assessment->duration_minutes);
-        $this->assertSame('Seleksi Literasi', $assessment->settings['type_label']);
+        $this->assertSame('Try Out Bersama', $assessment->settings['type_label']);
         $this->assertSame('automatic', $assessment->settings['selection_mode']);
         $this->assertTrue($assessment->settings['shuffle_questions']);
         $this->assertTrue($assessment->settings['shuffle_options']);
@@ -420,7 +420,7 @@ class AttemptWorkflowTest extends TestCase
                 'title' => 'Paket Minim Pengulangan',
                 'grade_level' => 6,
                 'duration_minutes' => 30,
-                'assessment_type' => 'tryout',
+                'assessment_type' => 'regular',
                 'selection_mode' => 'automatic',
                 'question_count' => 1,
                 'shuffle_questions' => false,
@@ -446,7 +446,7 @@ class AttemptWorkflowTest extends TestCase
             'title' => 'Paket Personal Siswa',
             'grade_level' => 6,
             'duration_minutes' => 30,
-            'assessment_type' => 'tryout',
+            'assessment_type' => 'regular',
             'selection_mode' => 'automatic',
             'question_count' => 1,
             'shuffle_questions' => false,
@@ -519,7 +519,7 @@ class AttemptWorkflowTest extends TestCase
                 'description' => 'Komposisi kompetensi terstruktur.',
                 'grade_level' => 6,
                 'duration_minutes' => 45,
-                'assessment_type' => 'tryout',
+                'assessment_type' => 'regular',
                 'selection_mode' => 'blueprint',
                 'question_count' => 3,
                 'blueprint_rows' => [
@@ -563,7 +563,7 @@ class AttemptWorkflowTest extends TestCase
                 'description' => 'Kuota sederhana per kompetensi.',
                 'grade_level' => 6,
                 'duration_minutes' => 45,
-                'assessment_type' => 'tryout',
+                'assessment_type' => 'regular',
                 'selection_mode' => 'competency',
                 'question_count' => 3,
                 'competency_rows' => [
@@ -601,7 +601,7 @@ class AttemptWorkflowTest extends TestCase
                 'title' => 'Paket manual',
                 'grade_level' => 6,
                 'duration_minutes' => 30,
-                'assessment_type' => 'tryout',
+                'assessment_type' => 'regular',
                 'selection_mode' => 'manual',
                 'question_count' => 2,
                 'question_ids' => [$informationQuestion->id],
@@ -647,8 +647,7 @@ class AttemptWorkflowTest extends TestCase
                 'description' => 'Petunjuk baru.',
                 'grade_level' => 6,
                 'duration_minutes' => 75,
-                'assessment_type' => 'diagnostic',
-                'custom_type_name' => '',
+                'assessment_type' => 'regular',
                 'selection_mode' => 'manual',
                 'question_count' => 1,
                 'question_ids' => [$informationQuestion->id],
@@ -665,7 +664,7 @@ class AttemptWorkflowTest extends TestCase
         $this->assertSame('Diagnostik Literasi Diperbarui', $assessment->title);
         $this->assertSame(75, $assessment->duration_minutes);
         $this->assertSame(AssessmentStatus::Draft, $assessment->status);
-        $this->assertSame('Tes Diagnostik', $assessment->settings['type_label']);
+        $this->assertSame('Try Out Reguler', $assessment->settings['type_label']);
         $this->assertCount(1, $assessment->questions);
     }
 

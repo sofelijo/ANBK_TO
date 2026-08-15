@@ -53,14 +53,15 @@ const hasCompleteAnswer = (question: ExamQuestion, response?: ResponseValue) => 
 };
 
 export default function Show({ attempt }: { attempt: Attempt }) {
-    const storageKey = `tka-attempt-${attempt.public_id}`;
+    const storageKey = `toa-attempt-${attempt.public_id}`;
+    const legacyStorageKey = `tka-attempt-${attempt.public_id}`;
     const initialResponses = Object.fromEntries(attempt.questions.map((question) => [question.id, question.response || {}]));
     const [responses, setResponses] = useState<Record<number, ResponseValue>>(() => {
-        const local = window.localStorage.getItem(storageKey);
+        const local = window.localStorage.getItem(storageKey) ?? window.localStorage.getItem(legacyStorageKey);
         return local ? { ...initialResponses, ...JSON.parse(local) } : initialResponses;
     });
     const [currentIndex, setCurrentIndex] = useState(0);
-    const [remaining, setRemaining] = useState(attempt.remaining_seconds);
+    const [remaining, setRemaining] = useState(() => Math.max(0, Math.ceil(attempt.remaining_seconds)));
     const [saveStatus, setSaveStatus] = useState('Tersimpan');
     const [selectedLeft, setSelectedLeft] = useState<Record<number, string | undefined>>({});
     const submitted = useRef(false);
@@ -79,6 +80,7 @@ export default function Show({ attempt }: { attempt: Attempt }) {
 
     useEffect(() => {
         window.localStorage.setItem(storageKey, JSON.stringify(responses));
+        window.localStorage.removeItem(legacyStorageKey);
     }, [responses]);
 
     useEffect(() => {
@@ -182,20 +184,104 @@ export default function Show({ attempt }: { attempt: Attempt }) {
         }
         submitted.current = true;
         window.localStorage.removeItem(storageKey);
+        window.localStorage.removeItem(legacyStorageKey);
         router.post(route('attempts.submit', attempt.public_id));
     };
 
-    const minutes = Math.floor(remaining / 60).toString().padStart(2, '0');
+    const totalDurationSeconds = Math.max(1, attempt.assessment.duration_minutes * 60);
+    const hours = Math.floor(remaining / 3600).toString().padStart(2, '0');
+    const minutes = Math.floor((remaining % 3600) / 60).toString().padStart(2, '0');
     const seconds = (remaining % 60).toString().padStart(2, '0');
+    const remainingPercentage = Math.min(100, Math.max(0, (remaining / totalDurationSeconds) * 100));
+    const timerState = remaining <= 60 ? 'critical' : remaining <= 300 ? 'warning' : 'normal';
+    const timerStyles = {
+        normal: {
+            card: 'border-slate-200 bg-white',
+            icon: 'bg-emerald-100 text-emerald-700',
+            label: 'text-slate-500',
+            value: 'text-slate-950',
+            progress: 'bg-emerald-500',
+        },
+        warning: {
+            card: 'border-amber-300 bg-amber-50',
+            icon: 'bg-amber-200 text-amber-800',
+            label: 'text-amber-700',
+            value: 'text-amber-950',
+            progress: 'bg-amber-500',
+        },
+        critical: {
+            card: 'border-rose-300 bg-rose-50',
+            icon: 'bg-rose-200 text-rose-800 animate-pulse',
+            label: 'text-rose-700',
+            value: 'text-rose-950',
+            progress: 'bg-rose-500',
+        },
+    }[timerState];
     const hasStimulus = Boolean(current.stimulus?.trim() || current.illustration_url);
 
     return (
         <div className="min-h-screen bg-slate-100">
             <Head title={`Mengerjakan ${attempt.assessment.title}`} />
-            <header className="sticky top-0 z-10 border-b border-slate-200 bg-white">
-                <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6">
-                    <div><p className="text-xs font-semibold uppercase tracking-wider text-emerald-600">{attempt.assessment.type_label}</p><h1 className="font-semibold text-slate-900">{attempt.assessment.title}</h1></div>
-                    <div className="flex items-center gap-4"><button onClick={enterFullscreen} className="hidden rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-600 sm:block">Layar penuh</button><div className="text-right"><p className={`font-mono text-xl font-bold ${remaining < 300 ? 'text-rose-600' : 'text-slate-900'}`}>{minutes}:{seconds}</p><p className="text-xs text-slate-500">{saveStatus}</p></div></div>
+            <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur">
+                <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
+                    <div className="min-w-0">
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-600 sm:text-xs">
+                            {attempt.assessment.type_label}
+                        </p>
+                        <h1 className="truncate text-sm font-semibold text-slate-900 sm:text-base">
+                            {attempt.assessment.title}
+                        </h1>
+                    </div>
+
+                    <div className="flex shrink-0 items-center gap-3">
+                        <button
+                            onClick={enterFullscreen}
+                            className="hidden rounded-xl border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 sm:block"
+                        >
+                            Layar penuh
+                        </button>
+
+                        <div>
+                            <div
+                                role="timer"
+                                aria-label={`Sisa waktu ${hours} jam ${minutes} menit ${seconds} detik`}
+                                className={`rounded-2xl border px-3 py-2 shadow-sm transition-colors sm:px-4 ${timerStyles.card}`}
+                            >
+                                <div className="flex items-center gap-2.5 sm:gap-3">
+                                    <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl sm:h-9 sm:w-9 ${timerStyles.icon}`}>
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 sm:h-5 sm:w-5" aria-hidden="true">
+                                            <circle cx="12" cy="13" r="8" />
+                                            <path strokeLinecap="round" d="M12 9v4l2.5 1.5M9 2h6M12 2v3" />
+                                        </svg>
+                                    </span>
+
+                                    <div>
+                                        <p className={`text-[9px] font-bold uppercase tracking-[0.16em] sm:text-[10px] ${timerStyles.label}`}>
+                                            {timerState === 'critical' ? 'Segera selesai' : timerState === 'warning' ? 'Waktu menipis' : 'Sisa waktu'}
+                                        </p>
+                                        <div className={`mt-0.5 flex items-baseline font-mono font-black tabular-nums leading-none ${timerStyles.value}`}>
+                                            <span className="text-lg sm:text-2xl">{hours}</span>
+                                            <span className="mx-0.5 text-sm opacity-40 sm:mx-1 sm:text-lg">:</span>
+                                            <span className="text-lg sm:text-2xl">{minutes}</span>
+                                            <span className="mx-0.5 text-sm opacity-40 sm:mx-1 sm:text-lg">:</span>
+                                            <span className="text-lg sm:text-2xl">{seconds}</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                            </div>
+                            <p className="mt-1 flex items-center justify-end gap-1.5 text-[10px] font-medium text-slate-500 sm:text-xs">
+                                <span className={`h-1.5 w-1.5 rounded-full ${saveStatus === 'Tersimpan' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                                {saveStatus}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+                <div className="h-1.5 w-full bg-slate-100" aria-hidden="true">
+                    <div
+                        className={`ml-auto h-full transition-[width,background-color] duration-1000 ease-linear ${timerStyles.progress}`}
+                        style={{ width: `${remainingPercentage}%` }}
+                    />
                 </div>
             </header>
 

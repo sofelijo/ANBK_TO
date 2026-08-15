@@ -7,7 +7,6 @@ use App\Enums\QuestionStatus;
 use App\Enums\QuestionType;
 use App\Enums\UserRole;
 use App\Models\Assessment;
-use App\Models\AssessmentSchedule;
 use App\Models\Competency;
 use App\Models\Question;
 use App\Models\Subject;
@@ -32,7 +31,6 @@ class AssessmentController extends Controller
             return to_route('schedules.index');
         }
 
-        $bookingRequired = AssessmentSchedule::bookingRequired();
         $query = Assessment::query()
             ->withCount(['questions', 'attempts'])
             ->latest();
@@ -41,9 +39,7 @@ class AssessmentController extends Controller
             $schoolNpsn = $user->school()->value('npsn');
             $query->where('status', AssessmentStatus::Published)
                 ->where('grade_level', $user->grade_level)
-                ->when($bookingRequired, fn ($assessments) => $assessments
-                    ->whereHas('schedules', fn ($schedules) => $schedules->where('school_npsn', $schoolNpsn))
-                    ->with(['schedules' => fn ($schedules) => $schedules->where('school_npsn', $schoolNpsn)]))
+                ->with(['schedules' => fn ($schedules) => $schedules->where('school_npsn', $schoolNpsn)])
                 ->with(['attempts' => fn ($attempts) => $attempts->where('user_id', $user->id)]);
         } else {
             $query->where('school_id', $user->school_id)
@@ -66,6 +62,11 @@ class AssessmentController extends Controller
         return Inertia::render('Assessments/Index', [
             'assessments' => $assessments->map(fn (Assessment $a) => [
                 ...$a->toArray(),
+                'settings' => [
+                    ...($a->settings ?? []),
+                    'type' => $a->assessmentType(),
+                    'type_label' => config("assessment.types.{$a->assessmentType()}"),
+                ],
                 'competency_coverage' => $user->hasRole(UserRole::Admin, UserRole::Teacher)
                     ? $a->questions
                         ->pluck('competency')
@@ -76,7 +77,6 @@ class AssessmentController extends Controller
                     : null,
             ]),
             'canManage' => $user->hasRole(UserRole::Admin, UserRole::Teacher),
-            'bookingRequired' => $bookingRequired,
             'subCompetencies' => $user->hasRole(UserRole::Admin, UserRole::Teacher)
                 ? $subCompetencies->values()
                 : [],
@@ -158,7 +158,7 @@ class AssessmentController extends Controller
                 $q->whereHas('competency', fn ($c) => $c->where('subject_id', $assessment->subject_id));
             })
             ->whereNotIn('id', $attachedQuestionIds)
-            ->with(['competency:id,name', 'options'])
+            ->with(['competency:id,parent_id,code,name', 'competency.parent:id,name', 'options'])
             ->latest()
             ->limit(100)
             ->get()
@@ -169,7 +169,10 @@ class AssessmentController extends Controller
                 'explanation' => $q->explanation,
                 'type' => $q->type,
                 'difficulty' => $q->difficulty,
+                'competency_id' => $q->competency?->id,
                 'competency_name' => $q->competency?->name ?? '-',
+                'competency_code' => $q->competency?->code ?? '-',
+                'parent_competency_name' => $q->competency?->parent?->name ?? '',
                 'options' => $q->options->map(fn ($opt) => [
                     'id' => $opt->id,
                     'label' => $opt->label,
@@ -300,10 +303,8 @@ class AssessmentController extends Controller
                 'description' => $assessment->description ?? '',
                 'grade_level' => $assessment->grade_level,
                 'duration_minutes' => $assessment->duration_minutes,
-                'assessment_type' => data_get($settings, 'type', 'tryout'),
-                'custom_type_name' => data_get($settings, 'type') === 'custom'
-                    ? data_get($settings, 'type_label', '')
-                    : '',
+                'assessment_type' => $assessment->assessmentType(),
+                'custom_type_name' => '',
                 'selection_mode' => data_get($settings, 'selection_mode', 'manual'),
                 'question_count' => $assessment->questions->count(),
                 'question_ids' => $assessment->questions->pluck('id')->all(),
@@ -375,7 +376,6 @@ class AssessmentController extends Controller
             'subject_id' => $request->input('subject_id') ? (int) $request->input('subject_id') : null,
             'starts_at' => $request->input('starts_at') ?: null,
             'ends_at' => $request->input('ends_at') ?: null,
-            'custom_type_name' => $request->input('custom_type_name') ?: null,
             'description' => $request->input('description') ?: null,
         ]);
 
@@ -388,7 +388,6 @@ class AssessmentController extends Controller
             'grade_level' => ['required', 'integer', Rule::in([6, 9, 12])],
             'duration_minutes' => ['required', 'integer', 'between:5,480'],
             'assessment_type' => ['required', 'string', Rule::in(array_keys(config('assessment.types')))],
-            'custom_type_name' => ['nullable', 'required_if:assessment_type,custom', 'string', 'max:100'],
             'selection_mode' => ['required', Rule::in(['manual', 'automatic', 'competency', 'blueprint'])],
             'question_count' => ['required', 'integer', 'between:1,100'],
             'question_ids' => ['nullable', 'required_if:selection_mode,manual', 'array', 'max:100'],
@@ -416,7 +415,6 @@ class AssessmentController extends Controller
             'duration_minutes.between' => 'Durasi pengerjaan harus antara 5 sampai 480 menit.',
             'question_count.required' => 'Jumlah soal wajib diisi.',
             'question_count.between' => 'Jumlah soal harus antara 1 sampai 100.',
-            'custom_type_name.required_if' => 'Nama jenis try out khusus wajib diisi.',
             'ends_at.after' => 'Waktu ditutup harus setelah waktu mulai tersedia.',
         ]);
 
@@ -595,9 +593,7 @@ class AssessmentController extends Controller
 
     private function attributes(array $data, array $existingSettings = [], array $candidateQuestionIds = []): array
     {
-        $typeLabel = $data['assessment_type'] === 'custom'
-            ? trim($data['custom_type_name'])
-            : config("assessment.types.{$data['assessment_type']}");
+        $typeLabel = config("assessment.types.{$data['assessment_type']}");
 
         return [
             'subject_id' => $data['subject_id'] ?? null,

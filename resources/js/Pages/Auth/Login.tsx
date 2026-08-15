@@ -57,7 +57,7 @@ export default function Login({
 
             <div className="mb-6 text-center">
                 <h1 className="text-2xl font-bold text-gray-900">
-                    Masuk TKA Cerdas
+                    Masuk TOA
                 </h1>
                 <p className="mt-1 text-sm text-gray-600">
                     Pilih cara masuk sesuai akunmu.

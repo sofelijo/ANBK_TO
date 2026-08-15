@@ -96,11 +96,9 @@ export default function AuthenticatedLayout({
                                 href={route('dashboard')}
                                 className="flex shrink-0 items-center gap-3"
                             >
-                                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-600 p-2 text-white">
-                                    <ApplicationLogo className="h-full w-full fill-current" />
-                                </span>
+                                <ApplicationLogo className="h-9 w-9" />
                                 <span className="font-semibold text-slate-900">
-                                    TKA Cerdas
+                                    TOA
                                 </span>
                             </Link>
 

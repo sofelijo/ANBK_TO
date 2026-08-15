@@ -4,7 +4,7 @@ set -euo pipefail
 
 backup_directory="${1:-./backups}"
 timestamp="$(date +%Y-%m-%d-%H%M%S)"
-backup_path="${backup_directory}/tka-${timestamp}.dump"
+backup_path="${backup_directory}/toa-${timestamp}.dump"
 partial_path="${backup_path}.partial"
 
 mkdir -p "${backup_directory}"

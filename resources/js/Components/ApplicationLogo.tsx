@@ -10,20 +10,30 @@ export default function ApplicationLogo(props: SVGAttributes<SVGElement>) {
         >
             <rect width="64" height="64" rx="18" fill="#059669" />
             <path
-                d="M14 18.5c7.47 0 11.73 1.73 18 6.5v25c-6.27-4.77-10.53-6.5-18-6.5v-25Z"
+                d="M14 26.5 42 17v30L14 37.5v-11Z"
+                fill="white"
+                stroke="white"
+                strokeWidth="3"
+                strokeLinejoin="round"
+            />
+            <path
+                d="M42 22h4.5a4.5 4.5 0 0 1 4.5 4.5v11a4.5 4.5 0 0 1-4.5 4.5H42V22Z"
                 stroke="white"
                 strokeWidth="3.5"
                 strokeLinejoin="round"
             />
             <path
-                d="M50 18.5c-7.47 0-11.73 1.73-18 6.5v25c6.27-4.77 10.53-6.5 18-6.5v-25Z"
-                stroke="white"
-                strokeWidth="3.5"
+                d="m23 40 3 10h10l-4-7"
+                stroke="#FDE68A"
+                strokeWidth="4"
+                strokeLinecap="round"
                 strokeLinejoin="round"
             />
             <path
-                d="m44 9 1.4 3.1L48.5 13.5l-3.1 1.4L44 18l-1.4-3.1-3.1-1.4 3.1-1.4L44 9Z"
-                fill="#FDE68A"
+                d="m10 23-3-3m3 21-3 3m2-12H5"
+                stroke="#FDE68A"
+                strokeWidth="3"
+                strokeLinecap="round"
             />
         </svg>
     );

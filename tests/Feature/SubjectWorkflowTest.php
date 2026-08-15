@@ -22,7 +22,7 @@ class SubjectWorkflowTest extends TestCase
         $this->actingAs($teacher)->post(route('subjects.store'), [
             'code' => ' bind ',
             'name' => ' Bahasa   Indonesia ',
-            'description' => 'Mapel literasi TKA.',
+            'description' => 'Mapel literasi TOA.',
             'ai_question_format' => 'story',
         ])->assertRedirect(route('subjects.index'));
 
@@ -45,12 +45,12 @@ class SubjectWorkflowTest extends TestCase
 
         $this->actingAs($teacher)->put(route('subjects.update', $subject), [
             'code' => 'BIND',
-            'name' => 'Bahasa Indonesia TKA',
+            'name' => 'Bahasa Indonesia TOA',
             'description' => null,
             'ai_question_format' => 'story',
         ])->assertRedirect(route('subjects.index'));
 
-        $this->assertSame('Bahasa Indonesia TKA', $subject->fresh()->name);
+        $this->assertSame('Bahasa Indonesia TOA', $subject->fresh()->name);
 
         $this->actingAs($teacher)
             ->delete(route('subjects.destroy', $subject))

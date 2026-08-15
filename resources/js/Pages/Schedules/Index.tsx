@@ -50,7 +50,7 @@ export default function Index({ assessments, schedules, slots, capacity, schoolN
 
                 <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                     <h2 className="font-semibold text-slate-900">Tambahkan jadwal sekolah</h2>
-                    <p className="mt-1 text-sm text-slate-500">Booking otomatis memakai NPSN sekolah akun guru. Di luar jam operasional, siswa dapat memakai try out tanpa booking untuk belajar di rumah.</p>
+                    <p className="mt-1 text-sm text-slate-500">Booking memakai NPSN sekolah akun guru dan hanya berlaku untuk Try Out Bersama. Try Out Reguler dapat dikerjakan tanpa booking jadwal.</p>
                     <div className="mt-4 rounded-xl bg-indigo-50 px-4 py-3 text-sm text-indigo-800">NPSN sekolah Anda: <strong className="font-mono">{schoolNpsn}</strong></div>
                     <InputError message={(errors as Record<string, string>).school_npsn} className="mt-2" />
                     {assessments.length === 0 ? (

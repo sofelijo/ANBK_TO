@@ -6,7 +6,6 @@ use App\Enums\AssessmentStatus;
 use App\Enums\AttemptStatus;
 use App\Enums\QuestionType;
 use App\Models\Assessment;
-use App\Models\AssessmentSchedule;
 use App\Models\Attempt;
 use App\Models\Question;
 use App\Services\AI\AiManager;
@@ -43,7 +42,7 @@ class AttemptController extends Controller
         abort_if($assessment->ends_at?->isPast(), 403, 'Try out telah ditutup.');
         $attemptStartedAt = now();
 
-        if (AssessmentSchedule::bookingRequired()) {
+        if ($assessment->requiresSchoolSchedule()) {
             $schoolNpsn = $user->school()->value('npsn');
             $schedule = $assessment->schedules()
                 ->where('school_npsn', $schoolNpsn)
@@ -123,15 +122,15 @@ class AttemptController extends Controller
             'attempt' => [
                 'public_id' => $attempt->public_id,
                 'started_at' => $attempt->started_at,
-                'remaining_seconds' => max(
+                'remaining_seconds' => (int) ceil(max(
                     0,
                     ($attempt->assessment->duration_minutes * 60)
                     - $attempt->started_at->diffInSeconds(now()),
-                ),
+                )),
                 'assessment' => [
                     'title' => $attempt->assessment->title,
                     'duration_minutes' => $attempt->assessment->duration_minutes,
-                    'type_label' => data_get($settings, 'type_label', 'Try Out TKA'),
+                    'type_label' => data_get($settings, 'type_label', 'Try Out Adaptif'),
                     'show_navigation' => (bool) data_get($settings, 'show_navigation', true),
                     'require_all_answers' => (bool) data_get($settings, 'require_all_answers', false),
                 ],

@@ -8,11 +8,7 @@ return [
     ],
 
     'types' => [
-        'tryout' => 'Try Out Reguler',
-        'simulation' => 'Simulasi TKA',
-        'diagnostic' => 'Tes Diagnostik',
-        'practice' => 'Latihan Harian',
-        'remedial' => 'Remedial',
-        'custom' => 'Jenis Custom',
+        'regular' => 'Try Out Reguler',
+        'together' => 'Try Out Bersama',
     ],
 ];

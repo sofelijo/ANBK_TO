@@ -141,7 +141,7 @@ class GenerateQuestionVariants implements ShouldQueue
         $sourceJson = json_encode($source, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
 
         return <<<PROMPT
-Anda membantu guru membuat bank soal try out TKA. Buat tepat 3 variasi dari soal sumber di bawah ini.
+Anda membantu guru membuat bank soal Try Out Adaptif. Buat tepat 3 variasi dari soal sumber di bawah ini.
 
 Pertahankan kompetensi, bentuk soal, jenjang kelas {$question->grade_level}, dan tingkat kognitif. Ubah konteks, angka, tokoh, atau distraktor secara bermakna; jangan sekadar mengganti beberapa kata. Pastikan soal tidak ambigu, kunci benar, semua informasi yang diperlukan tersedia, dan bahasa sesuai pelajar Indonesia.
 

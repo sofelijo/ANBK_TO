@@ -111,7 +111,7 @@ class AssessmentMonitoringWorkflowTest extends TestCase
         $assessment = Assessment::create([
             'school_id' => $ownerSchool->id,
             'created_by' => $owner->id,
-            'title' => 'Try Out TKA Serentak',
+            'title' => 'Try Out Adaptif Serentak',
             'grade_level' => 6,
             'duration_minutes' => 150,
             'status' => AssessmentStatus::Published,

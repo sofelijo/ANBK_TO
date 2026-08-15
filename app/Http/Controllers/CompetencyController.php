@@ -34,7 +34,11 @@ class CompetencyController extends Controller
             ->when($request->integer('grade_level'), fn ($query, int $grade) => $query->where('grade_level', $grade))
             ->when($request->integer('subject_id'), fn ($query, int $subjectId) => $query->where('subject_id', $subjectId))
             ->with(['parent:id,code,name', 'subject:id,code,name'])
-            ->withCount(['questions', 'children'])
+            ->withCount([
+                'questions',
+                'children',
+                'subcompetencyQuestions' => fn ($query) => $query->where('questions.school_id', $schoolId),
+            ])
             ->orderBy('grade_level')
             ->orderByRaw('COALESCE(parent_id, id)')
             ->orderBy('parent_id')
@@ -51,7 +55,9 @@ class CompetencyController extends Controller
                 'grade_level' => $competency->grade_level,
                 'subject' => $competency->subject,
                 'parent' => $competency->parent,
-                'questions_count' => $competency->questions_count,
+                'questions_count' => $competency->parent_id === null
+                    ? $competency->subcompetency_questions_count
+                    : $competency->questions_count,
                 'children_count' => $competency->children_count,
                 'can_manage' => $competency->school_id === $schoolId,
             ]),

@@ -54,7 +54,7 @@ class AssessmentScheduleWorkflowTest extends TestCase
         ])->assertSessionHasErrors('scheduled_date');
     }
 
-    public function test_only_scheduled_school_can_see_and_start_during_its_session(): void
+    public function test_students_can_see_together_try_out_but_only_scheduled_school_can_start(): void
     {
         [$manager, $assessment, $student, $otherStudent] = $this->scenario();
         $this->travelTo(CarbonImmutable::parse('2026-08-10 05:00'));
@@ -69,21 +69,25 @@ class AssessmentScheduleWorkflowTest extends TestCase
             ->get(route('assessments.index'))
             ->assertInertia(fn (Assert $page) => $page
                 ->has('assessments', 1)
-                ->where('bookingRequired', false));
+                ->has('assessments.0.schedules', 1)
+                ->where('assessments.0.settings.type', Assessment::TYPE_TOGETHER));
 
         $this->actingAs($otherStudent)
             ->get(route('assessments.index'))
-            ->assertInertia(fn (Assert $page) => $page->has('assessments', 1));
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('assessments', 1)
+                ->has('assessments.0.schedules', 0));
 
         $this->travelTo(CarbonImmutable::parse('2026-08-11 07:00'));
         $this->actingAs($student)
             ->get(route('assessments.index'))
             ->assertInertia(fn (Assert $page) => $page
-                ->where('bookingRequired', true)
                 ->where('assessments.0.schedules.0.school_npsn', '22222222'));
         $this->actingAs($otherStudent)
             ->get(route('assessments.index'))
-            ->assertInertia(fn (Assert $page) => $page->has('assessments', 0));
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('assessments', 1)
+                ->has('assessments.0.schedules', 0));
 
         $this->actingAs($student)
             ->post(route('attempts.start', $assessment))
@@ -99,21 +103,45 @@ class AssessmentScheduleWorkflowTest extends TestCase
             ->assertForbidden();
     }
 
-    public function test_students_can_start_without_booking_outside_operational_hours(): void
+    public function test_regular_try_out_can_start_without_booking_at_any_hour(): void
     {
         [, $assessment, $student, $otherStudent] = $this->scenario();
+        $assessment->update(['settings' => [
+            'type' => Assessment::TYPE_REGULAR,
+            'type_label' => 'Try Out Reguler',
+        ]]);
 
-        $this->travelTo(CarbonImmutable::parse('2026-08-10 05:30'));
-        $this->assertFalse(AssessmentSchedule::bookingRequired());
+        $this->travelTo(CarbonImmutable::parse('2026-08-10 07:00'));
         $this->actingAs($student)->post(route('attempts.start', $assessment))->assertRedirect();
         $this->actingAs($otherStudent)->post(route('attempts.start', $assessment))->assertRedirect();
+    }
 
-        $this->travelTo(CarbonImmutable::parse('2026-08-10 16:29'));
-        $this->assertTrue(AssessmentSchedule::bookingRequired());
-        $this->travelTo(CarbonImmutable::parse('2026-08-10 16:30'));
-        $this->assertFalse(AssessmentSchedule::bookingRequired());
-        $this->travelTo(CarbonImmutable::parse('2026-08-15 10:00'));
-        $this->assertFalse(AssessmentSchedule::bookingRequired());
+    public function test_together_try_out_requires_an_active_schedule_at_any_hour(): void
+    {
+        [, $assessment, $student] = $this->scenario();
+
+        $this->travelTo(CarbonImmutable::parse('2026-08-10 05:30'));
+        $this->actingAs($student)
+            ->post(route('attempts.start', $assessment))
+            ->assertForbidden();
+    }
+
+    public function test_regular_try_out_cannot_take_an_npsn_schedule(): void
+    {
+        [$manager, $assessment] = $this->scenario();
+        $assessment->update(['settings' => [
+            'type' => Assessment::TYPE_REGULAR,
+            'type_label' => 'Try Out Reguler',
+        ]]);
+        $this->travelTo(CarbonImmutable::parse('2026-08-10 05:00'));
+
+        $this->actingAs($manager)->post(route('schedules.store'), [
+            'assessment_id' => $assessment->id,
+            'scheduled_date' => '2026-08-11',
+            'session_number' => 1,
+        ])->assertSessionHasErrors('assessment_id');
+
+        $this->assertDatabaseCount('assessment_schedules', 0);
     }
 
     public function test_teacher_cannot_manage_school_schedule(): void
@@ -166,6 +194,10 @@ class AssessmentScheduleWorkflowTest extends TestCase
             'grade_level' => 6,
             'duration_minutes' => 150,
             'status' => AssessmentStatus::Published,
+            'settings' => [
+                'type' => Assessment::TYPE_TOGETHER,
+                'type_label' => 'Try Out Bersama',
+            ],
         ]);
         $assessment->questions()->attach($question->id, ['position' => 1, 'points' => 1]);
 

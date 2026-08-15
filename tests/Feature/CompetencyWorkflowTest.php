@@ -103,6 +103,45 @@ class CompetencyWorkflowTest extends TestCase
         $this->assertDatabaseHas('competencies', ['id' => $competency->id]);
     }
 
+    public function test_parent_displays_the_total_questions_from_its_subcompetencies(): void
+    {
+        [$teacher] = $this->users();
+        $parent = $this->competency($teacher, 'NUM6-MAIN');
+        $child = Competency::create([
+            'school_id' => $teacher->school_id,
+            'subject_id' => $parent->subject_id,
+            'parent_id' => $parent->id,
+            'code' => 'NUM6-SUB',
+            'domain' => 'Numerasi',
+            'name' => 'Subkompetensi Numerasi',
+            'grade_level' => 6,
+        ]);
+
+        foreach ([$parent, $child, $child] as $index => $competency) {
+            Question::create([
+                'school_id' => $teacher->school_id,
+                'author_id' => $teacher->id,
+                'competency_id' => $competency->id,
+                'type' => QuestionType::SingleChoice,
+                'status' => QuestionStatus::Draft,
+                'prompt' => "Pertanyaan agregasi {$index}",
+                'difficulty' => 1,
+                'grade_level' => 6,
+            ]);
+        }
+
+        $this->actingAs($teacher)
+            ->get(route('competencies.index', ['search' => 'NUM6']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('competencies', fn ($competencies) => collect($competencies)->every(
+                    fn (array $competency): bool => match ($competency['code']) {
+                        'NUM6-MAIN' => $competency['questions_count'] === 2,
+                        'NUM6-SUB' => $competency['questions_count'] === 2,
+                        default => false,
+                    }
+                )));
+    }
+
     public function test_legacy_grade_is_normalized_when_competency_is_updated(): void
     {
         [$teacher] = $this->users();

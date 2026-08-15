@@ -9,12 +9,14 @@ use Illuminate\Console\Command;
 
 class GenerateLoadTestUsers extends Command
 {
-    protected $signature = 'tka:load-users
+    protected $signature = 'toa:load-users
         {npsn : NPSN sekolah target}
         {--count=50 : Jumlah akun}
-        {--grade=5 : Jenjang 5, 8, atau 11}
+        {--grade=6 : Jenjang 6, 9, atau 12}
         {--password=load-test-only : Kata sandi akun}
         {--force : Izinkan pada APP_ENV production}';
+
+    protected $aliases = ['tka:load-users'];
 
     protected $description = 'Membuat akun murid khusus pengujian beban';
 
@@ -45,7 +47,7 @@ class GenerateLoadTestUsers extends Command
         for ($number = 1; $number <= $count; $number++) {
             $suffix = str_pad((string) $number, 4, '0', STR_PAD_LEFT);
             User::updateOrCreate(
-                ['email' => "loadtest+{$suffix}@tka.invalid"],
+                ['email' => "loadtest+{$suffix}@toa.invalid"],
                 [
                     'school_id' => $school->id,
                     'name' => "Load Test {$suffix}",

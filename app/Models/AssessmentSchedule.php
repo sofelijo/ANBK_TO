@@ -7,7 +7,6 @@ use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Support\Carbon;
 
 #[Fillable([
     'assessment_id', 'school_npsn', 'scheduled_date', 'session_number',
@@ -23,16 +22,6 @@ class AssessmentSchedule extends Model
         3 => ['start' => '11:30', 'end' => '14:00'],
         4 => ['start' => '14:00', 'end' => '16:30'],
     ];
-
-    public static function bookingRequired(?Carbon $moment = null): bool
-    {
-        $moment ??= now();
-        $minutes = ($moment->hour * 60) + $moment->minute;
-
-        return $moment->isWeekday()
-            && $minutes >= (6 * 60) + 30
-            && $minutes < (16 * 60) + 30;
-    }
 
     protected function casts(): array
     {

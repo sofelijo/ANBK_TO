@@ -20,7 +20,7 @@ class GradeLevelMigrationTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_existing_grade_levels_are_migrated_for_tka(): void
+    public function test_existing_grade_levels_are_migrated_for_toa(): void
     {
         $school = School::create(['name' => 'Sekolah Migrasi', 'npsn' => '12345678']);
         $teacher = User::create([
@@ -65,7 +65,7 @@ class GradeLevelMigrationTest extends TestCase
         $assessment = Assessment::create([
             'school_id' => $school->id,
             'created_by' => $teacher->id,
-            'title' => 'Try Out TKA Kelas 5',
+            'title' => 'Try Out Adaptif Kelas 5',
             'grade_level' => 5,
             'duration_minutes' => 30,
             'status' => AssessmentStatus::Published,
@@ -86,7 +86,7 @@ class GradeLevelMigrationTest extends TestCase
         $this->assertSame(6, $question->fresh()->grade_level);
         $this->assertSame('Siswa kelas 6 membaca teks.', $question->fresh()->stimulus);
         $this->assertSame(6, $assessment->fresh()->grade_level);
-        $this->assertSame('Try Out TKA Kelas 6', $assessment->fresh()->title);
+        $this->assertSame('Try Out Adaptif Kelas 6', $assessment->fresh()->title);
         $snapshot = json_decode(DB::table('assessment_question')->where('assessment_id', $assessment->id)->value('snapshot'), true);
         $this->assertSame(6, $snapshot['grade_level']);
     }

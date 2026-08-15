@@ -18,6 +18,10 @@ class Assessment extends Model
 {
     use HasFactory;
 
+    public const TYPE_REGULAR = 'regular';
+
+    public const TYPE_TOGETHER = 'together';
+
     protected function casts(): array
     {
         return [
@@ -59,5 +63,17 @@ class Assessment extends Model
     public function schedules(): HasMany
     {
         return $this->hasMany(AssessmentSchedule::class);
+    }
+
+    public function assessmentType(): string
+    {
+        return data_get($this->settings, 'type') === self::TYPE_TOGETHER
+            ? self::TYPE_TOGETHER
+            : self::TYPE_REGULAR;
+    }
+
+    public function requiresSchoolSchedule(): bool
+    {
+        return $this->assessmentType() === self::TYPE_TOGETHER;
     }
 }

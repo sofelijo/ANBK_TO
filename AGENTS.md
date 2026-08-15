@@ -2,14 +2,16 @@
 
 ## Product identity
 
-- The current product name is **TKA Cerdas**.
-- The product is a TKA try-out and learning platform. Previous product branding is obsolete.
+- The current product name is **TOA**, short for **Try Out Adaptif**.
+- The product is an adaptive try-out and learning platform. Previous product branding is obsolete.
 - Never introduce user-facing copy, AI prompts, seed data, documentation, examples, or test fixtures using the previous brand.
-- Use `TKA`, `TKA Cerdas`, `Try Out TKA`, or `Simulasi TKA` according to context.
+- Use `TOA`, `Try Out Adaptif`, or `Simulasi Adaptif` according to context.
+- Use the horn loudspeaker mark in `ApplicationLogo` as the product icon.
 
 ## Infrastructure identity
 
-- Use `tka-cerdas` for Compose projects, container images, deployment directories, database names, backup paths, and other technical identifiers.
+- Use `toa` for new Compose projects, container images, deployment directories, database names, backup paths, and other technical identifiers.
+- Keep documented legacy aliases and explicit Docker volume names only where required for backward compatibility with existing deployments.
 - Preserve production data when changing infrastructure identifiers by backing up the database before deployment.
 
 ## Validation

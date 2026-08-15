@@ -35,7 +35,10 @@ type BankQuestionItem = {
     explanation?: string;
     type: string;
     difficulty: number;
+    competency_id: number | null;
     competency_name: string;
+    competency_code: string;
+    parent_competency_name: string;
     options?: OptionItem[];
 };
 
@@ -90,6 +93,8 @@ export default function Show({
     const [swapModalOpen, setSwapModalOpen] = useState(false);
     const [targetQuestionToSwap, setTargetQuestionToSwap] = useState<QuestionItem | null>(null);
     const [selectedReplacementId, setSelectedReplacementId] = useState<number | null>(null);
+    const [swapSubCompetencyId, setSwapSubCompetencyId] = useState<number | 'all'>('all');
+    const [swapSearch, setSwapSearch] = useState('');
 
     const [addFromBankModalOpen, setAddFromBankModalOpen] = useState(false);
     const [bankSearch, setBankSearch] = useState('');
@@ -107,9 +112,71 @@ export default function Show({
     } | null>(null);
 
     const openSwapModal = (question: QuestionItem) => {
+        const targetSubCompetencyId = question.competency?.id ?? 'all';
+        const initialCandidates = availableBankQuestions.filter(
+            (candidate) => targetSubCompetencyId === 'all' || candidate.competency_id === targetSubCompetencyId,
+        );
+
         setTargetQuestionToSwap(question);
-        setSelectedReplacementId(availableBankQuestions[0]?.id ?? null);
+        setSwapSubCompetencyId(targetSubCompetencyId);
+        setSwapSearch('');
+        setSelectedReplacementId(initialCandidates[0]?.id ?? null);
         setSwapModalOpen(true);
+    };
+
+    const replacementQuestions = availableBankQuestions.filter((question) => {
+        const matchesSubCompetency =
+            swapSubCompetencyId === 'all' || question.competency_id === swapSubCompetencyId;
+        const keyword = swapSearch.trim().toLowerCase();
+        const matchesSearch =
+            keyword === '' ||
+            question.prompt.toLowerCase().includes(keyword) ||
+            question.competency_name.toLowerCase().includes(keyword) ||
+            question.competency_code.toLowerCase().includes(keyword);
+
+        return matchesSubCompetency && matchesSearch;
+    });
+
+    const replacementCountBySubCompetency = availableBankQuestions.reduce<Record<number, number>>(
+        (counts, question) => {
+            if (question.competency_id !== null) {
+                counts[question.competency_id] = (counts[question.competency_id] ?? 0) + 1;
+            }
+
+            return counts;
+        },
+        {},
+    );
+
+    const changeSwapSubCompetency = (value: string) => {
+        const subCompetencyId = value === 'all' ? 'all' : Number(value);
+        const candidates = availableBankQuestions.filter(
+            (question) => subCompetencyId === 'all' || question.competency_id === subCompetencyId,
+        );
+
+        setSwapSubCompetencyId(subCompetencyId);
+        setSwapSearch('');
+        setSelectedReplacementId(candidates[0]?.id ?? null);
+    };
+
+    const changeSwapSearch = (value: string) => {
+        const keyword = value.trim().toLowerCase();
+        const candidates = availableBankQuestions.filter((question) => {
+            const matchesSubCompetency =
+                swapSubCompetencyId === 'all' || question.competency_id === swapSubCompetencyId;
+            const matchesSearch =
+                keyword === '' ||
+                question.prompt.toLowerCase().includes(keyword) ||
+                question.competency_name.toLowerCase().includes(keyword) ||
+                question.competency_code.toLowerCase().includes(keyword);
+
+            return matchesSubCompetency && matchesSearch;
+        });
+
+        setSwapSearch(value);
+        if (!candidates.some((question) => question.id === selectedReplacementId)) {
+            setSelectedReplacementId(candidates[0]?.id ?? null);
+        }
     };
 
     const handleSwapSubmit = () => {
@@ -431,13 +498,54 @@ export default function Show({
                             Pilih Soal Pengganti dari Bank Soal ({assessment.subject?.name ?? 'Semua Mapel'} · Kelas {assessment.grade_level}):
                         </label>
 
+                        <div className="mb-3 grid gap-3 sm:grid-cols-2">
+                            <label className="text-xs font-semibold text-slate-700">
+                                Subkompetensi
+                                <select
+                                    value={swapSubCompetencyId}
+                                    onChange={(event) => changeSwapSubCompetency(event.target.value)}
+                                    className="mt-1 block w-full rounded-xl border-slate-300 text-xs focus:border-indigo-500 focus:ring-indigo-500"
+                                >
+                                    <option value="all">Semua subkompetensi ({availableBankQuestions.length} soal)</option>
+                                    {subCompetencies.map((subCompetency) => {
+                                        const availableCount = replacementCountBySubCompetency[subCompetency.id] ?? 0;
+
+                                        return (
+                                            <option
+                                                key={subCompetency.id}
+                                                value={subCompetency.id}
+                                                disabled={availableCount === 0}
+                                            >
+                                                {subCompetency.parent_name} · {subCompetency.name} ({availableCount})
+                                            </option>
+                                        );
+                                    })}
+                                </select>
+                            </label>
+
+                            <label className="text-xs font-semibold text-slate-700">
+                                Cari soal
+                                <input
+                                    type="search"
+                                    value={swapSearch}
+                                    onChange={(event) => changeSwapSearch(event.target.value)}
+                                    placeholder="Cari teks atau kode subkompetensi…"
+                                    className="mt-1 block w-full rounded-xl border-slate-300 text-xs focus:border-indigo-500 focus:ring-indigo-500"
+                                />
+                            </label>
+                        </div>
+
                         {availableBankQuestions.length === 0 ? (
                             <p className="text-xs text-rose-600 font-medium p-4 border rounded-xl bg-rose-50/50">
                                 Tidak ada soal terbit pengganti yang tersedia di bank soal untuk jenjang dan mapel ini. Silakan buat soal baru terlebih dahulu.
                             </p>
+                        ) : replacementQuestions.length === 0 ? (
+                            <p className="rounded-xl border border-amber-200 bg-amber-50/70 p-4 text-xs font-medium text-amber-700">
+                                Tidak ada soal terbit yang cocok dengan filter ini. Pilih subkompetensi lain atau tampilkan semua subkompetensi.
+                            </p>
                         ) : (
                             <div className="max-h-64 overflow-y-auto divide-y divide-slate-100 border rounded-xl">
-                                {availableBankQuestions.map((bankQ) => (
+                                {replacementQuestions.map((bankQ) => (
                                     <div
                                         key={bankQ.id}
                                         className={`flex items-start justify-between gap-3 p-3 text-xs cursor-pointer hover:bg-slate-50 transition-colors ${
@@ -455,6 +563,7 @@ export default function Show({
                                             />
                                             <div className="space-y-1">
                                                 <span className="font-semibold text-indigo-700 block">
+                                                    {bankQ.parent_competency_name && `${bankQ.parent_competency_name} · `}
                                                     {bankQ.competency_name} ({typeLabels[bankQ.type] || bankQ.type})
                                                 </span>
                                                 <p className="text-slate-800 font-medium">{bankQ.prompt}</p>
@@ -488,7 +597,10 @@ export default function Show({
                         <button
                             type="button"
                             onClick={handleSwapSubmit}
-                            disabled={!selectedReplacementId || availableBankQuestions.length === 0}
+                            disabled={
+                                !selectedReplacementId ||
+                                !replacementQuestions.some((question) => question.id === selectedReplacementId)
+                            }
                             className="rounded-xl bg-indigo-600 px-5 py-2 text-xs font-semibold text-white hover:bg-indigo-500 disabled:opacity-50"
                         >
                             Konfirmasi Ganti Soal

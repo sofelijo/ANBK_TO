@@ -34,7 +34,7 @@ export default function Dashboard({ mode, stats }: DashboardProps) {
                         Ringkasan platform
                     </p>
                     <h1 className="mt-1 text-2xl font-bold text-slate-900">
-                        Dashboard TKA Cerdas
+                        Dashboard TOA
                     </h1>
                 </div>
             }

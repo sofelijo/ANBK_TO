@@ -1,3 +1,4 @@
+import ApplicationLogo from '@/Components/ApplicationLogo';
 import { PageProps } from '@/types';
 import { Head, Link } from '@inertiajs/react';
 
@@ -32,18 +33,18 @@ export default function Welcome({ auth, canLogin, canRegister }: WelcomeProps) {
 
     return (
         <>
-            <Head title="TKA Cerdas" />
+            <Head title="Try Out Adaptif" />
             <div className="min-h-screen overflow-hidden bg-[#f7faf9] text-slate-900">
                 <header className="relative z-20 border-b border-emerald-100/80 bg-white/90 backdrop-blur">
                     <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 sm:px-8 lg:px-10">
                         <Link href="/" className="flex items-center gap-3">
-                            <BrandMark className="h-11 w-11" />
+                            <ApplicationLogo className="h-11 w-11" />
                             <div>
                                 <p className="text-lg font-bold tracking-tight text-slate-900">
-                                    TKA Cerdas
+                                    TOA
                                 </p>
                                 <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-emerald-600">
-                                    Belajar lebih terarah
+                                    Try Out Adaptif
                                 </p>
                             </div>
                         </Link>
@@ -89,7 +90,7 @@ export default function Welcome({ auth, canLogin, canRegister }: WelcomeProps) {
                             <div>
                                 <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-white px-3 py-1.5 text-xs font-bold uppercase tracking-[0.14em] text-emerald-700 shadow-sm">
                                     <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                                    Try Out TKA Berbasis AI
+                                    Try Out Adaptif Berbasis AI
                                 </div>
                                 <h1 className="mt-6 max-w-3xl text-4xl font-black leading-[1.08] tracking-tight text-slate-950 sm:text-5xl lg:text-6xl">
                                     Latihan lebih cerdas,
@@ -187,7 +188,7 @@ export default function Welcome({ auth, canLogin, canRegister }: WelcomeProps) {
                                 href={primaryHref}
                                 className="shrink-0 rounded-2xl bg-emerald-500 px-7 py-4 text-sm font-bold text-white transition hover:bg-emerald-400"
                             >
-                                {auth.user ? 'Buka Dashboard' : 'Masuk ke TKA Cerdas'}
+                                {auth.user ? 'Buka Dashboard' : 'Masuk ke TOA'}
                             </Link>
                         </div>
                     </section>
@@ -196,33 +197,13 @@ export default function Welcome({ auth, canLogin, canRegister }: WelcomeProps) {
                 <footer className="border-t border-slate-200 bg-white">
                     <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-3 px-5 py-7 text-sm text-slate-500 sm:flex-row sm:px-8 lg:px-10">
                         <div className="flex items-center gap-2 font-semibold text-slate-700">
-                            <BrandMark className="h-8 w-8" /> TKA Cerdas
+                            <ApplicationLogo className="h-8 w-8" /> TOA
                         </div>
                         <p>Platform try out dan pembelajaran berbantuan AI.</p>
                     </div>
                 </footer>
             </div>
         </>
-    );
-}
-
-function BrandMark({ className }: { className: string }) {
-    return (
-        <span
-            className={`inline-flex items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-sm ${className}`}
-        >
-            <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                className="h-5 w-5"
-                stroke="currentColor"
-                strokeWidth="1.8"
-            >
-                <path d="M4 5.5c2.8 0 5.2.7 8 2.5v11c-2.8-1.8-5.2-2.5-8-2.5v-11Z" />
-                <path d="M20 5.5c-2.8 0-5.2.7-8 2.5v11c2.8-1.8 5.2-2.5 8-2.5v-11Z" />
-                <path d="m16.5 2 .45 1.05L18 3.5l-1.05.45L16.5 5l-.45-1.05L15 3.5l1.05-.45L16.5 2Z" />
-            </svg>
-        </span>
     );
 }
 

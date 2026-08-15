@@ -186,7 +186,7 @@ class DatabaseSeeder extends Seeder
         $assessment = Assessment::create([
             'school_id' => $school->id,
             'created_by' => $teacher->id,
-            'title' => 'Try Out TKA Kelas 6 - Demo',
+            'title' => 'Try Out Adaptif Kelas 6 - Demo',
             'description' => 'Paket singkat untuk mencoba alur pengerjaan dan analisis kompetensi.',
             'grade_level' => 6,
             'duration_minutes' => 30,

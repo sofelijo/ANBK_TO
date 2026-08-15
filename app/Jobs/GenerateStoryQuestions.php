@@ -447,7 +447,7 @@ class GenerateStoryQuestions implements ShouldQueue
         $duplicateDirection = $this->duplicateDirection($recentQuestions, $variationStrategy);
 
         return <<<PROMPT
-Anda membantu guru membuat paket soal cerita try out TKA berbahasa Indonesia.
+Anda membantu guru membuat paket soal cerita Try Out Adaptif berbahasa Indonesia.
 
 Buat satu cerita berdasarkan tema "{$theme}" dengan tepat {$paragraphCount} paragraf, lalu buat tepat {$questionCount} soal yang semuanya hanya menggunakan cerita tersebut sebagai stimulus. Kembalikan setiap paragraf sebagai satu elemen story_paragraphs tanpa nomor paragraf. Gunakan hanya kompetensi atau subkompetensi yang diberikan untuk seluruh soal dan jangan menggantinya dengan klasifikasi lain. Semua soal harus berada pada satu jenjang kelas yang sama. Cerita harus sesuai usia jenjang tersebut, faktual, aman untuk anak, tidak bias, dan memuat seluruh informasi yang diperlukan untuk menjawab soal.
 
@@ -488,7 +488,7 @@ PROMPT;
         $duplicateDirection = $this->duplicateDirection($recentQuestions, $variationStrategy);
 
         return <<<PROMPT
-Anda membantu guru membuat soal try out TKA berbahasa Indonesia.
+Anda membantu guru membuat soal Try Out Adaptif berbahasa Indonesia.
 
 Buat tepat {$questionCount} variasi soal. Soal harus mengukur kompetensi yang diberikan. Jangan memaksakan cerita panjang. Gunakan stimulus singkat hanya jika memang dibutuhkan; jika tidak, isi stimulus dengan string kosong. Untuk Matematika, pastikan angka, operasi, satuan, kunci, dan pembahasan konsisten serta dapat dihitung dengan jelas.
 

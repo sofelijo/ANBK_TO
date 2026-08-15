@@ -45,7 +45,7 @@ class ValidateQuestionQuality implements ShouldQueue
             $payloadJson = json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
             $response = $manager->provider()->generateJson(
                 <<<PROMPT
-Anda adalah reviewer kualitas soal try out TKA. Evaluasi kejelasan stimulus, kesesuaian jenjang, ketepatan kunci, kualitas distraktor, potensi ambiguitas, dan kecukupan pembahasan. Jangan mengubah soal dan jangan menganggap keluaran ini sebagai keputusan final; guru tetap peninjau akhir.
+Anda adalah reviewer kualitas soal Try Out Adaptif. Evaluasi kejelasan stimulus, kesesuaian jenjang, ketepatan kunci, kualitas distraktor, potensi ambiguitas, dan kecukupan pembahasan. Jangan mengubah soal dan jangan menganggap keluaran ini sebagai keputusan final; guru tetap peninjau akhir.
 
 Kembalikan JSON saja:
 {"passed":true,"score":85,"issues":[{"severity":"warning","field":"prompt","message":"..."}],"suggestions":["..."]}

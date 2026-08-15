@@ -126,7 +126,7 @@ class AiStoryIllustrationController extends Controller
         $contentLabel = $format === 'story' ? 'Cerita' : 'Deskripsi visual';
 
         return <<<PROMPT
-Buat satu ilustrasi edukatif rasio 16:9 untuk mendampingi soal TKA siswa Indonesia.
+Buat satu ilustrasi edukatif rasio 16:9 untuk mendampingi soal Try Out Adaptif siswa Indonesia.
 
 Mata pelajaran: {$subject}
 Kompetensi atau subkompetensi: {$competency}

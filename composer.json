@@ -1,9 +1,9 @@
 {
     "$schema": "https://getcomposer.org/schema.json",
-    "name": "laravel/laravel",
+    "name": "toa/try-out-adaptif",
     "type": "project",
-    "description": "The skeleton application for the Laravel framework.",
-    "keywords": ["laravel", "framework"],
+    "description": "Platform TOA — Try Out Adaptif.",
+    "keywords": ["laravel", "try-out", "education", "adaptive-learning"],
     "license": "MIT",
     "require": {
         "php": "^8.3",

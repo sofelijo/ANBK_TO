@@ -22,7 +22,7 @@ class SchoolProfileWorkflowTest extends TestCase
         $assessment = Assessment::create([
             'school_id' => $school->id,
             'created_by' => $admin->id,
-            'title' => 'Paket TKA',
+            'title' => 'Paket TOA',
             'grade_level' => 6,
             'duration_minutes' => 150,
             'status' => AssessmentStatus::Published,
@@ -44,7 +44,7 @@ class SchoolProfileWorkflowTest extends TestCase
                 ->where('school.npsn', '44444444'));
 
         $this->actingAs($operator)->patch(route('school.update'), [
-            'name' => 'SD TKA Nusantara',
+            'name' => 'SD TOA Nusantara',
             'npsn' => '55555555',
             'timezone' => 'Asia/Makassar',
             'address' => 'Jalan Pendidikan 1',
@@ -55,7 +55,7 @@ class SchoolProfileWorkflowTest extends TestCase
         ])->assertRedirect()->assertSessionHasNoErrors();
 
         $school->refresh();
-        $this->assertSame('SD TKA Nusantara', $school->name);
+        $this->assertSame('SD TOA Nusantara', $school->name);
         $this->assertSame('55555555', $school->npsn);
         $this->assertSame('Asia/Makassar', $school->timezone);
         $this->assertSame('Makassar', $school->settings['city']);
@@ -133,7 +133,7 @@ class SchoolProfileWorkflowTest extends TestCase
         return User::create([
             'school_id' => $school->id,
             'name' => $name,
-            'email' => "student.{$school->id}.{$nisn}@tka.local",
+            'email' => "student.{$school->id}.{$nisn}@toa.local",
             'password' => 'password',
             'role' => UserRole::Student,
             'student_identifier' => $nisn,
