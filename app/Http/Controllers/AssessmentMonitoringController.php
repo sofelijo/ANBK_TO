@@ -2,10 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\AiGenerationStatus;
+use App\Enums\AiGenerationType;
 use App\Enums\AttemptStatus;
+use App\Models\AiGeneration;
 use App\Models\Assessment;
 use App\Models\Attempt;
 use App\Models\Question;
+use App\Services\AssessmentAiAnalysisData;
 use App\Services\QuestionScorer;
 use App\Services\QuestionSnapshotService;
 use Illuminate\Http\Request;
@@ -19,6 +23,7 @@ class AssessmentMonitoringController extends Controller
         Request $request,
         QuestionScorer $scorer,
         QuestionSnapshotService $snapshotService,
+        AssessmentAiAnalysisData $analysisData,
     ): Response {
         $schoolId = $request->user()->school_id;
         $schoolNpsn = (string) $request->user()->school()->value('npsn');
@@ -65,7 +70,56 @@ class AssessmentMonitoringController extends Controller
             'monitor' => $selectedAssessmentId
                 ? $this->monitor($selectedAssessmentId, $schoolId, $scorer, $snapshotService)
                 : null,
+            'aiAnalysis' => $selectedAssessmentId
+                ? $this->aiAnalysis($selectedAssessmentId, $schoolId, $analysisData)
+                : null,
         ]);
+    }
+
+    private function aiAnalysis(
+        int $assessmentId,
+        int $schoolId,
+        AssessmentAiAnalysisData $analysisData,
+    ): array {
+        $assessment = Assessment::query()->findOrFail($assessmentId);
+        $context = $analysisData->build($assessment, $schoolId);
+        $generation = AiGeneration::query()
+            ->where('school_id', $schoolId)
+            ->where('assessment_id', $assessmentId)
+            ->where('type', AiGenerationType::SchoolAssessmentAnalysis)
+            ->latest('id')
+            ->first();
+
+        return [
+            'sample_size' => $context['sample_size'],
+            'weak_competencies' => $context['weak_competencies'],
+            'difficult_questions' => collect($context['difficult_questions'])->map(fn (array $question): array => [
+                'question_id' => $question['question_id'],
+                'title' => $question['title'],
+                'competency_code' => $question['competency_code'],
+                'competency_name' => $question['competency_name'],
+                'response_count' => $question['response_count'],
+                'incorrect_count' => $question['incorrect_count'],
+                'incorrect_percentage' => $question['incorrect_percentage'],
+            ])->all(),
+            'generation' => $generation ? [
+                'id' => $generation->id,
+                'status' => $generation->status->value,
+                'provider' => $generation->provider,
+                'model' => $generation->model,
+                'is_stale' => $generation->input_hash !== $analysisData->hash($context),
+                'result' => $generation->status === AiGenerationStatus::Completed
+                    ? $generation->result_payload
+                    : null,
+                'error' => $generation->status === AiGenerationStatus::Failed
+                    ? 'Analisis AI gagal diproses. Silakan jalankan ulang.'
+                    : null,
+                'created_at' => $generation->created_at,
+                'completed_at' => $generation->status === AiGenerationStatus::Completed
+                    ? $generation->updated_at
+                    : null,
+            ] : null,
+        ];
     }
 
     private function monitor(

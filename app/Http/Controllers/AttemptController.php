@@ -195,9 +195,16 @@ class AttemptController extends Controller
                     return [
                         'id' => $question->id,
                         'type' => $type->value,
-                        'title' => $snapshot['title'],
                         'stimulus' => $snapshot['stimulus'],
+                        'stimulus_visual' => $metadata['stimulus_visual'] ?? null,
                         'illustration_url' => $snapshotService->illustrationUrl($snapshot),
+                        'illustration_display' => [
+                            'width' => (int) data_get($metadata, 'illustration.display_width', 800),
+                            'height' => (int) data_get($metadata, 'illustration.display_height', 450),
+                            'zoom' => (float) data_get($metadata, 'illustration.display_zoom', 1),
+                            'offset_x' => (float) data_get($metadata, 'illustration.display_offset_x', 0),
+                            'offset_y' => (float) data_get($metadata, 'illustration.display_offset_y', 0),
+                        ],
                         'prompt' => $snapshot['prompt'],
                         'position' => $questionIndex + 1,
                         'matching' => $matching,
@@ -342,7 +349,7 @@ class AttemptController extends Controller
         return to_route('attempts.result', $attempt->public_id);
     }
 
-    public function result(Request $request, Attempt $attempt): Response|RedirectResponse
+    public function result(Request $request, Attempt $attempt, QuestionSnapshotService $snapshotService): Response|RedirectResponse
     {
         $this->authorizeStudent($request, $attempt);
         if ($attempt->status !== AttemptStatus::Submitted) {
@@ -356,7 +363,25 @@ class AttemptController extends Controller
             'recommendations.question.options',
         ]);
 
-        return Inertia::render('Attempts/Result', ['attempt' => $attempt]);
+        $answers = $attempt->answers()->get()->keyBy('question_id');
+        $questionReviews = $attempt->questions()->with('options')->get()->map(function (Question $question) use ($answers, $snapshotService): array {
+            $snapshot = $snapshotService->forQuestion($question);
+
+            return [
+                'id' => $question->id,
+                'position' => (int) $question->pivot->position,
+                'prompt' => $snapshot['prompt'],
+                'explanation' => $snapshot['explanation'] ?? null,
+                'explanation_image_url' => $snapshotService->explanationImageUrl($snapshot),
+                'explanation_image_alt' => data_get($snapshot, 'metadata.explanation_illustration.alt', 'Gambar pembahasan soal'),
+                'is_correct' => (bool) $answers->get($question->id)?->is_correct,
+            ];
+        })->values();
+
+        return Inertia::render('Attempts/Result', [
+            'attempt' => $attempt,
+            'questionReviews' => $questionReviews,
+        ]);
     }
 
     public function practiceChat(

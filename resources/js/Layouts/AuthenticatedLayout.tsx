@@ -2,6 +2,7 @@ import ApplicationLogo from '@/Components/ApplicationLogo';
 import Dropdown from '@/Components/Dropdown';
 import NavLink from '@/Components/NavLink';
 import ResponsiveNavLink from '@/Components/ResponsiveNavLink';
+import ThemeToggle from '@/Components/ThemeToggle';
 import { Link, usePage } from '@inertiajs/react';
 import { PropsWithChildren, ReactNode, useState } from 'react';
 
@@ -60,7 +61,10 @@ export default function AuthenticatedLayout({
                       { label: 'Data Sekolah', href: route('school.edit'), active: 'school.edit' },
                       { label: 'Data Siswa', href: route('school.students.index'), active: 'school.students.*' },
                       { label: 'Pengguna', href: route('admin.users.index'), active: 'admin.users.*' },
+                      { label: 'Analisis Verifikasi', href: route('admin.teacher-verifications.index'), active: 'admin.teacher-verifications.*' },
+                      { label: 'Bentuk Soal Aktif', href: route('admin.question-types.edit'), active: 'admin.question-types.*' },
                       { label: 'Kuota AI Guru', href: route('admin.ai-quotas.edit'), active: 'admin.ai-quotas.*' },
+                      { label: 'Default Bundle B. Indonesia', href: route('admin.indonesian-bundles.edit'), active: 'admin.indonesian-bundles.*' },
                   ],
               }]
             : []),
@@ -125,42 +129,49 @@ export default function AuthenticatedLayout({
                             </div>
                         </div>
 
-                        <div className="hidden sm:ms-6 sm:flex sm:items-center">
-                            <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-700">
-                                {roleLabels[auth.user.role]}
-                            </span>
-                            <div className="relative ms-3">
-                                <Dropdown>
-                                    <Dropdown.Trigger>
-                                        <button className="inline-flex items-center rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900">
-                                            {auth.user.name}
-                                            <span className="ms-2">⌄</span>
-                                        </button>
-                                    </Dropdown.Trigger>
-                                    <Dropdown.Content>
-                                        <Dropdown.Link href={route('profile.edit')}>
-                                            Profil
-                                        </Dropdown.Link>
-                                        <Dropdown.Link
-                                            href={route('logout')}
-                                            method="post"
-                                            as="button"
-                                        >
-                                            Keluar
-                                        </Dropdown.Link>
-                                    </Dropdown.Content>
-                                </Dropdown>
-                            </div>
-                        </div>
+                        <div className="flex items-center gap-2 sm:ms-6">
+                            <ThemeToggle />
 
-                        <button
-                            onClick={() =>
-                                setShowingNavigationDropdown((value) => !value)
-                            }
-                            className="my-auto rounded-lg p-2 text-slate-500 sm:hidden"
-                        >
-                            ☰
-                        </button>
+                            <div className="hidden sm:flex sm:items-center">
+                                <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                                    {roleLabels[auth.user.role]}
+                                </span>
+                                <div className="relative ms-3">
+                                    <Dropdown>
+                                        <Dropdown.Trigger>
+                                            <button className="inline-flex items-center rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900">
+                                                {auth.user.name}
+                                                <span className="ms-2">⌄</span>
+                                            </button>
+                                        </Dropdown.Trigger>
+                                        <Dropdown.Content>
+                                            <Dropdown.Link href={route('profile.edit')}>
+                                                Profil
+                                            </Dropdown.Link>
+                                            <Dropdown.Link
+                                                href={route('logout')}
+                                                method="post"
+                                                as="button"
+                                            >
+                                                Keluar
+                                            </Dropdown.Link>
+                                        </Dropdown.Content>
+                                    </Dropdown>
+                                </div>
+                            </div>
+
+                            <button
+                                type="button"
+                                aria-label={showingNavigationDropdown ? 'Tutup menu navigasi' : 'Buka menu navigasi'}
+                                aria-expanded={showingNavigationDropdown}
+                                onClick={() =>
+                                    setShowingNavigationDropdown((value) => !value)
+                                }
+                                className="my-auto min-h-11 min-w-11 rounded-lg p-2 text-slate-500 sm:hidden"
+                            >
+                                ☰
+                            </button>
+                        </div>
                     </div>
                 </div>
 

@@ -33,6 +33,7 @@ class AssessmentController extends Controller
 
         $query = Assessment::query()
             ->withCount(['questions', 'attempts'])
+            ->withAvg('questions as average_difficulty', 'difficulty')
             ->latest();
 
         if ($user->hasRole(UserRole::Student)) {
@@ -67,6 +68,9 @@ class AssessmentController extends Controller
                     'type' => $a->assessmentType(),
                     'type_label' => config("assessment.types.{$a->assessmentType()}"),
                 ],
+                'average_difficulty' => $a->average_difficulty !== null
+                    ? round((float) $a->average_difficulty, 2)
+                    : null,
                 'competency_coverage' => $user->hasRole(UserRole::Admin, UserRole::Teacher)
                     ? $a->questions
                         ->pluck('competency')

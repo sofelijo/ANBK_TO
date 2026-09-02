@@ -47,9 +47,14 @@ class GenerateStoryQuestions implements ShouldQueue
             $format = data_get($generation->request_payload, 'format') === 'direct' ? 'direct' : 'story';
             $theme = trim((string) data_get($generation->request_payload, 'theme'));
             $paragraphCount = (int) data_get($generation->request_payload, 'paragraph_count', 3);
+            $maxWords = (int) data_get($generation->request_payload, 'max_words', 200);
             $questionCount = (int) data_get($generation->request_payload, 'question_count', 3);
             $questionStyle = (string) data_get($generation->request_payload, 'question_style', 'direct');
             $answerFormat = (string) data_get($generation->request_payload, 'answer_format', 'single_choice');
+            $requestedDifficulty = data_get($generation->request_payload, 'difficulty');
+            $targetDifficulty = $requestedDifficulty !== null
+                ? max(1, min(3, (int) $requestedDifficulty))
+                : null;
             $useIllustration = (bool) data_get($generation->request_payload, 'use_illustration', false);
             $illustrationMode = (string) data_get($generation->request_payload, 'illustration_mode', 'lite');
             $questionBlueprints = collect(data_get($generation->request_payload, 'question_blueprints', []))->values();
@@ -62,7 +67,7 @@ class GenerateStoryQuestions implements ShouldQueue
             $recentQuestions = $this->recentQuestionExamples($generation, $competencies);
             $variationStrategy = $this->variationStrategy($generation->id);
             $prompt = $format === 'story'
-                ? $this->prompt($theme, $paragraphCount, $questionCount, $competencyContext, $questionBlueprints->all(), $recentQuestions, $variationStrategy)
+                ? $this->prompt($theme, $paragraphCount, $maxWords, $questionCount, $competencyContext, $questionBlueprints->all(), $recentQuestions, $variationStrategy)
                 : $this->directPrompt(
                     (string) data_get($generation->request_payload, 'example_question', ''),
                     $questionCount,
@@ -76,6 +81,11 @@ class GenerateStoryQuestions implements ShouldQueue
                     $illustrationProfile->promptDirection(array_column($competencyContext, 'code')),
                     $illustrationMode,
                 );
+            $usesConfiguredBundle = $questionBlueprints->isNotEmpty()
+                && $questionBlueprints->every(fn (array $blueprint): bool => isset($blueprint['cognitive_level']));
+            if (! $usesConfiguredBundle && $targetDifficulty !== null) {
+                $prompt .= "\n\nLEVEL SOAL WAJIB: semua soal harus memiliki difficulty={$targetDifficulty} pada skala 1=mudah, 2=sedang, 3=sulit.";
+            }
             $provider = $manager->provider();
 
             $context = [
@@ -83,9 +93,11 @@ class GenerateStoryQuestions implements ShouldQueue
                 'format' => $format,
                 'theme' => $theme,
                 'paragraph_count' => $paragraphCount,
+                'max_words' => $format === 'story' ? $maxWords : 0,
                 'question_count' => $questionCount,
                 'question_style' => $questionStyle,
                 'answer_format' => $answerFormat,
+                'difficulty' => $targetDifficulty,
                 'use_illustration' => $useIllustration,
                 'illustration_mode' => $illustrationMode,
                 'competencies' => $competencyContext,
@@ -219,6 +231,9 @@ class GenerateStoryQuestions implements ShouldQueue
             }
 
             $this->validateQuestionSet($data['questions'], $competencies);
+            if ($format === 'story' && $questionBlueprints->isNotEmpty() && $questionBlueprints->every(fn (array $blueprint): bool => isset($blueprint['answer_format'], $blueprint['cognitive_level']))) {
+                $this->validateIndonesianBundle($data['questions'], $questionBlueprints);
+            }
             if ($provider->name() !== 'fake'
                 && $this->hasDuplicatePrompt($data['questions'], $recentQuestions, $duplicateDetector)) {
                 throw ValidationException::withMessages([
@@ -235,8 +250,13 @@ class GenerateStoryQuestions implements ShouldQueue
                     'story_paragraphs' => 'Cerita yang dihasilkan terlalu panjang.',
                 ]);
             }
+            if ($story !== null && $this->wordCount($story) > $maxWords) {
+                throw ValidationException::withMessages([
+                    'story_paragraphs' => "Cerita yang dihasilkan melebihi batas {$maxWords} kata.",
+                ]);
+            }
 
-            $questionIds = DB::transaction(function () use ($data, $generation, $manager, $response, $theme, $story, $competencies, $format, $questionBlueprints): array {
+            $questionIds = DB::transaction(function () use ($data, $generation, $manager, $response, $theme, $story, $competencies, $format, $questionBlueprints, $targetDifficulty): array {
                 $questionIds = [];
 
                 foreach ($data['questions'] as $index => $questionData) {
@@ -247,6 +267,8 @@ class GenerateStoryQuestions implements ShouldQueue
                         'story_generation_id' => $generation->id,
                         'generation_format' => $format,
                         'story_theme' => $format === 'story' ? $theme : null,
+                        'bundle_answer_format' => data_get($questionBlueprints, "{$index}.answer_format"),
+                        'bundle_cognitive_level' => data_get($questionBlueprints, "{$index}.cognitive_level"),
                     ];
 
                     if ($type === QuestionType::ShortAnswer) {
@@ -293,9 +315,14 @@ class GenerateStoryQuestions implements ShouldQueue
                         'stimulus' => $format === 'story' ? $story : ($questionData['stimulus'] ?? null),
                         'prompt' => $questionData['prompt'],
                         'explanation' => $questionData['explanation'],
-                        'difficulty' => $questionData['difficulty'],
+                        'difficulty' => match (data_get($questionBlueprints, "{$index}.cognitive_level")) {
+                            'textual' => 1,
+                            'inferential' => 2,
+                            'evaluation' => 3,
+                            default => $targetDifficulty ?? $questionData['difficulty'],
+                        },
                         'grade_level' => $competency->grade_level,
-                        'cognitive_level' => $questionData['cognitive_level'] ?? null,
+                        'cognitive_level' => data_get($questionBlueprints, "{$index}.cognitive_level_label", $questionData['cognitive_level'] ?? null),
                         'metadata' => $metadata,
                     ]);
 
@@ -453,7 +480,8 @@ class GenerateStoryQuestions implements ShouldQueue
                 )->values()->all();
 
                 return $question['type'] !== QuestionType::CategoryMatrix->value
-                    || $columns !== ['benar', 'salah'];
+                    || $columns !== ['benar', 'salah']
+                    || count($question['matrix_rows'] ?? []) !== 3;
             }),
             'mixed' => collect($questions)->contains(function (array $question): bool {
                 $type = $question['type'];
@@ -471,7 +499,8 @@ class GenerateStoryQuestions implements ShouldQueue
                     return collect($question['matrix_columns'] ?? [])
                         ->map(fn (string $column): string => mb_strtolower(trim($column)))
                         ->values()
-                        ->all() !== ['benar', 'salah'];
+                        ->all() !== ['benar', 'salah']
+                        || count($question['matrix_rows'] ?? []) !== 3;
                 }
 
                 return false;
@@ -486,22 +515,48 @@ class GenerateStoryQuestions implements ShouldQueue
         }
     }
 
+    private function validateIndonesianBundle(array $questions, Collection $blueprints): void
+    {
+        foreach ($questions as $index => $question) {
+            $format = data_get($blueprints, "{$index}.answer_format");
+            $valid = match ($format) {
+                'single_choice' => $question['type'] === QuestionType::SingleChoice->value,
+                'multiple_choice' => $question['type'] === QuestionType::MultipleChoice->value
+                    && collect($question['options'] ?? [])->where('is_correct', true)->count() >= 2,
+                'true_false' => $question['type'] === QuestionType::CategoryMatrix->value
+                    && collect($question['matrix_columns'] ?? [])->map(fn (string $column): string => mb_strtolower(trim($column)))->values()->all() === ['benar', 'salah']
+                    && count($question['matrix_rows'] ?? []) === 3,
+                default => false,
+            };
+
+            if (! $valid) {
+                throw ValidationException::withMessages([
+                    "questions.{$index}.type" => 'AI tidak mengikuti format jawaban pada komposisi bundle Bahasa Indonesia.',
+                ]);
+            }
+        }
+    }
+
     private function supportsPrecisionVisualSpec(mixed $spec): bool
     {
         return is_array($spec)
             && in_array(data_get($spec, 'type'), ['fraction_models', 'object_groups', 'geometry_2d', ...EducationalMathSvgRenderer::TYPES], true);
     }
 
-    private function prompt(string $theme, int $paragraphCount, int $questionCount, array $competencies, array $questionBlueprints, array $recentQuestions, string $variationStrategy): string
+    private function prompt(string $theme, int $paragraphCount, int $maxWords, int $questionCount, array $competencies, array $questionBlueprints, array $recentQuestions, string $variationStrategy): string
     {
         $competencyJson = json_encode($competencies, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
         $blueprintDirection = $this->questionBlueprintDirection($questionBlueprints);
         $duplicateDirection = $this->duplicateDirection($recentQuestions, $variationStrategy);
+        $themeDirection = $theme !== ''
+            ? "Gunakan tema yang diberikan guru: \"{$theme}\"."
+            : 'Guru tidak menentukan tema. Pilih sendiri satu tema yang konkret, menarik, sesuai usia siswa dan kompetensi, serta berbeda dari contoh soal sebelumnya.';
 
         return <<<PROMPT
 Anda membantu guru membuat paket soal cerita Try Out Adaptif berbahasa Indonesia.
 
-Buat satu cerita berdasarkan tema "{$theme}" dengan tepat {$paragraphCount} paragraf, lalu buat tepat {$questionCount} soal yang semuanya hanya menggunakan cerita tersebut sebagai stimulus. Kembalikan setiap paragraf sebagai satu elemen story_paragraphs tanpa nomor paragraf. Gunakan hanya kompetensi atau subkompetensi yang diberikan untuk seluruh soal dan jangan menggantinya dengan klasifikasi lain. Semua soal harus berada pada satu jenjang kelas yang sama. Cerita harus sesuai usia jenjang tersebut, faktual, aman untuk anak, tidak bias, dan memuat seluruh informasi yang diperlukan untuk menjawab soal.
+{$themeDirection}
+Buat satu cerita dengan tepat {$paragraphCount} paragraf dan maksimal {$maxWords} kata untuk keseluruhan cerita, lalu buat tepat {$questionCount} soal yang semuanya hanya menggunakan cerita tersebut sebagai stimulus. Kembalikan setiap paragraf sebagai satu elemen story_paragraphs tanpa nomor paragraf. Gunakan hanya kompetensi atau subkompetensi yang diberikan untuk seluruh soal dan jangan menggantinya dengan klasifikasi lain. Semua soal harus berada pada satu jenjang kelas yang sama. Cerita harus sesuai usia jenjang tersebut, faktual, aman untuk anak, tidak bias, dan memuat seluruh informasi yang diperlukan untuk menjawab soal.
 
 Gunakan variasi tingkat kesulitan dan proses kognitif. Soal boleh berbentuk single_choice, multiple_choice, short_answer, matching, atau category_matrix. Untuk single_choice berikan 4 opsi dengan tepat satu jawaban benar. Untuk multiple_choice berikan 4 opsi dan minimal satu jawaban benar. Untuk short_answer kosongkan options dan isi accepted_answers. Untuk matching kosongkan options dan accepted_answers, lalu isi matching_pairs dengan 2–5 objek left/right serta matching_distractors dengan 0–2 pilihan kanan pengecoh. Untuk category_matrix kosongkan options, isi matrix_columns dengan 2–4 label kategori, lalu isi matrix_rows dengan 2–6 pernyataan dan correct_column_index berbasis indeks mulai dari 0. Sertakan pembahasan yang merujuk isi cerita. Jangan membuat pertanyaan yang membutuhkan pengetahuan di luar cerita.
 
@@ -529,9 +584,11 @@ PROMPT;
         $illustrationDirection = $useIllustration
             ? 'Gunakan satu ilustrasi visual bersama untuk seluruh soal. Isi visual_description dengan deskripsi gambar yang presisi, termasuk jumlah objek, posisi, bentuk, ukuran, atau data visual yang dibutuhkan. Semua soal harus konsisten dengan ilustrasi tersebut dan tidak boleh membocorkan jawaban.'
             : 'Soal tidak memakai ilustrasi. Isi visual_description dengan string kosong.';
-        $visualSpecDirection = $illustrationMode === 'pro'
-            ? 'Mode ilustrasi PRO memakai API gambar. Isi visual_spec dengan null. Buat visual_description yang lengkap dan hindari tulisan, rumus, proses hitung, hasil turunan, kunci, atau penanda opsi benar pada gambar.'
-            : <<<DIRECTION
+        $visualSpecDirection = ! $useIllustration
+            ? 'Isi visual_spec dengan null. Semua informasi yang dibutuhkan untuk menjawab wajib tertulis langsung pada stimulus atau pertanyaan; jangan membuat soal yang bergantung pada gambar, diagram, grafik, atau tabel yang tidak ditampilkan.'
+            : ($illustrationMode === 'pro'
+                ? 'Mode ilustrasi PRO memakai API gambar. Isi visual_spec dengan null. Buat visual_description yang lengkap dan hindari tulisan, rumus, proses hitung, hasil turunan, kunci, atau penanda opsi benar pada gambar.'
+                : <<<DIRECTION
 {$illustrationProfileDirection}
 
 Mode ilustrasi LITE memakai SVG lokal. Untuk diagram Matematika, visual_spec WAJIB terstruktur agar sistem menggambar secara presisi. Pilih tepat satu format berikut:
@@ -546,12 +603,12 @@ Mode ilustrasi LITE memakai SVG lokal. Untuk diagram Matematika, visual_spec WAJ
 - data_chart: style bar/pictogram/table, title, items berisi label dan value; piktogram juga wajib legend_value dan unit.
 - route: points berisi label dan distance_from_previous (mulai titik kedua), serta unit.
 Masukkan hanya data mentah yang disebut dalam soal. Jangan menaruh rumus, proses hitung, hasil turunan, kunci, atau penanda opsi benar di visual. Untuk visual nonmatematika isi visual_spec dengan null.
-DIRECTION;
+DIRECTION);
         $answerFormatDirection = match ($answerFormat) {
             'single_choice' => 'FORMAT JAWABAN WAJIB: Semua soal harus bertipe single_choice dengan 4 opsi dan tepat 1 jawaban benar.',
             'multiple_choice' => 'FORMAT JAWABAN WAJIB: Semua soal harus bertipe multiple_choice (MCMA) dengan 4 opsi dan minimal 2 jawaban benar. Pertanyaan harus memerintahkan siswa memilih semua jawaban yang benar.',
-            'true_false' => 'FORMAT JAWABAN WAJIB: Semua soal harus bertipe category_matrix. Gunakan tepat dua matrix_columns dalam urutan ["Benar", "Salah"] dan 2–6 pernyataan pada matrix_rows.',
-            'mixed' => 'FORMAT JAWABAN WAJIB: Campurkan hanya single_choice, multiple_choice, dan category_matrix. Gunakan minimal 2 tipe berbeda dalam paket. Untuk category_matrix gunakan tepat dua kolom ["Benar", "Salah"]. Untuk multiple_choice gunakan minimal 2 jawaban benar.',
+            'true_false' => 'FORMAT JAWABAN WAJIB: Semua soal harus bertipe category_matrix. Gunakan tepat dua matrix_columns dalam urutan ["Benar", "Salah"] dan tepat 3 pernyataan pada matrix_rows.',
+            'mixed' => 'FORMAT JAWABAN WAJIB: Campurkan hanya single_choice, multiple_choice, dan category_matrix. Gunakan minimal 2 tipe berbeda dalam paket. Untuk category_matrix gunakan tepat dua kolom ["Benar", "Salah"] dan tepat 3 pernyataan. Untuk multiple_choice gunakan minimal 2 jawaban benar.',
             default => 'FORMAT JAWABAN WAJIB: Semua soal harus bertipe single_choice.',
         };
         $blueprintDirection = $this->questionBlueprintDirection($questionBlueprints);
@@ -593,6 +650,21 @@ PROMPT;
         }
 
         $blueprintJson = json_encode($questionBlueprints, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+
+        $isBundle = collect($questionBlueprints)->every(fn (array $blueprint): bool => isset($blueprint['answer_format'], $blueprint['cognitive_level_label']));
+        if ($isBundle) {
+            return <<<DIRECTION
+Buat setiap soal tepat sesuai slot bundle berikut dan urutannya tidak boleh diubah:
+{$blueprintJson}
+
+Aturan format slot:
+- answer_format=single_choice: type=single_choice, 4 opsi, tepat 1 jawaban benar.
+- answer_format=true_false: type=category_matrix, matrix_columns tepat ["Benar","Salah"], dan tepat 3 pernyataan yang semuanya wajib dijawab.
+- answer_format=multiple_choice: type=multiple_choice, 4 opsi, minimal 2 jawaban benar, dan perintah memilih semua jawaban benar.
+- cognitive_level harus mengukur tingkat yang tertulis pada cognitive_level_label, bukan hanya menyalin labelnya.
+- Ketiga soal wajib menggunakan cerita yang sama, tetapi mengukur fokus tipe soal yang berbeda sesuai name dan description setiap slot.
+DIRECTION;
+        }
 
         return "Gunakan tipe soal berikut secara bergiliran sesuai urutan untuk setiap soal. Isi pertanyaan harus benar-benar mengukur fokus tipe soal tersebut:\n{$blueprintJson}";
     }
@@ -664,5 +736,12 @@ PROMPT;
         }
 
         return false;
+    }
+
+    private function wordCount(string $text): int
+    {
+        preg_match_all('/[\p{L}\p{N}]+(?:[-’\'][\p{L}\p{N}]+)*/u', $text, $matches);
+
+        return count($matches[0]);
     }
 }

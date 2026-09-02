@@ -160,6 +160,7 @@ class AttemptWorkflowTest extends TestCase
     {
         config()->set('queue.default', 'sync');
         [$student, $assessment, $informationQuestion] = $this->scenario();
+        $informationQuestion->update(['explanation' => 'Jawaban benar dipilih berdasarkan informasi pada soal.']);
         $originalCorrect = $informationQuestion->options()->where('is_correct', true)->firstOrFail();
         $originalWrong = $informationQuestion->options()->where('is_correct', false)->firstOrFail();
 
@@ -184,7 +185,8 @@ class AttemptWorkflowTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page
                 ->where('attempt.remaining_seconds', fn ($value) => is_int($value))
                 ->where('attempt.questions.0.prompt', 'Pilih jawaban yang tepat.')
-                ->where('attempt.questions.0.options.0.content', 'Jawaban benar'));
+                ->where('attempt.questions.0.options.0.content', 'Jawaban benar')
+                ->missing('attempt.questions.0.title'));
 
         $this->actingAs($student)->putJson(
             route('attempts.answers.update', [$attempt->public_id, $informationQuestion]),
@@ -193,6 +195,14 @@ class AttemptWorkflowTest extends TestCase
         $this->actingAs($student)
             ->post(route('attempts.submit', $attempt->public_id))
             ->assertRedirect(route('attempts.result', $attempt->public_id));
+
+        $this->actingAs($student)
+            ->get(route('attempts.result', $attempt->public_id))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Attempts/Result')
+                ->where('questionReviews.0.prompt', 'Pilih jawaban yang tepat.')
+                ->where('questionReviews.0.explanation', 'Jawaban benar dipilih berdasarkan informasi pada soal.')
+                ->where('questionReviews.0.is_correct', true));
 
         $this->assertTrue($attempt->answers()->where('question_id', $informationQuestion->id)->firstOrFail()->is_correct);
     }

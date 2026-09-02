@@ -10,6 +10,7 @@ type MatrixRow = { id: string; statement: string; correct_column_id: string };
 export type InlineEditableQuestion = {
     id: number;
     type: 'single_choice' | 'multiple_choice' | 'short_answer' | 'matching' | 'category_matrix';
+    difficulty: number;
     stimulus?: string;
     prompt: string;
     explanation?: string;
@@ -24,6 +25,7 @@ export type InlineEditableQuestion = {
 };
 
 type EditorData = {
+    difficulty: number;
     stimulus: string;
     prompt: string;
     explanation: string;
@@ -47,6 +49,7 @@ export default function InlineQuestionEditor({
     onCancel: () => void;
 }) {
     const { data, setData, put, processing, errors } = useForm<EditorData>({
+        difficulty: question.difficulty,
         stimulus: question.stimulus || '',
         prompt: question.prompt,
         explanation: question.explanation || '',
@@ -95,6 +98,15 @@ export default function InlineQuestionEditor({
                     <textarea value={data.stimulus} onChange={(event) => setData('stimulus', event.target.value)} rows={3} className="mt-1 block w-full rounded-lg border-slate-300 bg-white focus:border-indigo-500 focus:ring-indigo-500" />
                 </label>
             )}
+
+            <label className="block text-sm font-medium text-slate-700">
+                Level soal
+                <select value={data.difficulty} onChange={(event) => setData('difficulty', Number(event.target.value))} className="mt-1 block w-full rounded-lg border-slate-300 bg-white focus:border-indigo-500 focus:ring-indigo-500">
+                    <option value={1}>Level 1 · Mudah</option>
+                    <option value={2}>Level 2 · Sedang</option>
+                    <option value={3}>Level 3 · Sulit</option>
+                </select>
+            </label>
 
             <label className="block text-sm font-medium text-slate-700">
                 Pertanyaan
@@ -153,7 +165,7 @@ export default function InlineQuestionEditor({
                         {data.options.map((option, index) => (
                             <div key={index} className="flex items-center gap-3">
                                 <input type={question.type === 'single_choice' ? 'radio' : 'checkbox'} name={`correct-option-${question.id}`} checked={option.is_correct} onChange={(event) => updateOption(index, 'is_correct', event.target.checked)} className="border-slate-300 text-indigo-600 focus:ring-indigo-500" />
-                                <span className="w-5 text-sm font-semibold text-slate-500">{String.fromCharCode(65 + index)}</span>
+                                {question.type === 'single_choice' && <span className="w-5 text-sm font-semibold text-slate-500">{String.fromCharCode(65 + index)}</span>}
                                 <input value={option.content} onChange={(event) => updateOption(index, 'content', event.target.value)} className="min-w-0 flex-1 rounded-lg border-slate-300 bg-white focus:border-indigo-500 focus:ring-indigo-500" />
                             </div>
                         ))}

@@ -22,10 +22,11 @@ class AiStoryIllustrationController extends Controller
         TeacherAiQuota $quota,
     ): RedirectResponse {
         $format = data_get($generation->request_payload, 'format', 'story');
+        $hasRecoverableVisualSpec = is_array(data_get($generation->result_payload, 'visual_spec'));
         abort_unless(
             $generation->school_id === $request->user()->school_id
             && $generation->type === AiGenerationType::StoryQuestions
-            && ($format === 'story' || data_get($generation->request_payload, 'use_illustration') === true)
+            && ($format === 'story' || data_get($generation->request_payload, 'use_illustration') === true || $hasRecoverableVisualSpec)
             && $generation->status === AiGenerationStatus::Completed,
             404,
         );
@@ -97,7 +98,7 @@ class AiStoryIllustrationController extends Controller
                 'image_size' => '1K',
                 'alt' => $alt,
                 'visual_spec' => data_get($generation->result_payload, 'visual_spec'),
-                'illustration_mode' => data_get($generation->request_payload, 'illustration_mode', 'lite'),
+                'illustration_mode' => data_get($generation->request_payload, 'illustration_mode') === 'pro' ? 'pro' : 'lite',
             ],
         ]);
 

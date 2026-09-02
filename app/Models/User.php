@@ -14,7 +14,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
-#[Fillable(['school_id', 'name', 'email', 'password', 'role', 'student_identifier', 'grade_level', 'email_verified_at', 'is_active', 'approved_at', 'approved_by', 'last_login_at'])]
+#[Fillable(['school_id', 'name', 'email', 'parent_email', 'password', 'role', 'student_identifier', 'grade_level', 'email_verified_at', 'is_active', 'approved_at', 'approved_by', 'last_login_at'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
@@ -52,6 +52,11 @@ class User extends Authenticatable
     public function attempts(): HasMany
     {
         return $this->hasMany(Attempt::class);
+    }
+
+    public function questionVerifications(): HasMany
+    {
+        return $this->hasMany(QuestionVerification::class, 'verifier_id');
     }
 
     public function chatRoom(): HasOne

@@ -22,8 +22,74 @@ class FakeAiProvider implements AiProvider
             'question_validation' => new AiResponse($this->questionValidation($context), 0, 0),
             'attempt_summary' => new AiResponse($this->attemptSummary($context), 0, 0),
             'student_chat' => new AiResponse($this->studentChat($context), 0, 0),
+            'school_assessment_analysis' => new AiResponse($this->schoolAssessmentAnalysis($context), 0, 0),
             default => new AiResponse([]),
         };
+    }
+
+    private function schoolAssessmentAnalysis(array $context): array
+    {
+        $competencies = collect($context['weak_competencies'] ?? [])->values();
+        $questions = collect($context['difficult_questions'] ?? [])->values();
+        $weakest = $competencies->first();
+        $subject = mb_strtolower((string) data_get($context, 'assessment.subject', ''));
+        $mathExercises = [
+            ['prompt' => 'Hasil dari 240 + 360 adalah …', 'correct' => '600', 'wrong' => ['500', '580', '620'], 'explanation' => 'Jumlahkan nilai ratusan dan puluhan: 240 + 360 = 600.'],
+            ['prompt' => 'Nilai 2/5 dari 150 adalah …', 'correct' => '60', 'wrong' => ['30', '50', '75'], 'explanation' => 'Hitung 150 ÷ 5 = 30, kemudian 30 × 2 = 60.'],
+            ['prompt' => 'FPB dari 42 dan 56 adalah …', 'correct' => '14', 'wrong' => ['7', '12', '21'], 'explanation' => 'Faktor terbesar yang membagi 42 dan 56 adalah 14.'],
+            ['prompt' => 'KPK dari 9 dan 12 adalah …', 'correct' => '36', 'wrong' => ['18', '24', '48'], 'explanation' => 'Kelipatan pertama yang sama dari 9 dan 12 adalah 36.'],
+            ['prompt' => 'Jarak 3,2 kilometer sama dengan … meter.', 'correct' => '3.200', 'wrong' => ['320', '3.020', '32.000'], 'explanation' => 'Satu kilometer adalah 1.000 meter, sehingga 3,2 km = 3.200 m.'],
+        ];
+
+        return [
+            'summary' => $weakest
+                ? "Dari {$context['sample_size']} pengerjaan selesai, prioritas penguatan berada pada {$weakest['name']} dengan {$weakest['incorrect_percentage']}% respons belum tepat. Guru disarankan memulai dari konsep dasar, memodelkan strategi penyelesaian, lalu memeriksa pemahaman melalui latihan bertahap."
+                : 'Data pengerjaan telah dianalisis. Gunakan latihan bertahap dan pemeriksaan pemahaman untuk menentukan tindak lanjut.',
+            'teacher_recommendations' => $competencies->map(fn (array $competency): array => [
+                'competency_code' => $competency['code'],
+                'finding' => "Sebanyak {$competency['incorrect_percentage']}% dari {$competency['response_count']} respons pada {$competency['name']} belum tepat.",
+                'action' => "Ulangi konsep inti {$competency['name']} dengan contoh konkret, lalu minta siswa menjelaskan alasan pada setiap langkah.",
+                'suggested_activity' => 'Gunakan latihan berpasangan: satu siswa menyelesaikan soal dan pasangannya memeriksa serta menjelaskan letak kekeliruan.',
+            ])->all(),
+            'practice_questions' => collect(range(0, 4))->map(function (int $index) use ($questions, $mathExercises, $subject): array {
+                $source = $questions[$index % $questions->count()];
+                $exercise = str_contains($subject, 'matematika')
+                    ? $mathExercises[$index]
+                    : $this->genericPracticeExercise($source, $index);
+
+                return [
+                    'source_question_id' => $source['question_id'],
+                    'competency_code' => $source['competency_code'],
+                    'prompt' => $exercise['prompt'],
+                    'difficulty' => min(3, max(1, (int) $source['difficulty'])),
+                    'options' => collect([$exercise['correct'], ...$exercise['wrong']])->map(
+                        fn (string $content, int $optionIndex): array => [
+                            'content' => $content,
+                            'is_correct' => $optionIndex === 0,
+                        ],
+                    )->all(),
+                    'explanation' => $exercise['explanation'],
+                ];
+            })->all(),
+        ];
+    }
+
+    private function genericPracticeExercise(array $source, int $index): array
+    {
+        $options = collect($source['options'] ?? []);
+        $correct = (string) data_get($options->firstWhere('is_correct', true), 'content', 'Jawaban paling tepat');
+        $wrong = $options->where('is_correct', false)->pluck('content')->map(fn ($content): string => (string) $content)->take(3);
+
+        while ($wrong->count() < 3) {
+            $wrong->push('Pilihan pengecoh '.($wrong->count() + 1));
+        }
+
+        return [
+            'prompt' => 'Latihan penguatan '.($index + 1).': '.(string) $source['prompt'],
+            'correct' => $correct,
+            'wrong' => $wrong->all(),
+            'explanation' => 'Tinjau kembali konsep pada kompetensi terkait dan cocokkan setiap informasi dengan pilihan jawaban.',
+        ];
     }
 
     private function storyQuestions(array $context): array
@@ -32,7 +98,7 @@ class FakeAiProvider implements AiProvider
             return $this->directQuestions($context);
         }
 
-        $theme = trim((string) ($context['theme'] ?? 'kegiatan sekolah'));
+        $theme = trim((string) ($context['theme'] ?? '')) ?: 'kegiatan sekolah yang menarik';
         $paragraphCount = (int) ($context['paragraph_count'] ?? 3);
         $questionCount = (int) ($context['question_count'] ?? 3);
         $competencyCode = $context['competencies'][0]['code'];
@@ -46,31 +112,67 @@ class FakeAiProvider implements AiProvider
         ];
 
         $questions = [
-            ['prompt' => 'Kapan kegiatan tersebut dilaksanakan?', 'correct' => 'Hari Senin', 'wrong' => ['Hari Selasa', 'Hari Rabu', 'Hari Jumat'], 'difficulty' => 1],
-            ['prompt' => 'Berapa kelompok yang mengikuti kegiatan?', 'correct' => 'Tiga kelompok', 'wrong' => ['Dua kelompok', 'Empat kelompok', 'Lima kelompok'], 'difficulty' => 1],
-            ['prompt' => 'Apa yang dilakukan setiap kelompok setelah kegiatan selesai?', 'correct' => 'Mempresentasikan temuan', 'wrong' => ['Langsung pulang', 'Menghapus catatan', 'Mengganti tema'], 'difficulty' => 2],
-            ['prompt' => 'Mengapa guru memberikan apresiasi kepada siswa?', 'correct' => 'Karena siswa menyelesaikan kegiatan', 'wrong' => ['Karena kegiatan dibatalkan', 'Karena siswa datang terlambat', 'Karena kelas belum dirapikan'], 'difficulty' => 2],
+            ['prompt' => 'Kapan kegiatan tersebut dilaksanakan?', 'correct' => 'Hari Senin', 'also_correct' => 'Pada awal pekan', 'wrong' => ['Hari Selasa', 'Hari Rabu', 'Hari Jumat'], 'difficulty' => 1],
+            ['prompt' => 'Berapa kelompok yang mengikuti kegiatan?', 'correct' => 'Tiga kelompok', 'also_correct' => 'Lebih dari dua kelompok', 'wrong' => ['Dua kelompok', 'Empat kelompok', 'Lima kelompok'], 'difficulty' => 1],
+            ['prompt' => 'Apa yang dilakukan setiap kelompok setelah kegiatan selesai?', 'correct' => 'Mempresentasikan temuan', 'also_correct' => 'Menyampaikan hasil di depan kelas', 'wrong' => ['Langsung pulang', 'Menghapus catatan', 'Mengganti tema'], 'difficulty' => 2],
+            ['prompt' => 'Mengapa guru memberikan apresiasi kepada siswa?', 'correct' => 'Karena siswa menyelesaikan kegiatan', 'also_correct' => 'Karena kegiatan berhasil diselesaikan', 'wrong' => ['Karena kegiatan dibatalkan', 'Karena siswa datang terlambat', 'Karena kelas belum dirapikan'], 'difficulty' => 2],
         ];
+        $blueprints = collect($context['question_blueprints'] ?? [])->values();
 
         return [
             'title' => $title,
             'story_paragraphs' => array_slice($paragraphs, 0, $paragraphCount),
-            'questions' => collect(array_slice($questions, 0, $questionCount))->map(fn (array $question, int $index): array => [
-                'competency_code' => $competencyCode,
-                'type' => 'single_choice',
-                'title' => "{$title} - Soal ".($index + 1),
-                'prompt' => $question['prompt'],
-                'explanation' => 'Jawaban ditemukan dengan membaca informasi pada cerita.',
-                'difficulty' => $question['difficulty'],
-                'cognitive_level' => 'menemukan informasi',
-                'options' => collect([$question['correct'], ...$question['wrong']])->map(
-                    fn (string $content, int $optionIndex): array => [
-                        'content' => $content,
-                        'is_correct' => $optionIndex === 0,
-                    ],
-                )->all(),
-                'accepted_answers' => [],
-            ])->all(),
+            'questions' => collect(array_slice($questions, 0, $questionCount))->map(fn (array $question, int $index): array => $this->storyQuestionPayload(
+                $question,
+                $index,
+                $title,
+                $competencyCode,
+                (string) data_get($blueprints, "{$index}.answer_format", 'single_choice'),
+                (string) data_get($blueprints, "{$index}.cognitive_level_label", 'Menemukan informasi'),
+            ))->all(),
+        ];
+    }
+
+    private function storyQuestionPayload(array $question, int $index, string $title, string $competencyCode, string $answerFormat, string $cognitiveLevel): array
+    {
+        $base = [
+            'competency_code' => $competencyCode,
+            'title' => "{$title} - Soal ".($index + 1),
+            'explanation' => 'Jawaban ditemukan dengan membaca dan menafsirkan informasi pada cerita.',
+            'difficulty' => min(3, $index + 1),
+            'cognitive_level' => $cognitiveLevel,
+            'accepted_answers' => [],
+            'matching_pairs' => [],
+            'matching_distractors' => [],
+            'matrix_columns' => [],
+            'matrix_rows' => [],
+        ];
+
+        if ($answerFormat === 'true_false') {
+            return [
+                ...$base,
+                'type' => 'category_matrix',
+                'prompt' => 'Tentukan Benar atau Salah untuk setiap pernyataan berdasarkan cerita.',
+                'options' => [],
+                'matrix_columns' => ['Benar', 'Salah'],
+                'matrix_rows' => [
+                    ['statement' => $question['correct'].'.', 'correct_column_index' => 0],
+                    ['statement' => $question['wrong'][0].'.', 'correct_column_index' => 1],
+                    ['statement' => $question['also_correct'].'.', 'correct_column_index' => 0],
+                ],
+            ];
+        }
+
+        $multipleChoice = $answerFormat === 'multiple_choice';
+        $options = $multipleChoice
+            ? [[$question['correct'], true], [$question['also_correct'], true], [$question['wrong'][0], false], [$question['wrong'][1], false]]
+            : [[$question['correct'], true], [$question['wrong'][0], false], [$question['wrong'][1], false], [$question['wrong'][2], false]];
+
+        return [
+            ...$base,
+            'type' => $multipleChoice ? 'multiple_choice' : 'single_choice',
+            'prompt' => $multipleChoice ? 'Pilih semua jawaban yang benar. '.$question['prompt'] : $question['prompt'],
+            'options' => collect($options)->map(fn (array $option): array => ['content' => $option[0], 'is_correct' => $option[1]])->all(),
         ];
     }
 
@@ -142,6 +244,7 @@ class FakeAiProvider implements AiProvider
                 'matrix_rows' => [
                     ['statement' => "Hasil perhitungan adalah {$question['correct']}.", 'correct_column_index' => 0],
                     ['statement' => "Hasil perhitungan adalah {$question['wrong'][0]}.", 'correct_column_index' => 1],
+                    ['statement' => "Hasil perhitungan bukan {$question['wrong'][1]}.", 'correct_column_index' => 0],
                 ],
             ];
         }

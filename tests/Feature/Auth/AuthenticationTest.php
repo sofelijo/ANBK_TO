@@ -66,31 +66,17 @@ class AuthenticationTest extends TestCase
         $response->assertRedirect('/');
     }
 
-    public function test_student_can_create_an_account_and_login_with_npsn_and_nisn(): void
+    public function test_unknown_student_cannot_create_account_from_login_form(): void
     {
-        $response = $this->post(route('student-login'), [
+        $this->post(route('student-login'), [
             'npsn' => '10001001',
             'nisn' => '0012345678',
-            'name' => '  Budi   Santoso  ',
+        ])->assertSessionHasErrors([
+            'nisn' => 'Akun belum terdaftar. Silakan daftar sebagai murid terlebih dahulu.',
         ]);
 
-        $school = School::query()->where('npsn', '10001001')->firstOrFail();
-        $student = User::query()->where('student_identifier', '0012345678')->firstOrFail();
-
-        $this->assertAuthenticatedAs($student);
-        $response->assertRedirect(route('dashboard', absolute: false));
-        $this->assertSame('Budi Santoso', $student->name);
-        $this->assertSame(UserRole::Student, $student->role);
-        $this->assertSame(6, $student->grade_level);
-        $this->assertNotNull($student->email_verified_at);
-        $this->assertNotNull($student->last_login_at);
-        $this->assertDatabaseHas('audit_logs', [
-            'school_id' => $school->id,
-            'actor_id' => $student->id,
-            'action' => 'student.auto_registered',
-            'auditable_type' => $student->getMorphClass(),
-            'auditable_id' => $student->id,
-        ]);
+        $this->assertGuest();
+        $this->assertDatabaseCount('users', 0);
     }
 
     public function test_existing_student_can_login_without_entering_their_name(): void
@@ -121,22 +107,29 @@ class AuthenticationTest extends TestCase
         ]);
     }
 
-    public function test_unknown_student_must_enter_a_name_on_first_login(): void
+    public function test_pending_student_cannot_login_before_operator_approval(): void
     {
         $school = School::create([
             'name' => 'SD Negeri Uji',
             'npsn' => '10001003',
         ]);
 
+        User::factory()->create([
+            'school_id' => $school->id,
+            'role' => UserRole::Student,
+            'student_identifier' => '0012345680',
+            'is_active' => false,
+            'approved_at' => null,
+        ]);
+
         $this->post(route('student-login'), [
             'npsn' => $school->npsn,
             'nisn' => '0012345680',
         ])->assertSessionHasErrors([
-            'name' => 'Isi nama lengkap untuk membuat akun pertama kali.',
+            'nisn' => 'Pendaftaran akun masih menunggu persetujuan operator sekolah.',
         ]);
 
         $this->assertGuest();
-        $this->assertDatabaseCount('users', 0);
     }
 
     public function test_inactive_student_cannot_login_with_nisn(): void
@@ -171,7 +164,7 @@ class AuthenticationTest extends TestCase
             $this->post(route('student-login'), [
                 'npsn' => '10001999',
                 'nisn' => '0012345699',
-            ])->assertSessionHasErrors('name');
+            ])->assertSessionHasErrors('nisn');
         }
 
         $this->post(route('student-login'), [

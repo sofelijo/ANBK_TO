@@ -4,8 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\Competency;
 use App\Models\CompetencyResult;
-use App\Models\Recommendation;
 use App\Models\QuestionBlueprint;
+use App\Models\Recommendation;
 use App\Models\Subject;
 use App\Services\AuditLogger;
 use Illuminate\Http\RedirectResponse;
@@ -33,7 +33,7 @@ class CompetencyController extends Controller
             })
             ->when($request->integer('grade_level'), fn ($query, int $grade) => $query->where('grade_level', $grade))
             ->when($request->integer('subject_id'), fn ($query, int $subjectId) => $query->where('subject_id', $subjectId))
-            ->with(['parent:id,code,name', 'subject:id,code,name'])
+            ->with(['parent:id,code,name', 'subject:id,code,name', 'questionBlueprints:id,code,name'])
             ->withCount([
                 'questions',
                 'children',
@@ -55,7 +55,11 @@ class CompetencyController extends Controller
                 'grade_level' => $competency->grade_level,
                 'subject' => $competency->subject,
                 'parent' => $competency->parent,
-                'questions_count' => $competency->parent_id === null
+                'question_blueprints' => $competency->questionBlueprints->map(fn (QuestionBlueprint $blueprint): array => [
+                    ...$blueprint->only(['id', 'code', 'name']),
+                    'position' => $blueprint->pivot->position,
+                ])->values(),
+                'questions_count' => $competency->parent_id === null && $competency->children_count > 0
                     ? $competency->subcompetency_questions_count
                     : $competency->questions_count,
                 'children_count' => $competency->children_count,
@@ -165,7 +169,7 @@ class CompetencyController extends Controller
         if ($rawCode === '') {
             $rawCode = Str::upper(Str::slug(Str::words($rawName, 4, ''), '-'));
             if ($rawCode === '') {
-                $rawCode = 'KOMP-' . Str::upper(Str::random(4));
+                $rawCode = 'KOMP-'.Str::upper(Str::random(4));
             }
             // Ensure uniqueness by appending school-scoped counter
             $base = $rawCode;
@@ -177,7 +181,7 @@ class CompetencyController extends Controller
                     ->when($competency, fn ($q) => $q->whereKeyNot($competency->id))
                     ->exists()
             ) {
-                $rawCode = $base . '-' . $suffix++;
+                $rawCode = $base.'-'.$suffix++;
             }
         }
 

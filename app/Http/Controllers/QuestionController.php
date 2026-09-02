@@ -7,18 +7,24 @@ use App\Enums\AiGenerationType;
 use App\Enums\AssessmentStatus;
 use App\Enums\QuestionStatus;
 use App\Enums\QuestionType;
+use App\Enums\UserRole;
 use App\Models\AiGeneration;
 use App\Models\Assessment;
 use App\Models\Competency;
 use App\Models\Question;
 use App\Models\QuestionBlueprint;
 use App\Models\Subject;
+use App\Models\User;
 use App\Services\AuditLogger;
+use App\Services\EducationalGeometryTemplateSvgRenderer;
 use App\Services\QuestionDuplicateDetector;
+use App\Services\QuestionTypeConfiguration;
+use App\Services\QuestionVerificationService;
 use App\Services\StimulusImageService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -30,6 +36,11 @@ use Throwable;
 
 class QuestionController extends Controller
 {
+    public function __construct(
+        private QuestionTypeConfiguration $questionTypeConfiguration,
+        private EducationalGeometryTemplateSvgRenderer $geometryTemplateRenderer,
+    ) {}
+
     public function index(Request $request): Response
     {
         $questions = Question::query()
@@ -55,8 +66,10 @@ class QuestionController extends Controller
             ])
             ->withCount([
                 'variants',
+                'verifications',
                 'bundleQuestions as bundle_question_count',
                 'bundleQuestions as bundle_draft_count' => fn ($query) => $query->where('status', QuestionStatus::Draft),
+                'bundleQuestions as bundle_review_count' => fn ($query) => $query->where('status', QuestionStatus::Review),
                 'bundleQuestions as bundle_published_count' => fn ($query) => $query->where('status', QuestionStatus::Published),
                 'bundleQuestions as bundle_archived_count' => fn ($query) => $query->where('status', QuestionStatus::Archived),
             ])
@@ -98,31 +111,45 @@ class QuestionController extends Controller
         ]);
     }
 
-    public function create(Request $request): Response
+    public function create(Request $request): Response|RedirectResponse
     {
         $subjects = $this->subjects($request);
         $selectedSubjectId = $subjects->contains('id', $request->integer('subject_id'))
             ? $request->integer('subject_id')
             : null;
 
+        if ($subjects->firstWhere('id', $selectedSubjectId)?->code === 'BIND') {
+            return to_route('manual-story-bundles.create', ['subject_id' => $selectedSubjectId]);
+        }
+
         return Inertia::render('Questions/Create', [
             'subjects' => $subjects,
             'competencies' => $this->competencies($request),
             'questionBlueprints' => $this->questionBlueprints($request),
             'assessments' => $this->assessmentsForQuestion($request),
+            'questionTypes' => $this->questionTypeConfiguration->options($request->user()->school),
             'selectedSubjectId' => $selectedSubjectId,
+            'stimulusSvgTemplates' => $this->stimulusSvgTemplates(),
         ]);
     }
 
     public function store(Request $request, AuditLogger $auditLogger, StimulusImageService $imageService): RedirectResponse
     {
         $data = $this->validatedData($request);
-        $illustration = $this->storeStimulusImage($request, $data, $imageService);
+        $illustration = null;
+        $explanationIllustration = null;
 
         try {
-            $question = DB::transaction(function () use ($data, $request, $illustration): Question {
+            $illustration = $this->storeStimulusImage($request, $data, $imageService);
+            $explanationIllustration = $this->storeExplanationImage($request, $data, $imageService);
+            $metadata = $this->withExplanationImage(
+                $this->withStimulusImage([], $data, $illustration),
+                $data,
+                $explanationIllustration,
+            );
+            $question = DB::transaction(function () use ($data, $request, $metadata): Question {
                 $question = Question::create([
-                    ...$this->attributes($data, $this->withStimulusImage([], $data, $illustration)),
+                    ...$this->attributes($data, $metadata),
                     'school_id' => $request->user()->school_id,
                     'author_id' => $request->user()->id,
                     'status' => QuestionStatus::Draft,
@@ -133,6 +160,7 @@ class QuestionController extends Controller
             });
         } catch (Throwable $exception) {
             $this->deleteStoredIllustration($illustration);
+            $this->deleteStoredIllustration($explanationIllustration);
 
             throw $exception;
         }
@@ -155,6 +183,7 @@ class QuestionController extends Controller
             'approver:id,name',
             'options',
             'reviews.reviewer:id,name',
+            'verifications.verifier:id,name',
             'variants' => fn ($query) => $query->with('competency:id,code,name')->latest(),
             'revisionOf:id,title,version,status',
             'supersededBy:id,title,version,status',
@@ -162,6 +191,8 @@ class QuestionController extends Controller
 
         return Inertia::render('Questions/Show', [
             'question' => $question,
+            'stimulusSvgTemplates' => $this->stimulusSvgTemplates(),
+            'verification' => $this->verificationSummary($question, $request->user()),
             'latestGeneration' => ($latestGeneration = AiGeneration::query()
                 ->where('source_question_id', $question->id)
                 ->where('type', AiGenerationType::QuestionVariants)
@@ -187,6 +218,7 @@ class QuestionController extends Controller
             'competencies' => $this->competencies($request),
             'questionBlueprints' => $this->questionBlueprints($request),
             'assessments' => $this->assessmentsForQuestion($request),
+            'questionTypes' => $this->questionTypeConfiguration->options($request->user()->school, $question->type),
             'question' => $question,
             'returnGeneration' => $returnGeneration ? [
                 'id' => $returnGeneration->id,
@@ -200,13 +232,20 @@ class QuestionController extends Controller
         $this->ensureSameSchool($request, $question);
         abort_if($question->superseded_by_id !== null, 409, 'Versi soal ini sudah digantikan oleh revisi yang lebih baru.');
         $returnGeneration = $this->returnGeneration($request, $question);
-        $data = $this->validatedData($request);
-        $illustration = $this->storeStimulusImage($request, $data, $imageService);
-        $metadata = $this->withStimulusImage($question->metadata ?? [], $data, $illustration);
+        $data = $this->validatedData($request, $question);
+        $illustration = null;
+        $explanationIllustration = null;
         $createRevision = $question->status === QuestionStatus::Published
             || $question->assessments()->exists();
 
         try {
+            $illustration = $this->storeStimulusImage($request, $data, $imageService);
+            $explanationIllustration = $this->storeExplanationImage($request, $data, $imageService);
+            $metadata = $this->withExplanationImage(
+                $this->withStimulusImage($question->metadata ?? [], $data, $illustration),
+                $data,
+                $explanationIllustration,
+            );
             $savedQuestion = DB::transaction(function () use ($question, $data, $request, $createRevision, $metadata): Question {
                 if ($createRevision) {
                     $revision = Question::create([
@@ -230,12 +269,14 @@ class QuestionController extends Controller
                     'approved_by' => null,
                     'approved_at' => null,
                 ]);
+                $question->verifications()->delete();
                 $this->syncOptions($question, $data['options'] ?? []);
 
                 return $question;
             });
         } catch (Throwable $exception) {
             $this->deleteStoredIllustration($illustration);
+            $this->deleteStoredIllustration($explanationIllustration);
 
             throw $exception;
         }
@@ -275,7 +316,11 @@ class QuestionController extends Controller
             && in_array($question->id, data_get($generation->result_payload, 'question_ids', []), true),
             404,
         );
-        abort_unless($question->status === QuestionStatus::Draft, 409, 'Hanya soal draft yang dapat diedit langsung dari paket AI.');
+        abort_unless(
+            in_array($question->status, [QuestionStatus::Draft, QuestionStatus::Review], true),
+            409,
+            'Hanya soal draft atau yang menunggu verifikasi yang dapat diedit langsung dari paket AI.',
+        );
 
         $question->loadMissing('competency');
         $irrelevantAnswerFields = match ($question->type) {
@@ -293,18 +338,20 @@ class QuestionController extends Controller
             'question_blueprint_id' => $question->question_blueprint_id,
             'type' => $question->type->value,
             'title' => $question->title,
-            'difficulty' => $question->difficulty,
+            'difficulty' => $request->input('difficulty', $question->difficulty),
             'grade_level' => $question->grade_level,
             'cognitive_level' => $question->cognitive_level,
         ]);
-        $data = $this->validatedData($request);
+        $data = $this->validatedData($request, $question);
 
         DB::transaction(function () use ($question, $data): void {
             $question->update([
                 ...$this->attributes($data, $question->metadata ?? []),
+                'status' => QuestionStatus::Draft,
                 'approved_by' => null,
                 'approved_at' => null,
             ]);
+            $question->verifications()->delete();
             $this->syncOptions($question, $data['options'] ?? []);
         });
 
@@ -312,7 +359,7 @@ class QuestionController extends Controller
             'story_generation_id' => $generation->id,
         ]);
 
-        return back()->with('success', 'Soal, jawaban, dan pembahasan berhasil diperbarui.');
+        return back()->with('success', 'Level soal, isi, jawaban, dan pembahasan berhasil diperbarui.');
     }
 
     public function destroyGenerated(
@@ -322,7 +369,11 @@ class QuestionController extends Controller
         AuditLogger $auditLogger,
     ): RedirectResponse {
         $this->ensureGeneratedQuestion($request, $generation, $question);
-        abort_unless($question->status === QuestionStatus::Draft, 409, 'Hanya soal draft yang dapat dihapus.');
+        abort_unless(
+            in_array($question->status, [QuestionStatus::Draft, QuestionStatus::Review], true),
+            409,
+            'Hanya soal draft atau yang menunggu verifikasi yang dapat dihapus.',
+        );
         abort_if($question->assessments()->exists(), 409, 'Soal yang sudah digunakan pada paket ujian tidak dapat dihapus.');
 
         DB::transaction(function () use ($generation, $question, $request, $auditLogger): void {
@@ -401,55 +452,145 @@ class QuestionController extends Controller
         Question $question,
         AuditLogger $auditLogger,
         QuestionDuplicateDetector $duplicateDetector,
+        QuestionVerificationService $verificationService,
     ): RedirectResponse {
         $this->ensureSameSchool($request, $question);
         abort_if($question->superseded_by_id !== null, 409, 'Versi soal ini sudah digantikan.');
-        if ($duplicateDetector->hasBlockingDuplicate($question)) {
+        if ($question->status !== QuestionStatus::Published && $duplicateDetector->hasBlockingDuplicate($question)) {
             throw ValidationException::withMessages([
                 'duplicate' => 'Soal belum dapat diverifikasi karena ditemukan soal lain yang sangat mirip. Edit atau hapus salah satunya terlebih dahulu.',
             ]);
         }
 
-        DB::transaction(function () use ($question, $request): void {
-            if ($question->revision_of_id) {
-                $source = Question::query()->lockForUpdate()->findOrFail($question->revision_of_id);
-                abort_if(
-                    $source->superseded_by_id !== null && $source->superseded_by_id !== $question->id,
-                    409,
-                    'Sudah ada revisi lain yang diterbitkan untuk soal ini.',
-                );
-                $source->update([
-                    'status' => QuestionStatus::Archived,
-                    'superseded_by_id' => $question->id,
-                ]);
-            }
+        $result = $verificationService->verify($question, $request->user());
 
-            $question->update([
-                'status' => QuestionStatus::Published,
-                'approved_by' => $request->user()->id,
-                'approved_at' => now(),
+        if ($result['created']) {
+            $auditLogger->log($request, 'question.verified', $question, [
+                'verification_count' => $result['count'],
+                'published' => $result['published'],
             ]);
-        });
-        $auditLogger->log($request, 'question.published', $question);
+        }
 
-        return back()->with('success', 'Soal sudah diterbitkan dan siap masuk paket ujian.');
+        if ($result['published']) {
+            $auditLogger->log($request, 'question.published', $question, [
+                'verification_count' => $result['count'],
+            ]);
+
+            return back()->with('success', 'Verifikasi guru ke-3 tercatat. Soal otomatis diterbitkan dan siap masuk paket ujian.');
+        }
+
+        if ($result['already_published']) {
+            return back()->with(
+                'success',
+                $result['created']
+                    ? "Verifikasi tambahan Anda tercatat. Soal tetap terbit dengan total {$result['count']} verifikator guru."
+                    : "Anda sudah memverifikasi soal ini. Total verifikator tetap {$result['count']} guru.",
+            );
+        }
+
+        if (! $result['created']) {
+            return back()->with('success', "Anda sudah memverifikasi soal ini. Progres tetap {$result['count']}/".Question::REQUIRED_VERIFICATIONS.'.');
+        }
+
+        return back()->with(
+            'success',
+            "Verifikasi Anda tercatat ({$result['count']}/".Question::REQUIRED_VERIFICATIONS."). Masih diperlukan {$result['remaining']} guru lagi.",
+        );
     }
 
-    private function validatedData(Request $request): array
+    private function verificationSummary(Question $question, User $user): array
     {
+        $count = $question->verifications->count();
+
+        return [
+            'required' => Question::REQUIRED_VERIFICATIONS,
+            'count' => $count,
+            'remaining' => max(0, Question::REQUIRED_VERIFICATIONS - $count),
+            'currentUserVerified' => $question->verifications->contains('verifier_id', $user->id),
+            'canVerify' => $user->hasRole(UserRole::Teacher)
+                && $question->status !== QuestionStatus::Archived
+                && $question->superseded_by_id === null,
+            'verifiers' => $question->verifications->map(fn ($verification): array => [
+                'id' => $verification->verifier_id,
+                'name' => $verification->verifier?->name ?? 'Guru tidak aktif',
+                'verifiedAt' => $verification->verified_at,
+            ])->values(),
+        ];
+    }
+
+    private function validatedData(Request $request, ?Question $existingQuestion = null): array
+    {
+        $allowedQuestionTypes = $this->questionTypeConfiguration->enabledValues($request->user()->school);
+        if ($existingQuestion) {
+            $allowedQuestionTypes[] = $existingQuestion->type->value;
+        }
+
         $data = $request->validate([
             'return_generation_id' => ['nullable', 'integer'],
             'subject_id' => ['required', 'integer'],
             'competency_id' => ['required', 'integer'],
             'question_blueprint_id' => ['nullable', 'integer'],
-            'type' => ['required', Rule::enum(QuestionType::class)],
+            'type' => ['required', Rule::in(array_unique($allowedQuestionTypes))],
             'title' => ['nullable', 'string', 'max:255'],
             'stimulus' => ['nullable', 'string', 'max:20000'],
+            'stimulus_visual_type' => ['nullable', Rule::in(['none', 'table', 'bar_chart', 'pictogram', 'pie_chart'])],
+            'stimulus_visual_title' => ['exclude_if:stimulus_visual_type,none', 'nullable', 'string', 'max:255'],
+            'stimulus_table_headers' => ['exclude_unless:stimulus_visual_type,table', 'required', 'array', 'between:2,6'],
+            'stimulus_table_headers.*' => ['required', 'string', 'max:100'],
+            'stimulus_table_rows' => ['exclude_unless:stimulus_visual_type,table', 'required', 'array', 'between:1,15'],
+            'stimulus_table_rows.*' => ['required', 'array'],
+            'stimulus_table_rows.*.*' => ['required', 'string', 'max:500'],
+            'stimulus_chart_mode' => ['exclude_unless:stimulus_visual_type,bar_chart', 'nullable', Rule::in(['single', 'grouped'])],
+            'stimulus_chart_items' => ['exclude_if:stimulus_chart_mode,grouped', 'exclude_unless:stimulus_visual_type,bar_chart', 'required', 'array', 'between:2,12'],
+            'stimulus_chart_items.*.label' => ['exclude_if:stimulus_chart_mode,grouped', 'required', 'string', 'max:60'],
+            'stimulus_chart_items.*.value' => ['exclude_if:stimulus_chart_mode,grouped', 'required', 'numeric', 'min:0', 'max:1000000000'],
+            'stimulus_chart_series_labels' => ['exclude_unless:stimulus_chart_mode,grouped', 'required', 'array', 'between:2,4'],
+            'stimulus_chart_series_labels.*' => ['required', 'string', 'max:60'],
+            'stimulus_chart_grouped_categories' => ['exclude_unless:stimulus_chart_mode,grouped', 'required', 'array', 'between:2,8'],
+            'stimulus_chart_grouped_categories.*.label' => ['required', 'string', 'max:60'],
+            'stimulus_chart_grouped_categories.*.values' => ['required', 'array'],
+            'stimulus_chart_grouped_categories.*.values.*' => ['required', 'numeric', 'min:0', 'max:1000000000'],
+            'stimulus_chart_x_axis_label' => ['exclude_unless:stimulus_visual_type,bar_chart', 'nullable', 'string', 'max:100'],
+            'stimulus_chart_y_axis_label' => ['exclude_unless:stimulus_visual_type,bar_chart', 'nullable', 'string', 'max:100'],
+            'stimulus_chart_maximum' => ['exclude_unless:stimulus_visual_type,bar_chart', 'nullable', 'numeric', 'gt:0', 'max:1000000000'],
+            'stimulus_pictogram_symbol' => ['exclude_unless:stimulus_visual_type,pictogram', 'required', 'string', 'max:20'],
+            'stimulus_pictogram_legend_value' => ['exclude_unless:stimulus_visual_type,pictogram', 'required', 'numeric', 'gt:0', 'max:1000000000'],
+            'stimulus_pictogram_unit' => ['exclude_unless:stimulus_visual_type,pictogram', 'nullable', 'string', 'max:50'],
+            'stimulus_pictogram_items' => ['exclude_unless:stimulus_visual_type,pictogram', 'required', 'array', 'between:2,12'],
+            'stimulus_pictogram_items.*.label' => ['required', 'string', 'max:60'],
+            'stimulus_pictogram_items.*.value' => ['required', 'numeric', 'min:0', 'max:1000000000'],
+            'stimulus_pie_unit' => ['exclude_unless:stimulus_visual_type,pie_chart', 'nullable', 'string', 'max:50'],
+            'stimulus_pie_show_percentages' => ['exclude_unless:stimulus_visual_type,pie_chart', 'required', 'boolean'],
+            'stimulus_pie_items' => ['exclude_unless:stimulus_visual_type,pie_chart', 'required', 'array', 'between:2,12'],
+            'stimulus_pie_items.*.label' => ['required', 'string', 'max:60'],
+            'stimulus_pie_items.*.value' => ['required', 'numeric', 'min:0', 'max:1000000000'],
             'stimulus_image' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:10240', 'dimensions:max_width=5000,max_height=5000'],
+            'stimulus_image_source' => ['nullable', Rule::in(['upload', 'template'])],
+            'stimulus_svg_template' => ['nullable', Rule::in(EducationalGeometryTemplateSvgRenderer::TEMPLATES)],
+            'stimulus_svg_dimension_a' => ['nullable', 'numeric', 'between:-1000000,1000000'],
+            'stimulus_svg_dimension_b' => ['nullable', 'numeric', 'between:-1000000,1000000'],
+            'stimulus_svg_dimension_c' => ['nullable', 'numeric', 'between:-1000000,1000000'],
+            'stimulus_svg_unit' => ['nullable', 'string', 'max:20'],
+            'stimulus_svg_zoom' => ['nullable', 'numeric', 'between:0.25,3'],
+            'stimulus_svg_offset_x' => ['nullable', 'numeric', 'between:-500,500'],
+            'stimulus_svg_offset_y' => ['nullable', 'numeric', 'between:-300,300'],
+            'stimulus_fraction_models' => ['nullable', 'array', 'between:2,4'],
+            'stimulus_fraction_models.*.numerator' => ['required_with:stimulus_fraction_models', 'integer', 'between:0,24'],
+            'stimulus_fraction_models.*.denominator' => ['required_with:stimulus_fraction_models', 'integer', 'between:1,24'],
+            'stimulus_fraction_models.*.shaded_parts' => ['nullable', 'array', 'max:24'],
+            'stimulus_fraction_models.*.shaded_parts.*' => ['integer', 'between:0,23'],
+            'stimulus_image_width' => ['nullable', 'integer', 'between:100,1600'],
+            'stimulus_image_height' => ['nullable', 'integer', 'between:100,1200'],
+            'stimulus_upload_zoom' => ['nullable', 'numeric', 'between:0.25,3'],
+            'stimulus_upload_offset_x' => ['nullable', 'numeric', 'between:-100,100'],
+            'stimulus_upload_offset_y' => ['nullable', 'numeric', 'between:-100,100'],
             'stimulus_image_alt' => ['nullable', 'string', 'max:255'],
             'remove_stimulus_image' => ['nullable', 'boolean'],
             'prompt' => ['required', 'string', 'max:10000'],
             'explanation' => ['nullable', 'string', 'max:10000'],
+            'explanation_image' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:10240', 'dimensions:max_width=5000,max_height=5000'],
+            'explanation_image_alt' => ['nullable', 'string', 'max:255'],
+            'remove_explanation_image' => ['nullable', 'boolean'],
             'difficulty' => ['required', 'integer', 'between:1,3'],
             'grade_level' => ['required', 'integer', Rule::in([6, 9, 12])],
             'cognitive_level' => ['nullable', 'string', 'max:100'],
@@ -475,6 +616,209 @@ class QuestionController extends Controller
             'matrix_rows.*.correct_column_index' => ['required_if:type,category_matrix', 'integer', 'between:0,3'],
             'target_assessment_id' => ['nullable', 'integer', 'exists:assessments,id'],
         ]);
+
+        $data['stimulus_visual_type'] ??= 'none';
+        if ($data['stimulus_visual_type'] === 'bar_chart') {
+            $data['stimulus_chart_mode'] ??= 'single';
+        }
+
+        if (($data['stimulus_image_source'] ?? null) === 'template') {
+            $template = $data['stimulus_svg_template'] ?? null;
+            if (! $template || ! isset($data['stimulus_svg_dimension_a'])) {
+                throw ValidationException::withMessages([
+                    'stimulus_svg_template' => 'Pilih template dan isi ukuran utamanya.',
+                ]);
+            }
+            $templateConfig = collect($this->stimulusSvgTemplates())->firstWhere('value', $template);
+            foreach (['b', 'c'] as $dimension) {
+                if (isset($templateConfig["dimension_{$dimension}_label"]) && ! isset($data["stimulus_svg_dimension_{$dimension}"])) {
+                    throw ValidationException::withMessages([
+                        "stimulus_svg_dimension_{$dimension}" => 'Lengkapi semua nilai yang dibutuhkan template ini.',
+                    ]);
+                }
+            }
+            if (! ($templateConfig['allow_signed_dimensions'] ?? false)) {
+                foreach (['a', 'b', 'c'] as $dimension) {
+                    $key = "stimulus_svg_dimension_{$dimension}";
+                    $allowsZeroNumerator = $template === 'fraction_equivalent_circles' && $dimension === 'a' && (float) ($data[$key] ?? 0) === 0.0;
+                    if (isset($data[$key]) && (float) $data[$key] <= 0 && ! $allowsZeroNumerator) {
+                        throw ValidationException::withMessages([$key => 'Nilai harus lebih besar dari nol.']);
+                    }
+                }
+            }
+            if (in_array($template, ['circle_sector', 'shaded_circle_sector'], true) && (float) ($data['stimulus_svg_dimension_b'] ?? 0) > 360) {
+                throw ValidationException::withMessages([
+                    'stimulus_svg_dimension_b' => 'Sudut pusat maksimal 360 derajat.',
+                ]);
+            }
+            if (in_array($template, ['annulus', 'shaded_annulus'], true) && (float) ($data['stimulus_svg_dimension_b'] ?? 0) >= (float) $data['stimulus_svg_dimension_a']) {
+                throw ValidationException::withMessages([
+                    'stimulus_svg_dimension_b' => 'Jari-jari dalam harus lebih kecil dari jari-jari luar.',
+                ]);
+            }
+            if ($template === 'composite_square_quarter_circle' && (float) ($data['stimulus_svg_dimension_b'] ?? 0) > (float) $data['stimulus_svg_dimension_a']) {
+                throw ValidationException::withMessages([
+                    'stimulus_svg_dimension_b' => 'Jari-jari seperempat lingkaran tidak boleh melebihi sisi persegi.',
+                ]);
+            }
+            if ($template === 'shaded_square_circle' && (2 * (float) ($data['stimulus_svg_dimension_b'] ?? 0)) > (float) $data['stimulus_svg_dimension_a']) {
+                throw ValidationException::withMessages([
+                    'stimulus_svg_dimension_b' => 'Diameter lingkaran tidak boleh melebihi sisi persegi.',
+                ]);
+            }
+            if ($template === 'composite_rectangle_two_quarters' && (float) ($data['stimulus_svg_dimension_b'] ?? 0) > (float) $data['stimulus_svg_dimension_a']) {
+                throw ValidationException::withMessages([
+                    'stimulus_svg_dimension_b' => 'Lebar tidak boleh melebihi panjang untuk susunan dua seperempat lingkaran ini.',
+                ]);
+            }
+            if ($template === 'composite_l_shape' && (float) ($data['stimulus_svg_dimension_c'] ?? 0) >= min((float) $data['stimulus_svg_dimension_a'], (float) $data['stimulus_svg_dimension_b'])) {
+                throw ValidationException::withMessages([
+                    'stimulus_svg_dimension_c' => 'Ukuran lekukan harus lebih kecil dari panjang dan tinggi total.',
+                ]);
+            }
+            if ($template === 'shaded_rectangle_circle' && (2 * (float) ($data['stimulus_svg_dimension_c'] ?? 0)) > min((float) $data['stimulus_svg_dimension_a'], (float) $data['stimulus_svg_dimension_b'])) {
+                throw ValidationException::withMessages([
+                    'stimulus_svg_dimension_c' => 'Diameter lingkaran tidak boleh melebihi sisi terpendek persegi panjang.',
+                ]);
+            }
+            if ($template === 'circle_chord' && (float) ($data['stimulus_svg_dimension_b'] ?? 0) > (2 * (float) $data['stimulus_svg_dimension_a'])) {
+                throw ValidationException::withMessages([
+                    'stimulus_svg_dimension_b' => 'Panjang tali busur tidak boleh melebihi diameter lingkaran.',
+                ]);
+            }
+            if ($template === 'cone_net' && (float) ($data['stimulus_svg_dimension_b'] ?? 0) < (float) $data['stimulus_svg_dimension_a']) {
+                throw ValidationException::withMessages([
+                    'stimulus_svg_dimension_b' => 'Garis pelukis kerucut tidak boleh lebih pendek dari jari-jari alas.',
+                ]);
+            }
+            if ($template === 'fraction_equivalent_circles') {
+                $fractionModels = $data['stimulus_fraction_models'] ?? [];
+                if (count($fractionModels) < 2 || count($fractionModels) > 4) {
+                    throw ValidationException::withMessages([
+                        'stimulus_fraction_models' => 'Pilih 2–4 lingkaran pecahan.',
+                    ]);
+                }
+                foreach ($fractionModels as $index => $model) {
+                    if ((int) $model['numerator'] > (int) $model['denominator']) {
+                        throw ValidationException::withMessages([
+                            "stimulus_fraction_models.{$index}.numerator" => 'Bagian yang diarsir tidak boleh melebihi total bagian.',
+                        ]);
+                    }
+                    $shadedParts = array_values(array_unique($model['shaded_parts'] ?? []));
+                    if (count($shadedParts) !== (int) $model['numerator'] || collect($shadedParts)->contains(fn ($part): bool => (int) $part >= (int) $model['denominator'])) {
+                        throw ValidationException::withMessages([
+                            "stimulus_fraction_models.{$index}.shaded_parts" => 'Pilihan sektor arsiran tidak sesuai dengan jumlah bagian lingkaran.',
+                        ]);
+                    }
+                }
+            } elseif (str_starts_with((string) $template, 'fraction_')) {
+                $numerator = (float) $data['stimulus_svg_dimension_a'];
+                $denominator = (float) $data['stimulus_svg_dimension_b'];
+                $factor = (float) ($data['stimulus_svg_dimension_c'] ?? 2);
+                if (floor($numerator) !== $numerator || floor($denominator) !== $denominator || $numerator > $denominator || $denominator > 24) {
+                    throw ValidationException::withMessages([
+                        'stimulus_svg_dimension_a' => 'Pembilang dan penyebut harus bilangan bulat, pembilang tidak melebihi penyebut, dan penyebut maksimal 24.',
+                    ]);
+                }
+                if (str_starts_with((string) $template, 'fraction_equivalent_') && (floor($factor) !== $factor || $factor < 2 || $factor > 4 || ($denominator * $factor) > 24)) {
+                    throw ValidationException::withMessages([
+                        'stimulus_svg_dimension_c' => 'Faktor harus bilangan bulat 2–4 dan hasil penyebut maksimal 24 bagian.',
+                    ]);
+                }
+            }
+            $angle = (float) ($data['stimulus_svg_dimension_a'] ?? 0);
+            $invalidAngle = match ($template) {
+                'angle_acute' => $angle >= 90,
+                'angle_right' => $angle !== 90.0,
+                'angle_obtuse' => $angle <= 90 || $angle >= 180,
+                'angle_straight' => $angle !== 180.0,
+                'angle_reflex' => $angle <= 180 || $angle >= 360,
+                'intersecting_lines', 'protractor' => $angle >= 180,
+                'rotation' => $angle > 360,
+                default => false,
+            };
+            if ($invalidAngle) {
+                throw ValidationException::withMessages([
+                    'stimulus_svg_dimension_a' => 'Besar sudut tidak sesuai dengan variasi yang dipilih.',
+                ]);
+            }
+            if ($template === 'clock' && ((float) $data['stimulus_svg_dimension_a'] < 0 || (float) $data['stimulus_svg_dimension_a'] > 23 || (float) $data['stimulus_svg_dimension_b'] < 0 || (float) $data['stimulus_svg_dimension_b'] > 59)) {
+                throw ValidationException::withMessages([
+                    'stimulus_svg_dimension_a' => 'Jam harus 0–23 dan menit harus 0–59.',
+                ]);
+            }
+            if ($template === 'number_line' && (float) $data['stimulus_svg_dimension_b'] <= (float) $data['stimulus_svg_dimension_a']) {
+                throw ValidationException::withMessages([
+                    'stimulus_svg_dimension_b' => 'Nilai maksimum harus lebih besar dari nilai minimum.',
+                ]);
+            }
+            if ($template === 'scale_bar' && ((float) $data['stimulus_svg_dimension_b'] < 1 || (float) $data['stimulus_svg_dimension_b'] > 12 || floor((float) $data['stimulus_svg_dimension_b']) !== (float) $data['stimulus_svg_dimension_b'])) {
+                throw ValidationException::withMessages([
+                    'stimulus_svg_dimension_b' => 'Jumlah interval harus bilangan bulat antara 1–12.',
+                ]);
+            }
+        }
+
+        if (($data['stimulus_visual_type'] ?? 'none') === 'table') {
+            $columnCount = count($data['stimulus_table_headers']);
+            $hasInvalidRow = collect($data['stimulus_table_rows'])->contains(
+                fn (array $row): bool => count($row) !== $columnCount,
+            );
+
+            if ($hasInvalidRow) {
+                throw ValidationException::withMessages([
+                    'stimulus_table_rows' => 'Setiap baris tabel harus memiliki jumlah sel yang sama dengan jumlah kolom.',
+                ]);
+            }
+        }
+
+        if (($data['stimulus_visual_type'] ?? 'none') === 'bar_chart' && ($data['stimulus_chart_mode'] ?? 'single') === 'grouped') {
+            $seriesCount = count($data['stimulus_chart_series_labels']);
+            $hasInvalidCategory = collect($data['stimulus_chart_grouped_categories'])->contains(
+                fn (array $category): bool => count($category['values']) !== $seriesCount,
+            );
+            $seriesLabels = collect($data['stimulus_chart_series_labels'])->map(fn (string $label): string => mb_strtolower(trim($label)));
+            $categoryLabels = collect($data['stimulus_chart_grouped_categories'])->pluck('label')->map(fn (string $label): string => mb_strtolower(trim($label)));
+
+            if ($hasInvalidCategory || $seriesLabels->unique()->count() !== $seriesLabels->count() || $categoryLabels->unique()->count() !== $categoryLabels->count()) {
+                throw ValidationException::withMessages([
+                    'stimulus_chart_grouped_categories' => 'Nama seri dan kategori harus unik, serta setiap kategori harus memiliki nilai untuk seluruh seri.',
+                ]);
+            }
+        }
+
+        if (($data['stimulus_visual_type'] ?? 'none') === 'bar_chart' && isset($data['stimulus_chart_maximum'])) {
+            $largestValue = ($data['stimulus_chart_mode'] ?? 'single') === 'grouped'
+                ? collect($data['stimulus_chart_grouped_categories'])->flatMap(fn (array $category): array => $category['values'])->max(fn (mixed $value): float => (float) $value)
+                : collect($data['stimulus_chart_items'])->max(fn (array $item): float => (float) $item['value']);
+            if ((float) $data['stimulus_chart_maximum'] < $largestValue) {
+                throw ValidationException::withMessages([
+                    'stimulus_chart_maximum' => 'Batas maksimum sumbu Y tidak boleh lebih kecil dari nilai data terbesar.',
+                ]);
+            }
+        }
+
+        if (($data['stimulus_visual_type'] ?? 'none') === 'pictogram') {
+            $legendValue = (float) $data['stimulus_pictogram_legend_value'];
+            $tooManySymbols = collect($data['stimulus_pictogram_items'])->contains(
+                fn (array $item): bool => ((float) $item['value'] / $legendValue) > 40,
+            );
+
+            if ($tooManySymbols) {
+                throw ValidationException::withMessages([
+                    'stimulus_pictogram_items' => 'Setiap kategori maksimal menampilkan 40 simbol. Perbesar nilai tiap simbol.',
+                ]);
+            }
+        }
+
+        if (($data['stimulus_visual_type'] ?? 'none') === 'pie_chart') {
+            $total = collect($data['stimulus_pie_items'])->sum(fn (array $item): float => (float) $item['value']);
+            if ($total <= 0) {
+                throw ValidationException::withMessages([
+                    'stimulus_pie_items' => 'Diagram lingkaran membutuhkan minimal satu nilai yang lebih besar dari nol.',
+                ]);
+            }
+        }
 
         $subjectExists = Subject::query()
             ->whereKey($data['subject_id'])
@@ -649,6 +993,64 @@ class QuestionController extends Controller
             unset($metadata['matrix_columns'], $metadata['matrix_rows']);
         }
 
+        if (($data['stimulus_visual_type'] ?? 'none') === 'table') {
+            $metadata['stimulus_visual'] = [
+                'type' => 'table',
+                'title' => trim($data['stimulus_visual_title'] ?? ''),
+                'headers' => collect($data['stimulus_table_headers'])->map(fn (string $header): string => trim($header))->all(),
+                'rows' => collect($data['stimulus_table_rows'])->map(
+                    fn (array $row): array => collect($row)->map(fn (string $cell): string => trim($cell))->all(),
+                )->all(),
+            ];
+        } elseif (($data['stimulus_visual_type'] ?? 'none') === 'bar_chart') {
+            $barChart = [
+                'type' => 'bar_chart',
+                'title' => trim($data['stimulus_visual_title'] ?? ''),
+                'x_axis_label' => trim($data['stimulus_chart_x_axis_label'] ?? ''),
+                'y_axis_label' => trim($data['stimulus_chart_y_axis_label'] ?? ''),
+                ...(isset($data['stimulus_chart_maximum']) ? ['maximum' => (float) $data['stimulus_chart_maximum']] : []),
+            ];
+            if (($data['stimulus_chart_mode'] ?? 'single') === 'grouped') {
+                $categories = collect($data['stimulus_chart_grouped_categories']);
+                $barChart['categories'] = $categories->pluck('label')->map(fn (string $label): string => trim($label))->all();
+                $barChart['series'] = collect($data['stimulus_chart_series_labels'])->map(fn (string $label, int $seriesIndex): array => [
+                    'label' => trim($label),
+                    'values' => $categories->map(fn (array $category): float => (float) $category['values'][$seriesIndex])->all(),
+                ])->all();
+            } else {
+                $barChart['items'] = collect($data['stimulus_chart_items'])->map(fn (array $item): array => [
+                    'label' => trim($item['label']),
+                    'value' => (float) $item['value'],
+                ])->all();
+            }
+            $metadata['stimulus_visual'] = $barChart;
+        } elseif (($data['stimulus_visual_type'] ?? 'none') === 'pictogram') {
+            $metadata['stimulus_visual'] = [
+                'type' => 'pictogram',
+                'title' => trim($data['stimulus_visual_title'] ?? ''),
+                'symbol' => trim($data['stimulus_pictogram_symbol']),
+                'legend_value' => (float) $data['stimulus_pictogram_legend_value'],
+                'unit' => trim($data['stimulus_pictogram_unit'] ?? ''),
+                'items' => collect($data['stimulus_pictogram_items'])->map(fn (array $item): array => [
+                    'label' => trim($item['label']),
+                    'value' => (float) $item['value'],
+                ])->all(),
+            ];
+        } elseif (($data['stimulus_visual_type'] ?? 'none') === 'pie_chart') {
+            $metadata['stimulus_visual'] = [
+                'type' => 'pie_chart',
+                'title' => trim($data['stimulus_visual_title'] ?? ''),
+                'unit' => trim($data['stimulus_pie_unit'] ?? ''),
+                'show_percentages' => (bool) $data['stimulus_pie_show_percentages'],
+                'items' => collect($data['stimulus_pie_items'])->map(fn (array $item): array => [
+                    'label' => trim($item['label']),
+                    'value' => (float) $item['value'],
+                ])->all(),
+            ];
+        } else {
+            unset($metadata['stimulus_visual']);
+        }
+
         return [
             'competency_id' => $data['competency_id'],
             'question_blueprint_id' => $data['question_blueprint_id'] ?? null,
@@ -666,17 +1068,59 @@ class QuestionController extends Controller
 
     private function storeStimulusImage(Request $request, array $data, StimulusImageService $imageService): ?array
     {
+        if (($data['stimulus_image_source'] ?? null) === 'template') {
+            $svg = $this->geometryTemplateRenderer->render(
+                $data['stimulus_svg_template'],
+                (float) $data['stimulus_svg_dimension_a'],
+                isset($data['stimulus_svg_dimension_b']) ? (float) $data['stimulus_svg_dimension_b'] : null,
+                trim($data['stimulus_svg_unit'] ?? '') ?: 'cm',
+                isset($data['stimulus_svg_dimension_c']) ? (float) $data['stimulus_svg_dimension_c'] : null,
+                (float) ($data['stimulus_svg_zoom'] ?? 1),
+                (float) ($data['stimulus_svg_offset_x'] ?? 0),
+                (float) ($data['stimulus_svg_offset_y'] ?? 0),
+                ['fraction_models' => $data['stimulus_fraction_models'] ?? []],
+            );
+            $path = 'question-stimuli/'.$request->user()->school_id.'/'.Str::uuid().'.svg';
+            Storage::disk('public')->put($path, $svg, ['visibility' => 'public']);
+
+            return [
+                'disk' => 'public',
+                'path' => $path,
+                'mime_type' => 'image/svg+xml',
+                'alt' => trim($data['stimulus_image_alt'] ?? '') ?: 'Diagram geometri soal',
+                'source' => 'template-svg',
+                'template' => $data['stimulus_svg_template'],
+                'dimension_a' => (float) $data['stimulus_svg_dimension_a'],
+                'dimension_b' => isset($data['stimulus_svg_dimension_b']) ? (float) $data['stimulus_svg_dimension_b'] : null,
+                'dimension_c' => isset($data['stimulus_svg_dimension_c']) ? (float) $data['stimulus_svg_dimension_c'] : null,
+                'unit' => trim($data['stimulus_svg_unit'] ?? '') ?: 'cm',
+                'zoom' => (float) ($data['stimulus_svg_zoom'] ?? 1),
+                'offset_x' => (float) ($data['stimulus_svg_offset_x'] ?? 0),
+                'offset_y' => (float) ($data['stimulus_svg_offset_y'] ?? 0),
+                'fraction_models' => $data['stimulus_fraction_models'] ?? null,
+                'display_width' => (int) ($data['stimulus_image_width'] ?? 800),
+                'display_height' => (int) ($data['stimulus_image_height'] ?? 450),
+            ];
+        }
+
         $file = $request->file('stimulus_image');
 
         if ($file === null) {
             return null;
         }
 
-        return $imageService->store(
-            $file,
-            $request->user()->school_id,
-            trim($data['stimulus_image_alt'] ?? '') ?: trim($data['title'] ?? '') ?: 'Gambar stimulus soal',
-        );
+        return [
+            ...$imageService->store(
+                $file,
+                $request->user()->school_id,
+                trim($data['stimulus_image_alt'] ?? '') ?: trim($data['title'] ?? '') ?: 'Gambar stimulus soal',
+            ),
+            'display_width' => (int) ($data['stimulus_image_width'] ?? 800),
+            'display_height' => (int) ($data['stimulus_image_height'] ?? 450),
+            'display_zoom' => (float) ($data['stimulus_upload_zoom'] ?? 1),
+            'display_offset_x' => (float) ($data['stimulus_upload_offset_x'] ?? 0),
+            'display_offset_y' => (float) ($data['stimulus_upload_offset_y'] ?? 0),
+        ];
     }
 
     private function withStimulusImage(array $metadata, array $data, ?array $illustration): array
@@ -689,14 +1133,148 @@ class QuestionController extends Controller
             $metadata['illustration']['alt'] = trim($data['stimulus_image_alt']);
         }
 
+        if (isset($metadata['illustration'])) {
+            $metadata['illustration']['display_width'] = (int) ($data['stimulus_image_width'] ?? data_get($metadata, 'illustration.display_width', 800));
+            $metadata['illustration']['display_height'] = (int) ($data['stimulus_image_height'] ?? data_get($metadata, 'illustration.display_height', 450));
+            if (($metadata['illustration']['source'] ?? null) !== 'template-svg') {
+                $metadata['illustration']['display_zoom'] = (float) ($data['stimulus_upload_zoom'] ?? data_get($metadata, 'illustration.display_zoom', 1));
+                $metadata['illustration']['display_offset_x'] = (float) ($data['stimulus_upload_offset_x'] ?? data_get($metadata, 'illustration.display_offset_x', 0));
+                $metadata['illustration']['display_offset_y'] = (float) ($data['stimulus_upload_offset_y'] ?? data_get($metadata, 'illustration.display_offset_y', 0));
+            }
+        }
+
+        return $metadata;
+    }
+
+    private function storeExplanationImage(Request $request, array $data, StimulusImageService $imageService): ?array
+    {
+        $file = $request->file('explanation_image');
+
+        if ($file === null) {
+            return null;
+        }
+
+        return $imageService->store(
+            $file,
+            $request->user()->school_id,
+            trim($data['explanation_image_alt'] ?? '') ?: 'Gambar pembahasan soal',
+            'explanation_image',
+            'question-explanations',
+        );
+    }
+
+    private function withExplanationImage(array $metadata, array $data, ?array $illustration): array
+    {
+        if ($illustration !== null) {
+            $metadata['explanation_illustration'] = $illustration;
+        } elseif ($data['remove_explanation_image'] ?? false) {
+            unset($metadata['explanation_illustration']);
+        } elseif (isset($metadata['explanation_illustration']) && trim($data['explanation_image_alt'] ?? '') !== '') {
+            $metadata['explanation_illustration']['alt'] = trim($data['explanation_image_alt']);
+        }
+
         return $metadata;
     }
 
     private function deleteStoredIllustration(?array $illustration): void
     {
-        if ($illustration !== null) {
+        if ($illustration !== null && ($illustration['source'] ?? null) !== 'library-svg') {
             Storage::disk($illustration['disk'])->delete($illustration['path']);
         }
+    }
+
+    private function stimulusSvgTemplates(): array
+    {
+        return [
+            ['value' => 'square', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'quadrilateral', 'family_label' => 'Segi empat', 'label' => 'Persegi', 'dimension_a_label' => 'Panjang sisi'],
+            ['value' => 'rectangle', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'quadrilateral', 'family_label' => 'Segi empat', 'label' => 'Persegi panjang', 'dimension_a_label' => 'Panjang', 'dimension_b_label' => 'Lebar'],
+            ['value' => 'parallelogram', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'quadrilateral', 'family_label' => 'Segi empat', 'label' => 'Jajar genjang', 'dimension_a_label' => 'Alas', 'dimension_b_label' => 'Tinggi'],
+            ['value' => 'trapezoid', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'quadrilateral', 'family_label' => 'Segi empat', 'label' => 'Trapesium', 'dimension_a_label' => 'Sisi sejajar atas', 'dimension_b_label' => 'Sisi sejajar bawah', 'dimension_c_label' => 'Tinggi'],
+            ['value' => 'trapezoid_right', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'quadrilateral', 'family_label' => 'Segi empat', 'label' => 'Trapesium siku-siku', 'dimension_a_label' => 'Sisi sejajar atas', 'dimension_b_label' => 'Sisi sejajar bawah', 'dimension_c_label' => 'Tinggi'],
+            ['value' => 'trapezoid_isosceles', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'quadrilateral', 'family_label' => 'Segi empat', 'label' => 'Trapesium sama kaki', 'dimension_a_label' => 'Sisi sejajar atas', 'dimension_b_label' => 'Sisi sejajar bawah', 'dimension_c_label' => 'Tinggi'],
+            ['value' => 'rhombus', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'quadrilateral', 'family_label' => 'Segi empat', 'label' => 'Belah ketupat', 'dimension_a_label' => 'Diagonal 1', 'dimension_b_label' => 'Diagonal 2'],
+            ['value' => 'kite', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'quadrilateral', 'family_label' => 'Segi empat', 'label' => 'Layang-layang', 'dimension_a_label' => 'Diagonal 1', 'dimension_b_label' => 'Diagonal 2'],
+            ['value' => 'triangle', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'triangle', 'family_label' => 'Segitiga', 'label' => 'Umum', 'dimension_a_label' => 'Alas', 'dimension_b_label' => 'Tinggi'],
+            ['value' => 'triangle_right', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'triangle', 'family_label' => 'Segitiga', 'label' => 'Siku-siku', 'dimension_a_label' => 'Alas', 'dimension_b_label' => 'Tinggi'],
+            ['value' => 'triangle_isosceles', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'triangle', 'family_label' => 'Segitiga', 'label' => 'Sama kaki', 'dimension_a_label' => 'Alas', 'dimension_b_label' => 'Tinggi'],
+            ['value' => 'triangle_equilateral', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'triangle', 'family_label' => 'Segitiga', 'label' => 'Sama sisi', 'dimension_a_label' => 'Panjang sisi'],
+            ['value' => 'triangle_scalene', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'triangle', 'family_label' => 'Segitiga', 'label' => 'Sembarang', 'dimension_a_label' => 'Alas', 'dimension_b_label' => 'Tinggi'],
+            ['value' => 'triangle_acute', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'triangle', 'family_label' => 'Segitiga', 'label' => 'Lancip', 'dimension_a_label' => 'Alas', 'dimension_b_label' => 'Tinggi'],
+            ['value' => 'triangle_obtuse', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'triangle', 'family_label' => 'Segitiga', 'label' => 'Tumpul', 'dimension_a_label' => 'Alas', 'dimension_b_label' => 'Tinggi'],
+            ['value' => 'circle', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'circle', 'family_label' => 'Lingkaran', 'label' => 'Jari-jari', 'dimension_a_label' => 'Jari-jari'],
+            ['value' => 'circle_diameter', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'circle', 'family_label' => 'Lingkaran', 'label' => 'Diameter', 'dimension_a_label' => 'Diameter'],
+            ['value' => 'semicircle', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'circle', 'family_label' => 'Lingkaran', 'label' => 'Setengah lingkaran', 'dimension_a_label' => 'Diameter'],
+            ['value' => 'quarter_circle', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'circle', 'family_label' => 'Lingkaran', 'label' => 'Seperempat lingkaran', 'dimension_a_label' => 'Jari-jari'],
+            ['value' => 'circle_sector', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'circle', 'family_label' => 'Lingkaran', 'label' => 'Juring', 'dimension_a_label' => 'Jari-jari', 'dimension_b_label' => 'Sudut pusat (derajat)'],
+            ['value' => 'annulus', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'circle', 'family_label' => 'Lingkaran', 'label' => 'Cincin lingkaran', 'dimension_a_label' => 'Jari-jari luar', 'dimension_b_label' => 'Jari-jari dalam'],
+            ['value' => 'pentagon', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'polygon', 'family_label' => 'Segi banyak beraturan', 'label' => 'Segi lima', 'dimension_a_label' => 'Panjang sisi'],
+            ['value' => 'hexagon', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'polygon', 'family_label' => 'Segi banyak beraturan', 'label' => 'Segi enam', 'dimension_a_label' => 'Panjang sisi'],
+            ['value' => 'heptagon', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'polygon', 'family_label' => 'Segi banyak beraturan', 'label' => 'Segi tujuh', 'dimension_a_label' => 'Panjang sisi'],
+            ['value' => 'octagon', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'polygon', 'family_label' => 'Segi banyak beraturan', 'label' => 'Segi delapan', 'dimension_a_label' => 'Panjang sisi'],
+            ['value' => 'nonagon', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'polygon', 'family_label' => 'Segi banyak beraturan', 'label' => 'Segi sembilan', 'dimension_a_label' => 'Panjang sisi'],
+            ['value' => 'decagon', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'polygon', 'family_label' => 'Segi banyak beraturan', 'label' => 'Segi sepuluh', 'dimension_a_label' => 'Panjang sisi'],
+            ['value' => 'dodecagon', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'polygon', 'family_label' => 'Segi banyak beraturan', 'label' => 'Segi dua belas', 'dimension_a_label' => 'Panjang sisi'],
+            ['value' => 'cube', 'category' => '3d', 'category_label' => 'Bangun ruang (3D)', 'family' => 'box', 'family_label' => 'Kubus & balok', 'label' => 'Kubus', 'dimension_a_label' => 'Panjang rusuk'],
+            ['value' => 'cuboid', 'category' => '3d', 'category_label' => 'Bangun ruang (3D)', 'family' => 'box', 'family_label' => 'Kubus & balok', 'label' => 'Balok', 'dimension_a_label' => 'Panjang', 'dimension_b_label' => 'Lebar', 'dimension_c_label' => 'Tinggi'],
+            ['value' => 'triangular_prism', 'category' => '3d', 'category_label' => 'Bangun ruang (3D)', 'family' => 'prism', 'family_label' => 'Prisma', 'label' => 'Prisma segitiga', 'dimension_a_label' => 'Alas segitiga', 'dimension_b_label' => 'Tinggi segitiga', 'dimension_c_label' => 'Panjang prisma'],
+            ['value' => 'pentagonal_prism', 'category' => '3d', 'category_label' => 'Bangun ruang (3D)', 'family' => 'prism', 'family_label' => 'Prisma', 'label' => 'Prisma segi lima', 'dimension_a_label' => 'Sisi alas', 'dimension_b_label' => 'Apotema alas', 'dimension_c_label' => 'Panjang prisma'],
+            ['value' => 'hexagonal_prism', 'category' => '3d', 'category_label' => 'Bangun ruang (3D)', 'family' => 'prism', 'family_label' => 'Prisma', 'label' => 'Prisma segi enam', 'dimension_a_label' => 'Sisi alas', 'dimension_b_label' => 'Apotema alas', 'dimension_c_label' => 'Panjang prisma'],
+            ['value' => 'triangular_pyramid', 'category' => '3d', 'category_label' => 'Bangun ruang (3D)', 'family' => 'pyramid', 'family_label' => 'Limas', 'label' => 'Limas segitiga', 'dimension_a_label' => 'Sisi alas', 'dimension_b_label' => 'Tinggi limas'],
+            ['value' => 'square_pyramid', 'category' => '3d', 'category_label' => 'Bangun ruang (3D)', 'family' => 'pyramid', 'family_label' => 'Limas', 'label' => 'Limas segi empat', 'dimension_a_label' => 'Sisi alas', 'dimension_b_label' => 'Tinggi limas'],
+            ['value' => 'pentagonal_pyramid', 'category' => '3d', 'category_label' => 'Bangun ruang (3D)', 'family' => 'pyramid', 'family_label' => 'Limas', 'label' => 'Limas segi lima', 'dimension_a_label' => 'Sisi alas', 'dimension_b_label' => 'Tinggi limas'],
+            ['value' => 'hexagonal_pyramid', 'category' => '3d', 'category_label' => 'Bangun ruang (3D)', 'family' => 'pyramid', 'family_label' => 'Limas', 'label' => 'Limas segi enam', 'dimension_a_label' => 'Sisi alas', 'dimension_b_label' => 'Tinggi limas'],
+            ['value' => 'cylinder', 'category' => '3d', 'category_label' => 'Bangun ruang (3D)', 'family' => 'round', 'family_label' => 'Sisi lengkung', 'label' => 'Tabung', 'dimension_a_label' => 'Jari-jari', 'dimension_b_label' => 'Tinggi'],
+            ['value' => 'cone', 'category' => '3d', 'category_label' => 'Bangun ruang (3D)', 'family' => 'round', 'family_label' => 'Sisi lengkung', 'label' => 'Kerucut', 'dimension_a_label' => 'Jari-jari', 'dimension_b_label' => 'Tinggi'],
+            ['value' => 'sphere', 'category' => '3d', 'category_label' => 'Bangun ruang (3D)', 'family' => 'round', 'family_label' => 'Sisi lengkung', 'label' => 'Bola', 'dimension_a_label' => 'Jari-jari'],
+            ['value' => 'hemisphere', 'category' => '3d', 'category_label' => 'Bangun ruang (3D)', 'family' => 'round', 'family_label' => 'Sisi lengkung', 'label' => 'Setengah bola', 'dimension_a_label' => 'Jari-jari'],
+            ['value' => 'parallel_lines', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'lines', 'family_label' => 'Garis & kedudukan', 'label' => 'Garis sejajar', 'dimension_a_label' => 'Jarak antar garis'],
+            ['value' => 'perpendicular_lines', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'lines', 'family_label' => 'Garis & kedudukan', 'label' => 'Garis tegak lurus', 'dimension_a_label' => 'Panjang acuan'],
+            ['value' => 'intersecting_lines', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'lines', 'family_label' => 'Garis & kedudukan', 'label' => 'Garis berpotongan', 'dimension_a_label' => 'Besar sudut', 'uses_unit' => false],
+            ['value' => 'angle_acute', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'angles', 'family_label' => 'Sudut', 'label' => 'Sudut lancip', 'dimension_a_label' => 'Besar sudut', 'uses_unit' => false],
+            ['value' => 'angle_right', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'angles', 'family_label' => 'Sudut', 'label' => 'Sudut siku-siku', 'dimension_a_label' => 'Besar sudut', 'uses_unit' => false],
+            ['value' => 'angle_obtuse', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'angles', 'family_label' => 'Sudut', 'label' => 'Sudut tumpul', 'dimension_a_label' => 'Besar sudut', 'uses_unit' => false],
+            ['value' => 'angle_straight', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'angles', 'family_label' => 'Sudut', 'label' => 'Sudut lurus', 'dimension_a_label' => 'Besar sudut', 'uses_unit' => false],
+            ['value' => 'angle_reflex', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'angles', 'family_label' => 'Sudut', 'label' => 'Sudut refleks', 'dimension_a_label' => 'Besar sudut', 'uses_unit' => false],
+            ['value' => 'circle_chord', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'circle', 'family_label' => 'Lingkaran', 'label' => 'Tali busur', 'dimension_a_label' => 'Jari-jari', 'dimension_b_label' => 'Panjang tali busur'],
+            ['value' => 'circle_segment', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'circle', 'family_label' => 'Lingkaran', 'label' => 'Tembereng', 'dimension_a_label' => 'Jari-jari'],
+            ['value' => 'circle_tangent', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'circle', 'family_label' => 'Lingkaran', 'label' => 'Garis singgung', 'dimension_a_label' => 'Jari-jari', 'dimension_b_label' => 'Panjang garis singgung'],
+            ['value' => 'composite_square_semicircle', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'composite', 'family_label' => 'Gabungan & arsiran', 'subfamily' => 'square', 'subfamily_label' => 'Persegi', 'label' => 'Gabung ½ lingkaran', 'dimension_a_label' => 'Sisi persegi / diameter'],
+            ['value' => 'composite_square_quarter_circle', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'composite', 'family_label' => 'Gabungan & arsiran', 'subfamily' => 'square', 'subfamily_label' => 'Persegi', 'label' => 'Arsir di luar ¼ lingkaran', 'dimension_a_label' => 'Sisi persegi', 'dimension_b_label' => 'Jari-jari ¼ lingkaran'],
+            ['value' => 'composite_square_four_quarters', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'composite', 'family_label' => 'Gabungan & arsiran', 'subfamily' => 'square', 'subfamily_label' => 'Persegi', 'label' => 'Arsir di luar empat ¼ lingkaran', 'dimension_a_label' => 'Sisi persegi'],
+            ['value' => 'shaded_square_diagonal', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'composite', 'family_label' => 'Gabungan & arsiran', 'subfamily' => 'square', 'subfamily_label' => 'Persegi', 'label' => 'Arsiran diagonal ½ bagian', 'dimension_a_label' => 'Sisi persegi'],
+            ['value' => 'shaded_square_circle', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'composite', 'family_label' => 'Gabungan & arsiran', 'subfamily' => 'square', 'subfamily_label' => 'Persegi', 'label' => 'Arsir di luar lingkaran', 'dimension_a_label' => 'Sisi persegi', 'dimension_b_label' => 'Jari-jari lingkaran'],
+            ['value' => 'composite_rectangle_semicircle', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'composite', 'family_label' => 'Gabungan & arsiran', 'subfamily' => 'rectangle', 'subfamily_label' => 'Persegi panjang', 'label' => 'Gabung ½ lingkaran', 'dimension_a_label' => 'Panjang / diameter', 'dimension_b_label' => 'Tinggi persegi panjang'],
+            ['value' => 'composite_stadium', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'composite', 'family_label' => 'Gabungan & arsiran', 'subfamily' => 'rectangle', 'subfamily_label' => 'Persegi panjang', 'label' => 'Gabung dua ½ lingkaran', 'dimension_a_label' => 'Panjang bagian lurus', 'dimension_b_label' => 'Diameter'],
+            ['value' => 'composite_rectangle_two_quarters', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'composite', 'family_label' => 'Gabungan & arsiran', 'subfamily' => 'rectangle', 'subfamily_label' => 'Persegi panjang', 'label' => 'Arsir di luar dua ¼ lingkaran', 'dimension_a_label' => 'Panjang', 'dimension_b_label' => 'Lebar / diameter'],
+            ['value' => 'composite_l_shape', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'composite', 'family_label' => 'Gabungan & arsiran', 'subfamily' => 'rectangle', 'subfamily_label' => 'Persegi panjang', 'label' => 'Lekukan persegi (bentuk L)', 'dimension_a_label' => 'Panjang total', 'dimension_b_label' => 'Tinggi total', 'dimension_c_label' => 'Ukuran lekukan'],
+            ['value' => 'shaded_rectangle_circle', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'composite', 'family_label' => 'Gabungan & arsiran', 'subfamily' => 'rectangle', 'subfamily_label' => 'Persegi panjang', 'label' => 'Arsir di luar lingkaran', 'dimension_a_label' => 'Panjang', 'dimension_b_label' => 'Lebar', 'dimension_c_label' => 'Jari-jari lingkaran'],
+            ['value' => 'composite_triangle_semicircle', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'composite', 'family_label' => 'Gabungan & arsiran', 'subfamily' => 'triangle', 'subfamily_label' => 'Segitiga', 'label' => 'Gabung ½ lingkaran', 'dimension_a_label' => 'Alas / diameter', 'dimension_b_label' => 'Tinggi segitiga'],
+            ['value' => 'composite_triangle_rectangle', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'composite', 'family_label' => 'Gabungan & arsiran', 'subfamily' => 'triangle', 'subfamily_label' => 'Segitiga', 'label' => 'Gabung persegi panjang', 'dimension_a_label' => 'Lebar bersama', 'dimension_b_label' => 'Tinggi persegi panjang', 'dimension_c_label' => 'Tinggi segitiga'],
+            ['value' => 'shaded_triangle_midsegment', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'composite', 'family_label' => 'Gabungan & arsiran', 'subfamily' => 'triangle', 'subfamily_label' => 'Segitiga', 'label' => 'Arsiran segitiga tengah ¼ bagian', 'dimension_a_label' => 'Alas segitiga besar', 'dimension_b_label' => 'Tinggi segitiga besar'],
+            ['value' => 'shaded_circle_square', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'composite', 'family_label' => 'Gabungan & arsiran', 'subfamily' => 'circle', 'subfamily_label' => 'Lingkaran', 'label' => 'Arsir di luar persegi dalam', 'dimension_a_label' => 'Jari-jari lingkaran'],
+            ['value' => 'shaded_circle_sector', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'composite', 'family_label' => 'Gabungan & arsiran', 'subfamily' => 'circle', 'subfamily_label' => 'Lingkaran', 'label' => 'Arsiran juring', 'dimension_a_label' => 'Jari-jari', 'dimension_b_label' => 'Sudut pusat (derajat)'],
+            ['value' => 'shaded_annulus', 'category' => '2d', 'category_label' => 'Bangun datar (2D)', 'family' => 'composite', 'family_label' => 'Gabungan & arsiran', 'subfamily' => 'circle', 'subfamily_label' => 'Lingkaran', 'label' => 'Arsiran cincin', 'dimension_a_label' => 'Jari-jari luar', 'dimension_b_label' => 'Jari-jari dalam'],
+            ['value' => 'fraction_circle', 'category' => 'fraction', 'category_label' => 'Pecahan & perbandingan', 'family' => 'fraction_model', 'family_label' => 'Model pecahan', 'label' => 'Satu lingkaran pecahan', 'dimension_a_label' => 'Pembilang', 'dimension_b_label' => 'Penyebut', 'uses_unit' => false, 'integer_dimensions' => true],
+            ['value' => 'fraction_bar', 'category' => 'fraction', 'category_label' => 'Pecahan & perbandingan', 'family' => 'fraction_model', 'family_label' => 'Model pecahan', 'label' => 'Satu batang pecahan', 'dimension_a_label' => 'Pembilang', 'dimension_b_label' => 'Penyebut', 'uses_unit' => false, 'integer_dimensions' => true],
+            ['value' => 'fraction_equivalent_circles', 'category' => 'fraction', 'category_label' => 'Pecahan & perbandingan', 'family' => 'fraction_reasoning', 'family_label' => 'Penalaran pecahan', 'label' => 'Perbandingan 2–4 lingkaran', 'dimension_a_label' => 'Pembilang lingkaran pertama', 'dimension_b_label' => 'Penyebut lingkaran pertama', 'dimension_c_label' => 'Jumlah lingkaran', 'uses_unit' => false, 'integer_dimensions' => true, 'custom_fraction_models' => true],
+            ['value' => 'fraction_equivalent_bars', 'category' => 'fraction', 'category_label' => 'Pecahan & perbandingan', 'family' => 'fraction_reasoning', 'family_label' => 'Penalaran pecahan', 'label' => 'Tiga batang pecahan senilai', 'dimension_a_label' => 'Pembilang dasar', 'dimension_b_label' => 'Penyebut dasar', 'dimension_c_label' => 'Faktor model ketiga (2–4)', 'uses_unit' => false, 'integer_dimensions' => true],
+            ['value' => 'cube_net', 'category' => '3d', 'category_label' => 'Bangun ruang (3D)', 'family' => 'nets', 'family_label' => 'Jaring-jaring', 'label' => 'Jaring-jaring kubus', 'dimension_a_label' => 'Panjang rusuk'],
+            ['value' => 'cuboid_net', 'category' => '3d', 'category_label' => 'Bangun ruang (3D)', 'family' => 'nets', 'family_label' => 'Jaring-jaring', 'label' => 'Jaring-jaring balok', 'dimension_a_label' => 'Panjang', 'dimension_b_label' => 'Lebar', 'dimension_c_label' => 'Tinggi'],
+            ['value' => 'triangular_prism_net', 'category' => '3d', 'category_label' => 'Bangun ruang (3D)', 'family' => 'nets', 'family_label' => 'Jaring-jaring', 'label' => 'Jaring-jaring prisma segitiga', 'dimension_a_label' => 'Alas segitiga', 'dimension_b_label' => 'Tinggi segitiga', 'dimension_c_label' => 'Panjang prisma'],
+            ['value' => 'cylinder_net', 'category' => '3d', 'category_label' => 'Bangun ruang (3D)', 'family' => 'nets', 'family_label' => 'Jaring-jaring', 'label' => 'Jaring-jaring tabung', 'dimension_a_label' => 'Jari-jari', 'dimension_b_label' => 'Tinggi tabung'],
+            ['value' => 'cone_net', 'category' => '3d', 'category_label' => 'Bangun ruang (3D)', 'family' => 'nets', 'family_label' => 'Jaring-jaring', 'label' => 'Jaring-jaring kerucut', 'dimension_a_label' => 'Jari-jari alas', 'dimension_b_label' => 'Garis pelukis'],
+            ['value' => 'cartesian_point', 'category' => 'coordinate', 'category_label' => 'Koordinat & transformasi', 'family' => 'cartesian', 'family_label' => 'Koordinat Kartesius', 'label' => 'Titik koordinat', 'dimension_a_label' => 'Koordinat x', 'dimension_b_label' => 'Koordinat y', 'uses_unit' => false, 'allow_signed_dimensions' => true],
+            ['value' => 'cartesian_line', 'category' => 'coordinate', 'category_label' => 'Koordinat & transformasi', 'family' => 'cartesian', 'family_label' => 'Koordinat Kartesius', 'label' => 'Persamaan garis', 'dimension_a_label' => 'Gradien (m)', 'dimension_b_label' => 'Konstanta (c)', 'uses_unit' => false, 'allow_signed_dimensions' => true],
+            ['value' => 'translation', 'category' => 'coordinate', 'category_label' => 'Koordinat & transformasi', 'family' => 'transform', 'family_label' => 'Transformasi', 'label' => 'Translasi', 'dimension_a_label' => 'Geser x', 'dimension_b_label' => 'Geser y', 'uses_unit' => false, 'allow_signed_dimensions' => true],
+            ['value' => 'reflection', 'category' => 'coordinate', 'category_label' => 'Koordinat & transformasi', 'family' => 'transform', 'family_label' => 'Transformasi', 'label' => 'Refleksi terhadap x = a', 'dimension_a_label' => 'Nilai a', 'uses_unit' => false, 'allow_signed_dimensions' => true],
+            ['value' => 'rotation', 'category' => 'coordinate', 'category_label' => 'Koordinat & transformasi', 'family' => 'transform', 'family_label' => 'Transformasi', 'label' => 'Rotasi', 'dimension_a_label' => 'Sudut rotasi', 'uses_unit' => false],
+            ['value' => 'dilation', 'category' => 'coordinate', 'category_label' => 'Koordinat & transformasi', 'family' => 'transform', 'family_label' => 'Transformasi', 'label' => 'Dilatasi', 'dimension_a_label' => 'Faktor skala', 'uses_unit' => false],
+            ['value' => 'ruler', 'category' => 'measurement', 'category_label' => 'Pengukuran', 'family' => 'length', 'family_label' => 'Panjang & skala', 'label' => 'Penggaris', 'dimension_a_label' => 'Panjang benda'],
+            ['value' => 'number_line', 'category' => 'measurement', 'category_label' => 'Pengukuran', 'family' => 'length', 'family_label' => 'Panjang & skala', 'label' => 'Garis bilangan', 'dimension_a_label' => 'Nilai minimum', 'dimension_b_label' => 'Nilai maksimum', 'uses_unit' => false, 'allow_signed_dimensions' => true],
+            ['value' => 'scale_bar', 'category' => 'measurement', 'category_label' => 'Pengukuran', 'family' => 'length', 'family_label' => 'Panjang & skala', 'label' => 'Skala batang', 'dimension_a_label' => 'Nilai total', 'dimension_b_label' => 'Jumlah interval'],
+            ['value' => 'clock', 'category' => 'measurement', 'category_label' => 'Pengukuran', 'family' => 'time_angle', 'family_label' => 'Waktu & sudut', 'label' => 'Jam analog', 'dimension_a_label' => 'Jam (0–23)', 'dimension_b_label' => 'Menit (0–59)', 'uses_unit' => false, 'allow_signed_dimensions' => true],
+            ['value' => 'protractor', 'category' => 'measurement', 'category_label' => 'Pengukuran', 'family' => 'time_angle', 'family_label' => 'Waktu & sudut', 'label' => 'Busur derajat', 'dimension_a_label' => 'Besar sudut', 'uses_unit' => false],
+        ];
     }
 
     private function syncOptions(Question $question, array $options): void
@@ -748,7 +1326,8 @@ class QuestionController extends Controller
                 'competency_ids' => $blueprint->competencies->pluck('id'),
             ]);
     }
-    private function assessmentsForQuestion(Request $request): \Illuminate\Support\Collection
+
+    private function assessmentsForQuestion(Request $request): Collection
     {
         return Assessment::query()
             ->where('school_id', $request->user()->school_id)

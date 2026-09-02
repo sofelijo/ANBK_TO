@@ -16,25 +16,25 @@ class StimulusImageService
 
     private const MIN_DIMENSION = 160;
 
-    public function store(UploadedFile $file, int $schoolId, string $alt): array
+    public function store(UploadedFile $file, int $schoolId, string $alt, string $field = 'stimulus_image', string $directory = 'question-stimuli'): array
     {
         $contents = file_get_contents($file->getRealPath());
         $source = is_string($contents) ? @imagecreatefromstring($contents) : false;
 
         if (! $source instanceof GdImage) {
             throw ValidationException::withMessages([
-                'stimulus_image' => 'File tidak dapat diproses sebagai gambar.',
+                $field => 'File tidak dapat diproses sebagai gambar.',
             ]);
         }
 
         $image = $this->normalize($source);
-        $compressed = $this->compress($image);
+        $compressed = $this->compress($image, $field);
         $disk = 'public';
-        $path = "question-stimuli/{$schoolId}/".Str::uuid().'.jpg';
+        $path = "{$directory}/{$schoolId}/".Str::uuid().'.jpg';
 
         if (! Storage::disk($disk)->put($path, $compressed, ['visibility' => 'public'])) {
             throw ValidationException::withMessages([
-                'stimulus_image' => 'Gambar stimulus gagal disimpan. Silakan coba kembali.',
+                $field => 'Gambar gagal disimpan. Silakan coba kembali.',
             ]);
         }
 
@@ -62,7 +62,7 @@ class StimulusImageService
         return $normalized;
     }
 
-    private function compress(GdImage $image): string
+    private function compress(GdImage $image, string $field): string
     {
         try {
             while (true) {
@@ -76,7 +76,7 @@ class StimulusImageService
 
                 if (max(imagesx($image), imagesy($image)) <= self::MIN_DIMENSION) {
                     throw ValidationException::withMessages([
-                        'stimulus_image' => 'Gambar tidak dapat dikompresi hingga maksimal 200 KB.',
+                        $field => 'Gambar tidak dapat dikompresi hingga maksimal 200 KB.',
                     ]);
                 }
 

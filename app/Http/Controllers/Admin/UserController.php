@@ -29,7 +29,7 @@ class UserController extends Controller
             ->when($request->string('status')->toString(), function ($query, string $status) {
                 match ($status) {
                     'pending' => $query
-                        ->where('role', UserRole::Teacher)
+                        ->whereIn('role', [UserRole::Teacher, UserRole::Operator])
                         ->whereNull('approved_at')
                         ->where('is_active', false),
                     'active' => $query->where('is_active', true),
@@ -42,8 +42,8 @@ class UserController extends Controller
                 };
             })
             ->orderByRaw(
-                'CASE WHEN role = ? AND approved_at IS NULL AND is_active = ? THEN 0 ELSE 1 END',
-                [UserRole::Teacher->value, false],
+                'CASE WHEN role IN (?, ?) AND approved_at IS NULL AND is_active = ? THEN 0 ELSE 1 END',
+                [UserRole::Teacher->value, UserRole::Operator->value, false],
             )
             ->orderBy('role')
             ->orderBy('name')
@@ -56,7 +56,7 @@ class UserController extends Controller
             'schoolNpsn' => $request->user()->school?->npsn,
             'pendingCount' => User::query()
                 ->where('school_id', $request->user()->school_id)
-                ->where('role', UserRole::Teacher)
+                ->whereIn('role', [UserRole::Teacher, UserRole::Operator])
                 ->whereNull('approved_at')
                 ->where('is_active', false)
                 ->count(),
@@ -122,9 +122,9 @@ class UserController extends Controller
             ]);
         }
 
-        if ($user->role === UserRole::Teacher && $user->approved_at === null && ! $user->is_active) {
+        if (in_array($user->role, [UserRole::Teacher, UserRole::Operator], true) && $user->approved_at === null && ! $user->is_active) {
             throw ValidationException::withMessages([
-                'user' => 'Gunakan tombol Setujui untuk akun guru yang masih menunggu.',
+                'user' => 'Gunakan tombol Setujui untuk akun guru atau operator yang masih menunggu.',
             ]);
         }
 
@@ -142,9 +142,9 @@ class UserController extends Controller
     {
         abort_unless($user->school_id === $request->user()->school_id, 404);
 
-        if ($user->role !== UserRole::Teacher || $user->approved_at !== null || $user->is_active) {
+        if (! in_array($user->role, [UserRole::Teacher, UserRole::Operator], true) || $user->approved_at !== null || $user->is_active) {
             throw ValidationException::withMessages([
-                'user' => 'Akun ini bukan pendaftaran guru yang sedang menunggu persetujuan.',
+                'user' => 'Akun ini bukan pendaftaran guru atau operator yang sedang menunggu persetujuan.',
             ]);
         }
 
@@ -156,6 +156,6 @@ class UserController extends Controller
         ]);
         $auditLogger->log($request, 'user.approved', $user, ['role' => $user->role->value]);
 
-        return back()->with('success', 'Akun guru disetujui dan sekarang dapat login.');
+        return back()->with('success', 'Akun guru atau operator disetujui dan sekarang dapat login.');
     }
 }

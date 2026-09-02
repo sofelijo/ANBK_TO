@@ -729,6 +729,7 @@ export default function Show({
                                     {previewQuestion.options.map((opt, idx) => {
                                         const text = opt.content || opt.option_text || opt.label || '';
                                         const labelLetter = opt.label || String.fromCharCode(65 + idx);
+                                        const isMcma = previewQuestion.type === 'multiple_choice';
                                         return (
                                             <div
                                                 key={opt.id || idx}
@@ -739,13 +740,13 @@ export default function Show({
                                                 }`}
                                             >
                                                 <span
-                                                    className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                                                    className={`w-6 h-6 ${isMcma ? 'rounded-md border-2' : 'rounded-full'} flex items-center justify-center text-xs font-bold shrink-0 ${
                                                         opt.is_correct
-                                                            ? 'bg-emerald-600 text-white shadow-xs'
-                                                            : 'bg-slate-100 text-slate-600'
+                                                            ? 'border-emerald-600 bg-emerald-600 text-white shadow-xs'
+                                                            : isMcma ? 'border-slate-300 bg-white text-transparent' : 'bg-slate-100 text-slate-600'
                                                     }`}
                                                 >
-                                                    {labelLetter}
+                                                    {isMcma ? '✓' : labelLetter}
                                                 </span>
                                                 <span className="flex-1 text-sm">{text}</span>
                                                 {opt.is_correct && (

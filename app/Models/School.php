@@ -7,10 +7,16 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['name', 'npsn', 'timezone', 'settings'])]
+#[Fillable(['name', 'npsn', 'subdistrict', 'timezone', 'settings'])]
 class School extends Model
 {
     use HasFactory;
+
+    public const SUBDISTRICTS = [
+        'Kelapa Gading',
+        'Cilincing',
+        'Koja',
+    ];
 
     protected function casts(): array
     {

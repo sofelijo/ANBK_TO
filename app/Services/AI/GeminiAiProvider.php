@@ -30,7 +30,7 @@ class GeminiAiProvider implements AiProvider
         }
 
         $task = $context['task'] ?? null;
-        $creativeTask = in_array($task, ['question_variants', 'story_questions'], true);
+        $creativeTask = in_array($task, ['question_variants', 'story_questions', 'school_assessment_analysis'], true);
 
         $response = Http::timeout(60)
             ->retry(2, 500)
@@ -46,6 +46,7 @@ class GeminiAiProvider implements AiProvider
                     'maxOutputTokens' => match ($task) {
                         'story_questions' => 6000,
                         'question_variants' => 4000,
+                        'school_assessment_analysis' => 6000,
                         default => 500,
                     },
                 ],

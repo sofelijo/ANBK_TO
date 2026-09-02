@@ -272,15 +272,49 @@ class EducationalMathSvgRenderer
     {
         $items = $spec['items'];
         $max = max(1, ...array_map(fn (array $item): float => (float) $item['value'], $items));
+        [$axisMaximum, $tickStep] = $this->chartScale($max);
         $slot = 900 / count($items);
-        $body = '<line x1="170" y1="520" x2="1110" y2="520" stroke="#334155" stroke-width="4"/><line x1="170" y1="160" x2="170" y2="520" stroke="#334155" stroke-width="4"/>';
+        $plotTop = 160;
+        $plotBottom = 520;
+        $plotHeight = $plotBottom - $plotTop;
+        $body = '';
+
+        for ($tick = 0.0; $tick <= $axisMaximum + ($tickStep / 2); $tick += $tickStep) {
+            $y = $plotBottom - ($plotHeight * $tick / $axisMaximum);
+            $body .= '<line x1="170" y1="'.$this->number($y).'" x2="1110" y2="'.$this->number($y).'" stroke="#cbd5e1" stroke-width="2"/>';
+            $body .= '<text x="150" y="'.$this->number($y + 6).'" text-anchor="end" class="axis-value">'.$this->number($tick).'</text>';
+        }
+
+        $body .= '<line x1="170" y1="'.$plotBottom.'" x2="1110" y2="'.$plotBottom.'" stroke="#334155" stroke-width="4"/><line x1="170" y1="'.$plotTop.'" x2="170" y2="'.$plotBottom.'" stroke="#334155" stroke-width="4"/>';
         foreach ($items as $index => $item) {
-            $height = 320 * (float) $item['value'] / $max;
+            $value = (float) $item['value'];
+            $height = $plotHeight * $value / $axisMaximum;
             $x = 190 + ($index * $slot);
-            $body .= '<rect x="'.$this->number($x).'" y="'.$this->number(520 - $height).'" width="'.$this->number($slot - 35).'" height="'.$this->number($height).'" rx="8" fill="#38bdf8" stroke="#0369a1" stroke-width="3"/><text x="'.$this->number($x + (($slot - 35) / 2)).'" y="560" text-anchor="middle" class="small">'.$this->escape($item['label']).'</text>';
+            $barWidth = $slot - 35;
+            $barTop = $plotBottom - $height;
+            $barCenter = $x + ($barWidth / 2);
+            $body .= '<rect x="'.$this->number($x).'" y="'.$this->number($barTop).'" width="'.$this->number($barWidth).'" height="'.$this->number($height).'" rx="8" fill="#38bdf8" stroke="#0369a1" stroke-width="3"/>';
+            $body .= '<text x="'.$this->number($barCenter).'" y="560" text-anchor="middle" class="small">'.$this->escape($item['label']).'</text>';
         }
 
         return $this->frame($this->escape((string) ($spec['title'] ?? 'Diagram Batang')), $body);
+    }
+
+    /** @return array{float, float} */
+    private function chartScale(float $maximum): array
+    {
+        $rawStep = $maximum / 6;
+        $magnitude = 10 ** floor(log10($rawStep));
+        $normalizedStep = $rawStep / $magnitude;
+        $niceStep = match (true) {
+            $normalizedStep <= 1 => 1,
+            $normalizedStep <= 2 => 2,
+            $normalizedStep <= 5 => 5,
+            default => 10,
+        };
+        $tickStep = $niceStep * $magnitude;
+
+        return [(float) (ceil($maximum / $tickStep) * $tickStep), (float) $tickStep];
     }
 
     private function pictogram(array $spec): string
@@ -345,7 +379,7 @@ class EducationalMathSvgRenderer
     {
         $noteSvg = $note === '' ? '' : '<text x="640" y="675" text-anchor="middle" class="note">'.$this->escape($note).'</text>';
 
-        return '<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-label="'.$title.'"><style>.title{font:700 34px sans-serif;fill:#0f172a}.label{font:700 22px sans-serif;fill:#334155}.small{font:600 18px sans-serif;fill:#334155}.note{font:500 17px sans-serif;fill:#64748b}.clock-number{font:700 25px sans-serif;fill:#0f172a}</style><rect width="1280" height="720" fill="#f8fafc"/><rect x="24" y="22" width="1232" height="676" rx="24" fill="#fff" stroke="#cbd5e1" stroke-width="3"/><text x="640" y="80" text-anchor="middle" class="title">'.$title.'</text>'.$body.$noteSvg.'</svg>';
+        return '<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-label="'.$title.'"><style>.title{font:700 34px sans-serif;fill:#0f172a}.label{font:700 22px sans-serif;fill:#334155}.small{font:600 18px sans-serif;fill:#334155}.axis-value{font:600 17px sans-serif;fill:#475569}.note{font:500 17px sans-serif;fill:#64748b}.clock-number{font:700 25px sans-serif;fill:#0f172a}</style><rect width="1280" height="720" fill="#f8fafc"/><rect x="24" y="22" width="1232" height="676" rx="24" fill="#fff" stroke="#cbd5e1" stroke-width="3"/><text x="640" y="80" text-anchor="middle" class="title">'.$title.'</text>'.$body.$noteSvg.'</svg>';
     }
 
     private function number(float|int $number): string

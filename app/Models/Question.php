@@ -23,7 +23,9 @@ class Question extends Model
 {
     use HasFactory;
 
-    protected $appends = ['illustration_url'];
+    public const REQUIRED_VERIFICATIONS = 3;
+
+    protected $appends = ['illustration_url', 'explanation_image_url'];
 
     protected function casts(): array
     {
@@ -40,6 +42,20 @@ class Question extends Model
         return Attribute::get(function (): ?string {
             $disk = data_get($this->metadata, 'illustration.disk');
             $path = data_get($this->metadata, 'illustration.path');
+
+            if (! is_string($disk) || $disk === '' || ! is_string($path) || $path === '') {
+                return null;
+            }
+
+            return StorageUrl::for($disk, $path);
+        });
+    }
+
+    protected function explanationImageUrl(): Attribute
+    {
+        return Attribute::get(function (): ?string {
+            $disk = data_get($this->metadata, 'explanation_illustration.disk');
+            $path = data_get($this->metadata, 'explanation_illustration.path');
 
             if (! is_string($disk) || $disk === '' || ! is_string($path) || $path === '') {
                 return null;
@@ -118,6 +134,11 @@ class Question extends Model
     public function reviews(): HasMany
     {
         return $this->hasMany(QuestionReview::class)->latest('reviewed_at');
+    }
+
+    public function verifications(): HasMany
+    {
+        return $this->hasMany(QuestionVerification::class)->latest('verified_at');
     }
 
     public function assessments(): BelongsToMany

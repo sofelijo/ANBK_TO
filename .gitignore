@@ -21,6 +21,7 @@
 /public/fonts-manifest.dev.json
 /public/hot
 /public/storage
+/README.local.md
 /storage/*.key
 /storage/pail
 /vendor

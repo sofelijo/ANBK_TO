@@ -10,4 +10,5 @@ enum AiGenerationType: string
     case QuestionValidation = 'question_validation';
     case AttemptSummary = 'attempt_summary';
     case StudentChat = 'student_chat';
+    case SchoolAssessmentAnalysis = 'school_assessment_analysis';
 }

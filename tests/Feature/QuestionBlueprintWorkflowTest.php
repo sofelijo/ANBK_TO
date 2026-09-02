@@ -10,12 +10,66 @@ use App\Models\QuestionBlueprint;
 use App\Models\School;
 use App\Models\Subject;
 use App\Models\User;
+use Database\Seeders\BahasaIndonesiaQuestionTypeSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 class QuestionBlueprintWorkflowTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_bahasa_indonesia_catalog_is_seeded_idempotently_with_reusable_types(): void
+    {
+        $school = School::create(['name' => 'Sekolah Katalog Bahasa', 'npsn' => '10000888']);
+        $subject = Subject::create([
+            'school_id' => $school->id,
+            'code' => 'BIND',
+            'name' => 'Bahasa Indonesia',
+            'ai_question_format' => 'story',
+        ]);
+        Competency::create([
+            'school_id' => $school->id,
+            'subject_id' => $subject->id,
+            'code' => 'LIT6-INFO',
+            'domain' => 'Literasi',
+            'name' => 'Informasi terkait deskripsi',
+            'grade_level' => 6,
+        ]);
+        Competency::create([
+            'school_id' => $school->id,
+            'subject_id' => $subject->id,
+            'code' => 'LIT6-INFER',
+            'domain' => 'Literasi',
+            'name' => 'Membuat inferensi',
+            'grade_level' => 6,
+        ]);
+
+        $this->seed(BahasaIndonesiaQuestionTypeSeeder::class);
+        $this->seed(BahasaIndonesiaQuestionTypeSeeder::class);
+
+        $this->assertSame(10, Competency::query()->where('subject_id', $subject->id)->count());
+        $this->assertSame(19, QuestionBlueprint::query()->where('subject_id', $subject->id)->count());
+        $this->assertSame(
+            6,
+            QuestionBlueprint::query()
+                ->where('subject_id', $subject->id)
+                ->where('code', 'INFO-TERSURAT')
+                ->firstOrFail()
+                ->competencies()
+                ->count(),
+        );
+        $this->assertSame(
+            4,
+            QuestionBlueprint::query()
+                ->where('subject_id', $subject->id)
+                ->where('code', 'MAKNA-UNGKAPAN')
+                ->firstOrFail()
+                ->competencies()
+                ->count(),
+        );
+        $this->assertDatabaseMissing('competencies', ['subject_id' => $subject->id, 'code' => 'LIT6-INFO']);
+        $this->assertDatabaseMissing('competencies', ['subject_id' => $subject->id, 'code' => 'LIT6-INFER']);
+    }
 
     public function test_teacher_can_reuse_a_question_type_as_default_for_multiple_competencies(): void
     {

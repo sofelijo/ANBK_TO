@@ -1,4 +1,6 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
+import StimulusVisual, { StimulusVisualData } from '@/Components/StimulusVisual';
+import PositionedImage from '@/Components/PositionedImage';
 import { Head, Link, router } from '@inertiajs/react';
 
 type Option = { id: number; label: string; content: string; is_correct: boolean };
@@ -18,9 +20,12 @@ type Question = {
     difficulty: number;
     grade_level: number;
     illustration_url?: string;
+    explanation_image_url?: string;
     metadata?: {
         accepted_answers?: string[];
-        illustration?: { alt?: string };
+        illustration?: { alt?: string; display_width?: number; display_height?: number; display_zoom?: number; display_offset_x?: number; display_offset_y?: number };
+        explanation_illustration?: { alt?: string };
+        stimulus_visual?: StimulusVisualData;
         matching_pairs?: MatchingPair[];
         matching_distractors?: MatchingDistractor[];
         matrix_columns?: { id: string; label: string }[];
@@ -38,7 +43,16 @@ type Question = {
     superseded_by?: { id: number; title?: string; version: number; status: string };
 };
 
-export default function Show({ question, latestGeneration }: { question: Question; latestGeneration?: { status: string; error?: string } }) {
+type VerificationSummary = {
+    required: number;
+    count: number;
+    remaining: number;
+    currentUserVerified: boolean;
+    canVerify: boolean;
+    verifiers: { id: number | null; name: string; verifiedAt: string }[];
+};
+
+export default function Show({ question, verification, latestGeneration }: { question: Question; verification: VerificationSummary; latestGeneration?: { status: string; error?: string } }) {
     return (
         <AuthenticatedLayout
             header={
@@ -49,8 +63,14 @@ export default function Show({ question, latestGeneration }: { question: Questio
                     </div>
                     <div className="flex flex-wrap gap-2">
                         <Link href={route('questions.edit', question.id)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Edit</Link>
-                        {question.status !== 'published' && (
-                            <button onClick={() => router.post(route('questions.approve', question.id))} className="rounded-lg border border-emerald-600 px-4 py-2 text-sm font-semibold text-emerald-700">Terbitkan</button>
+                        {verification.canVerify && (
+                            <button
+                                disabled={verification.currentUserVerified}
+                                onClick={() => !verification.currentUserVerified && window.confirm('Catat verifikasi Anda untuk soal ini? Soal otomatis terbit setelah diverifikasi tiga guru berbeda.') && router.post(route('questions.approve', question.id), {}, { preserveScroll: true })}
+                                className="rounded-lg border border-emerald-600 px-4 py-2 text-sm font-semibold text-emerald-700 disabled:cursor-not-allowed disabled:border-slate-300 disabled:text-slate-400"
+                            >
+                                {verification.currentUserVerified ? 'Sudah Diverifikasi' : question.status === 'published' ? 'Tambah Verifikasi' : 'Verifikasi Soal'}
+                            </button>
                         )}
                         <button onClick={() => router.post(route('questions.duplicate', question.id))} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Duplikasi</button>
                         {question.status !== 'archived' && <button onClick={() => window.confirm('Arsipkan soal ini?') && router.post(route('questions.archive', question.id))} className="rounded-lg border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700">Arsipkan</button>}
@@ -63,6 +83,46 @@ export default function Show({ question, latestGeneration }: { question: Questio
             <Head title={question.title || 'Detail Soal'} />
             <div className="mx-auto grid max-w-7xl gap-6 px-4 py-8 sm:px-6 lg:grid-cols-[1fr_320px] lg:px-8">
                 <div className="space-y-6">
+                    <section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                                <p className="text-xs font-bold uppercase tracking-wide text-emerald-700">Verifikasi guru</p>
+                                <h2 className="mt-1 text-lg font-bold text-slate-900">
+                                    {question.status === 'published'
+                                        ? verification.count >= verification.required ? 'Syarat penerbitan terpenuhi' : 'Soal terbit dari data lama'
+                                        : `${verification.count} dari ${verification.required} guru`}
+                                </h2>
+                                <p className="mt-1 text-sm text-slate-600">
+                                    {question.status === 'published'
+                                        ? verification.count >= verification.required
+                                            ? 'Soal telah diterbitkan setelah mencapai tiga verifikasi guru.'
+                                            : 'Status terbit dipertahankan untuk kompatibilitas; riwayat verifikasi lama tetap tercatat.'
+                                        : verification.remaining > 0
+                                          ? `Masih diperlukan ${verification.remaining} guru berbeda sebelum soal dapat terbit.`
+                                          : 'Soal siap diterbitkan.'}
+                                </p>
+                            </div>
+                            <div className="flex gap-2">
+                                {Array.from({ length: verification.required }).map((_, index) => (
+                                    <span key={index} className={`flex h-10 w-10 items-center justify-center rounded-full border-2 text-sm font-bold ${index < verification.count ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-emerald-200 bg-white text-emerald-300'}`}>{index < verification.count ? '✓' : index + 1}</span>
+                                ))}
+                                {verification.count > verification.required && (
+                                    <span className="flex h-10 min-w-10 items-center justify-center rounded-full bg-blue-600 px-2 text-sm font-bold text-white">+{verification.count - verification.required}</span>
+                                )}
+                            </div>
+                        </div>
+                        {verification.verifiers.length > 0 && (
+                            <div className="mt-4 grid gap-2 border-t border-emerald-200 pt-4 sm:grid-cols-3">
+                                {verification.verifiers.map((verifier, index) => (
+                                    <div key={`${verifier.id ?? 'inactive'}-${index}`} className="rounded-xl bg-white px-3 py-2.5 text-sm shadow-sm">
+                                        <p className="font-semibold text-slate-900">{index + 1}. {verifier.name}</p>
+                                        <p className="mt-0.5 text-xs text-slate-500">{formatVerificationDate(verifier.verifiedAt)}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </section>
+
                     <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                         <div className="flex flex-wrap gap-2 text-xs font-semibold">
                             <span className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-700">{question.status}</span>
@@ -80,20 +140,15 @@ export default function Show({ question, latestGeneration }: { question: Questio
                                 Versi ini sudah digantikan oleh <Link href={route('questions.show', question.superseded_by.id)} className="font-semibold underline">versi {question.superseded_by.version}</Link>.
                             </p>
                         )}
-                        {question.illustration_url && (
-                            <img
-                                src={question.illustration_url}
-                                alt={question.metadata?.illustration?.alt || 'Ilustrasi soal'}
-                                className="mt-6 aspect-video w-full rounded-xl border border-slate-200 object-cover"
-                            />
-                        )}
+                        {question.illustration_url && <PositionedImage src={question.illustration_url} alt={question.metadata?.illustration?.alt || 'Ilustrasi soal'} width={question.metadata?.illustration?.display_width || 800} height={question.metadata?.illustration?.display_height || 450} zoom={question.metadata?.illustration?.display_zoom || 1} offsetX={question.metadata?.illustration?.display_offset_x || 0} offsetY={question.metadata?.illustration?.display_offset_y || 0} className="mt-6" />}
+                        {question.metadata?.stimulus_visual && <StimulusVisual visual={question.metadata.stimulus_visual} className="mt-6" />}
                         {question.stimulus && <div className="mt-6 whitespace-pre-wrap rounded-xl bg-slate-50 p-5 leading-7 text-slate-700">{question.stimulus}</div>}
                         <h2 className="mt-6 text-lg font-semibold leading-7 text-slate-900">{question.prompt}</h2>
                         {question.options.length > 0 && (
                             <div className="mt-5 space-y-3">
                                 {question.options.map((option) => (
                                     <div key={option.id} className={`flex gap-3 rounded-xl border p-4 ${option.is_correct ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200'}`}>
-                                        <span className="font-semibold">{option.label}.</span>
+                                        {question.type === 'multiple_choice' ? <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border text-xs ${option.is_correct ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-300 text-transparent'}`}>✓</span> : <span className="font-semibold">{option.label}.</span>}
                                         <span>{option.content}</span>
                                     </div>
                                 ))}
@@ -127,7 +182,7 @@ export default function Show({ question, latestGeneration }: { question: Questio
                             </div>
                         )}
                         {question.metadata?.accepted_answers && <p className="mt-5 text-sm text-emerald-700">Jawaban diterima: {question.metadata.accepted_answers.join(', ')}</p>}
-                        {question.explanation && <div className="mt-6 border-t border-slate-100 pt-5"><h3 className="text-sm font-semibold text-slate-900">Pembahasan</h3><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">{question.explanation}</p></div>}
+                        {(question.explanation || question.explanation_image_url) && <div className="mt-6 border-t border-slate-100 pt-5"><h3 className="text-sm font-semibold text-slate-900">Pembahasan</h3>{question.explanation && <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">{question.explanation}</p>}{question.explanation_image_url && <img src={question.explanation_image_url} alt={question.metadata?.explanation_illustration?.alt || 'Gambar pembahasan soal'} className="mt-4 max-h-96 w-full rounded-xl border border-slate-200 bg-white object-contain" />}</div>}
                     </article>
 
                     <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -163,10 +218,21 @@ export default function Show({ question, latestGeneration }: { question: Questio
                         <div><dt className="text-slate-500">Domain</dt><dd className="mt-1 text-slate-900">{question.competency.domain}</dd></div>
                         <div><dt className="text-slate-500">Bentuk</dt><dd className="mt-1 text-slate-900">{question.type}</dd></div>
                         <div><dt className="text-slate-500">Pembuat</dt><dd className="mt-1 text-slate-900">{question.author.name}</dd></div>
-                        <div><dt className="text-slate-500">Verifikator</dt><dd className="mt-1 text-slate-900">{question.approver?.name || 'Belum diverifikasi'}</dd></div>
+                        <div><dt className="text-slate-500">Progres verifikasi</dt><dd className="mt-1 text-slate-900">{verification.count} dari {verification.required} guru</dd></div>
+                        <div><dt className="text-slate-500">Penerbit akhir</dt><dd className="mt-1 text-slate-900">{question.approver?.name || 'Belum terbit'}</dd></div>
                     </dl>
                 </aside>
             </div>
         </AuthenticatedLayout>
     );
+}
+
+function formatVerificationDate(value: string): string {
+    return new Intl.DateTimeFormat('id-ID', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+    }).format(new Date(value));
 }

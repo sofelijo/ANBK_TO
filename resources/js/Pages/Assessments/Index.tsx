@@ -1,5 +1,6 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, Link, router } from '@inertiajs/react';
+import { useMemo, useState } from 'react';
 
 type SubCompetency = {
     id: number;
@@ -21,6 +22,7 @@ type Assessment = {
     competency_slots?: number[];
     questions_count: number;
     attempts_count: number;
+    average_difficulty: number | null;
     starts_at?: string;
     ends_at?: string;
     schedules_count?: number;
@@ -39,6 +41,28 @@ export default function Index({
     canManage: boolean;
     subCompetencies: SubCompetency[];
 }) {
+    const [difficultySort, setDifficultySort] = useState<'default' | 'easiest' | 'hardest'>('default');
+    const displayedAssessments = useMemo(() => {
+        if (difficultySort === 'default') return assessments;
+
+        return [...assessments].sort((left, right) => {
+            if (left.average_difficulty === null && right.average_difficulty === null) return 0;
+            if (left.average_difficulty === null) return 1;
+            if (right.average_difficulty === null) return -1;
+
+            return difficultySort === 'easiest'
+                ? left.average_difficulty - right.average_difficulty
+                : right.average_difficulty - left.average_difficulty;
+        });
+    }, [assessments, difficultySort]);
+
+    const difficultyLabel = (average: number | null) => {
+        if (average === null) return 'Belum dihitung';
+        if (average < 1.5) return 'Mudah';
+        if (average < 2.5) return 'Sedang';
+        return 'Sulit';
+    };
+
     return (
         <AuthenticatedLayout
             header={
@@ -62,13 +86,25 @@ export default function Index({
         >
             <Head title={canManage ? 'Paket Ujian' : 'Try Out'} />
             <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+                {!canManage && assessments.length > 1 && (
+                    <div className="mb-5 flex justify-end">
+                        <label className="text-sm font-semibold text-slate-700">
+                            Urutkan berdasarkan level
+                            <select value={difficultySort} onChange={(event) => setDifficultySort(event.target.value as typeof difficultySort)} className="ml-3 rounded-lg border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500">
+                                <option value="default">Terbaru</option>
+                                <option value="easiest">Termudah</option>
+                                <option value="hardest">Tersulit</option>
+                            </select>
+                        </label>
+                    </div>
+                )}
                 {assessments.length === 0 ? (
                     <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">
                         Belum ada paket yang tersedia.
                     </div>
                 ) : (
                     <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
-                        {assessments.map((assessment) => {
+                        {displayedAssessments.map((assessment) => {
                             const attempt = assessment.attempts?.[0];
                             const isTogether = assessment.settings?.type === 'together';
                             const schoolSchedule = assessment.schedules?.[0];
@@ -166,6 +202,9 @@ export default function Index({
                                     <div className="mt-5 flex gap-4 border-t border-slate-100 pt-4 text-xs text-slate-500">
                                         <span>{assessment.questions_count} soal</span>
                                         <span>{assessment.duration_minutes} menit</span>
+                                        <span title="Rata-rata level seluruh soal yang terpasang pada paket">
+                                            Level {assessment.average_difficulty?.toFixed(2) ?? '-'} · {difficultyLabel(assessment.average_difficulty)}
+                                        </span>
                                         {canManage && (assessment.schedules_count || 0) > 0 && (
                                             <span>{assessment.schedules_count} sekolah terjadwal</span>
                                         )}

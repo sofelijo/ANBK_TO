@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\AiGenerationStatus;
 use App\Enums\AiGenerationType;
 use App\Enums\QuestionStatus;
+use App\Enums\UserRole;
 use App\Jobs\GenerateStoryQuestions;
 use App\Models\AiGeneration;
 use App\Models\Competency;
@@ -14,10 +15,12 @@ use App\Models\Subject;
 use App\Services\AI\AiManager;
 use App\Services\AI\StoryIllustrationService;
 use App\Services\AuditLogger;
+use App\Services\IndonesianBundleConfiguration;
+use App\Services\QuestionDuplicateDetector;
+use App\Services\QuestionVerificationService;
 use App\Services\TeacherAiQuota;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -25,7 +28,7 @@ use Inertia\Response;
 
 class AiStoryQuestionController extends Controller
 {
-    public function create(Request $request): Response|RedirectResponse
+    public function create(Request $request, IndonesianBundleConfiguration $bundleConfiguration): Response|RedirectResponse
     {
         $subjects = Subject::query()
             ->where(fn ($query) => $query
@@ -68,7 +71,11 @@ class AiStoryQuestionController extends Controller
                 ->map(fn (QuestionBlueprint $blueprint): array => [
                     ...$blueprint->only(['id', 'subject_id', 'code', 'name', 'description']),
                     'competency_ids' => $blueprint->competencies->pluck('id'),
+                    'competency_positions' => $blueprint->competencies->mapWithKeys(fn (Competency $competency): array => [
+                        $competency->id => $competency->pivot->position,
+                    ]),
                 ]),
+            'indonesianBundleDefaults' => $bundleConfiguration->forUser($request->user()),
             'recentGenerations' => AiGeneration::query()
                 ->where('school_id', $request->user()->school_id)
                 ->where('requested_by', $request->user()->id)
@@ -79,20 +86,35 @@ class AiStoryQuestionController extends Controller
         ]);
     }
 
-    public function store(Request $request, AiManager $manager, AuditLogger $auditLogger, TeacherAiQuota $quota): RedirectResponse
+    public function store(Request $request, AiManager $manager, AuditLogger $auditLogger, TeacherAiQuota $quota, IndonesianBundleConfiguration $bundleConfiguration): RedirectResponse
     {
+        $requestedSubjectUsesIndonesianBundle = Subject::query()
+            ->whereKey($request->integer('subject_id'))
+            ->where('code', 'BIND')
+            ->exists();
+
+        if (! $requestedSubjectUsesIndonesianBundle) {
+            $request->request->remove('bundle_slots');
+        }
+
         $data = $request->validate([
             'subject_id' => ['required', 'integer'],
             'root_competency_id' => ['nullable', 'integer'],
             'competency_id' => ['nullable', 'integer'],
             'question_blueprint_ids' => ['array'],
             'question_blueprint_ids.*' => ['integer', 'distinct'],
+            'bundle_slots' => ['nullable', 'array', 'size:3'],
+            'bundle_slots.*.question_blueprint_id' => ['required_with:bundle_slots', 'integer', 'distinct'],
+            'bundle_slots.*.answer_format' => ['required_with:bundle_slots', Rule::in(IndonesianBundleConfiguration::ANSWER_FORMATS)],
+            'bundle_slots.*.cognitive_level' => ['required_with:bundle_slots', Rule::in(IndonesianBundleConfiguration::COGNITIVE_LEVELS)],
             'theme' => ['nullable', 'string', 'max:5000'],
             'question_style' => ['nullable', Rule::in(['direct', 'reasoning'])],
             'answer_format' => ['nullable', Rule::in(['single_choice', 'true_false', 'multiple_choice', 'mixed'])],
+            'difficulty' => ['nullable', 'integer', 'between:1,3'],
             'use_illustration' => ['nullable', 'boolean'],
             'illustration_mode' => ['nullable', Rule::in(['lite', 'pro'])],
             'paragraph_count' => ['nullable', 'integer', 'between:1,5'],
+            'max_words' => ['nullable', 'integer', 'between:50,1000'],
             'question_count' => ['required', 'integer', 'between:1,9'],
         ]);
         $subject = Subject::query()
@@ -109,28 +131,63 @@ class AiStoryQuestionController extends Controller
             ]);
         }
         $selectedCompetency = $this->selectedCompetency($request, $subject, $data);
-        $questionBlueprints = QuestionBlueprint::query()
-            ->whereIn('id', $data['question_blueprint_ids'] ?? [])
+        $availableBundleBlueprints = $selectedCompetency?->questionBlueprints()
             ->where('subject_id', $subject->id)
-            ->where(fn ($query) => $query
-                ->whereNull('school_id')
-                ->orWhere('school_id', $request->user()->school_id))
-            ->get(['id', 'code', 'name', 'description']);
-        if ($questionBlueprints->count() !== count($data['question_blueprint_ids'] ?? [])) {
-            throw ValidationException::withMessages([
-                'question_blueprint_ids' => 'Ada tipe soal yang tidak tersedia.',
-            ]);
+            ->get(['question_blueprints.id', 'code', 'name', 'description']) ?? collect();
+        $usesIndonesianBundle = $subject->code === 'BIND' && $availableBundleBlueprints->count() === 3;
+        $bundleSlots = [];
+        if ($usesIndonesianBundle) {
+            $submittedSlots = $data['bundle_slots'] ?? collect($bundleConfiguration->forUser($request->user()))
+                ->values()
+                ->map(fn (array $slot, int $index): array => [
+                    'question_blueprint_id' => $availableBundleBlueprints[$index]->id,
+                    ...$slot,
+                ])->all();
+            $bundleConfiguration->ensureComplete(
+                collect($submittedSlots)->map(fn (array $slot): array => collect($slot)->only(['answer_format', 'cognitive_level'])->all())->all(),
+                'bundle_slots',
+            );
+            $submittedBlueprintIds = collect($submittedSlots)->pluck('question_blueprint_id')->map(fn ($id): int => (int) $id);
+            if ($submittedBlueprintIds->unique()->count() !== 3
+                || $submittedBlueprintIds->sort()->values()->all() !== $availableBundleBlueprints->pluck('id')->sort()->values()->all()) {
+                throw ValidationException::withMessages([
+                    'bundle_slots' => 'Bundle wajib menggunakan ketiga tipe soal milik kompetensi masing-masing satu kali.',
+                ]);
+            }
+            $availableById = $availableBundleBlueprints->keyBy('id');
+            $bundleSlots = collect($submittedSlots)->values()->map(fn (array $slot, int $index): array => [
+                'position' => $index + 1,
+                'question_blueprint_id' => (int) $slot['question_blueprint_id'],
+                'answer_format' => $slot['answer_format'],
+                'cognitive_level' => $slot['cognitive_level'],
+                'cognitive_level_label' => $bundleConfiguration->levelLabel($slot['cognitive_level']),
+            ])->all();
+            $questionBlueprints = collect($bundleSlots)->map(function (array $slot) use ($availableById): array {
+                $blueprint = $availableById[$slot['question_blueprint_id']];
+
+                return [...$blueprint->only(['id', 'code', 'name', 'description']), ...$slot];
+            });
+        } else {
+            $questionBlueprints = QuestionBlueprint::query()
+                ->whereIn('id', $data['question_blueprint_ids'] ?? [])
+                ->where('subject_id', $subject->id)
+                ->where(fn ($query) => $query
+                    ->whereNull('school_id')
+                    ->orWhere('school_id', $request->user()->school_id))
+                ->get(['id', 'code', 'name', 'description']);
+            if ($questionBlueprints->count() !== count($data['question_blueprint_ids'] ?? [])) {
+                throw ValidationException::withMessages([
+                    'question_blueprint_ids' => 'Ada tipe soal yang tidak tersedia.',
+                ]);
+            }
         }
         $generationFormat = $subject->ai_question_format === 'story' ? 'story' : 'direct';
-        if ($generationFormat === 'story' && ! in_array((int) $data['question_count'], [2, 3, 4], true)) {
+        if ($generationFormat === 'story' && ! $usesIndonesianBundle && ! in_array((int) $data['question_count'], [2, 3, 4], true)) {
             throw ValidationException::withMessages([
                 'question_count' => 'Paket cerita hanya mendukung 2–4 soal.',
             ]);
         }
         $theme = trim($data['theme'] ?? '');
-        if ($generationFormat === 'story' && $theme === '') {
-            throw ValidationException::withMessages(['theme' => 'Tema cerita wajib diisi.']);
-        }
         $questionStyle = $generationFormat === 'direct' ? ($data['question_style'] ?? 'direct') : 'reasoning';
         $answerFormat = $generationFormat === 'direct' ? ($data['answer_format'] ?? 'single_choice') : 'mixed';
         if ($answerFormat === 'mixed' && (int) $data['question_count'] < 2) {
@@ -152,15 +209,21 @@ class AiStoryQuestionController extends Controller
             'competency_id' => $selectedCompetency?->id,
             'competency_code' => $selectedCompetency?->code,
             'competency_name' => $selectedCompetency?->name,
-            'question_blueprints' => $questionBlueprints->map->only(['id', 'code', 'name', 'description'])->values()->all(),
-            'theme' => $theme !== '' ? $theme : ($selectedCompetency?->name ?? $subject->name),
+            'question_blueprints' => $questionBlueprints->values()->all(),
+            'bundle_slots' => $bundleSlots,
+            'theme' => $generationFormat === 'story'
+                ? $theme
+                : ($theme !== '' ? $theme : ($selectedCompetency?->name ?? $subject->name)),
+            'theme_source' => $generationFormat === 'story' && $theme === '' ? 'ai' : 'user',
             'example_question' => $generationFormat === 'direct' && $theme !== '' ? $theme : null,
             'question_style' => $questionStyle,
             'answer_format' => $answerFormat,
+            'difficulty' => $usesIndonesianBundle ? null : (int) ($data['difficulty'] ?? 2),
             'use_illustration' => $useIllustration,
             'illustration_mode' => $useIllustration ? $illustrationMode : null,
             'paragraph_count' => $generationFormat === 'story' ? (int) ($data['paragraph_count'] ?? 3) : 0,
-            'question_count' => (int) $data['question_count'],
+            'max_words' => $generationFormat === 'story' ? (int) ($data['max_words'] ?? 200) : 0,
+            'question_count' => $usesIndonesianBundle ? 3 : (int) $data['question_count'],
         ];
         $generation = AiGeneration::create([
             'school_id' => $request->user()->school_id,
@@ -273,6 +336,7 @@ class AiStoryQuestionController extends Controller
                 'author:id,name',
                 'approver:id,name',
                 'options',
+                'verifications.verifier:id,name',
             ])
             ->get()
             ->sortBy(fn (Question $question) => array_search($question->id, $questionIds, true))
@@ -285,7 +349,11 @@ class AiStoryQuestionController extends Controller
                     ? 'Soal belum berhasil dibuat. Silakan coba proses kembali.'
                     : null,
             ],
-            'questions' => $questions,
+            'questions' => $questions->map(fn (Question $question): array => [
+                ...$question->toArray(),
+                'verification' => $this->verificationSummary($question, $request),
+            ]),
+            'canVerify' => $request->user()->hasRole(UserRole::Teacher),
             'illustration' => $illustration ? [
                 ...$illustration->only(['id', 'status', 'created_at']),
                 'error' => $illustration->status === AiGenerationStatus::Failed
@@ -330,6 +398,8 @@ class AiStoryQuestionController extends Controller
         Request $request,
         AiGeneration $generation,
         AuditLogger $auditLogger,
+        QuestionDuplicateDetector $duplicateDetector,
+        QuestionVerificationService $verificationService,
     ): RedirectResponse {
         $this->ensureAccessible($request, $generation);
 
@@ -341,7 +411,7 @@ class AiStoryQuestionController extends Controller
 
         if ($generation->status !== AiGenerationStatus::Completed) {
             throw ValidationException::withMessages([
-                'generation' => 'Bundle hanya dapat diverifikasi setelah proses AI selesai.',
+                'generation' => 'Bundle hanya dapat diverifikasi setelah paket selesai dibuat.',
             ]);
         }
 
@@ -357,50 +427,93 @@ class AiStoryQuestionController extends Controller
             ]);
         }
 
-        $publishedCount = DB::transaction(function () use ($generation, $questionIds, $request): int {
-            $questions = Question::query()
-                ->where('school_id', $request->user()->school_id)
-                ->where('story_generation_id', $generation->id)
-                ->whereIn('id', $questionIds)
-                ->lockForUpdate()
-                ->get();
-
-            if ($questions->count() !== $questionIds->count()) {
-                throw ValidationException::withMessages([
-                    'generation' => 'Sebagian soal bundle tidak ditemukan. Muat ulang halaman dan periksa kembali.',
-                ]);
-            }
-
-            if ($questions->contains(fn (Question $question): bool => $question->status === QuestionStatus::Archived || $question->superseded_by_id !== null
-            )) {
-                throw ValidationException::withMessages([
-                    'generation' => 'Bundle memuat soal yang sudah diarsipkan atau digantikan. Periksa soal satu per satu.',
-                ]);
-            }
-
-            $publishable = $questions->where('status', '!=', QuestionStatus::Published);
-
-            Question::query()
-                ->whereIn('id', $publishable->pluck('id'))
-                ->update([
-                    'status' => QuestionStatus::Published,
-                    'approved_by' => $request->user()->id,
-                    'approved_at' => now(),
-                ]);
-
-            return $publishable->count();
-        });
-
-        if ($publishedCount === 0) {
-            return back()->with('success', 'Seluruh soal dalam bundle sudah terbit.');
+        if (! $request->user()->hasRole(UserRole::Teacher)) {
+            throw ValidationException::withMessages([
+                'generation' => 'Hanya akun guru yang dapat memverifikasi bundle soal.',
+            ]);
         }
 
-        $auditLogger->log($request, 'story_bundle.published', $generation, [
-            'question_ids' => $questionIds->all(),
-            'question_count' => $publishedCount,
+        $questions = Question::query()
+            ->where('school_id', $request->user()->school_id)
+            ->where('story_generation_id', $generation->id)
+            ->whereIn('id', $questionIds)
+            ->with('verifications:id,question_id,verifier_id')
+            ->get();
+
+        if ($questions->count() !== $questionIds->count()) {
+            throw ValidationException::withMessages([
+                'generation' => 'Sebagian soal bundle tidak ditemukan. Muat ulang halaman dan periksa kembali.',
+            ]);
+        }
+
+        if ($questions->contains(fn (Question $question): bool => $question->status === QuestionStatus::Archived || $question->superseded_by_id !== null
+        )) {
+            throw ValidationException::withMessages([
+                'generation' => 'Bundle memuat soal yang sudah diarsipkan atau digantikan. Periksa soal satu per satu.',
+            ]);
+        }
+
+        $verifiable = $questions->reject(fn (Question $question): bool => $question
+            ->verifications
+            ->contains('verifier_id', $request->user()->id));
+
+        if ($verifiable->isEmpty()) {
+            return back()->with('success', 'Anda sudah memverifikasi seluruh soal dalam bundle ini.');
+        }
+
+        foreach ($verifiable as $index => $question) {
+            if ($question->status !== QuestionStatus::Published && $duplicateDetector->hasBlockingDuplicate($question)) {
+                throw ValidationException::withMessages([
+                    'generation' => 'Soal nomor '.($index + 1).' terindikasi duplikat kuat. Periksa soal tersebut sebelum memverifikasi bundle.',
+                ]);
+            }
+        }
+
+        $results = $verifiable->map(fn (Question $question): array => $verificationService
+            ->verify($question, $request->user()));
+        $verifiedCount = $results->where('created', true)->count();
+        $publishedCount = $results->where('published', true)->count();
+
+        if ($verifiedCount === 0) {
+            return back()->with('success', 'Anda sudah memverifikasi seluruh soal dalam bundle ini.');
+        }
+
+        $auditLogger->log($request, 'story_bundle.verified', $generation, [
+            'question_ids' => $verifiable->pluck('id')->all(),
+            'question_count' => $verifiedCount,
+            'published_count' => $publishedCount,
         ]);
 
-        return back()->with('success', "{$publishedCount} soal dalam bundle berhasil diverifikasi dan diterbitkan.");
+        if ($publishedCount > 0) {
+            $auditLogger->log($request, 'story_bundle.published', $generation, [
+                'question_ids' => $verifiable->pluck('id')->all(),
+                'question_count' => $publishedCount,
+            ]);
+        }
+
+        return back()->with(
+            'success',
+            $publishedCount > 0
+                ? "Verifikasi Anda tercatat pada {$verifiedCount} soal; {$publishedCount} soal mencapai tiga verifikasi dan diterbitkan."
+                : "Verifikasi Anda tercatat pada {$verifiedCount} soal. Tiga guru adalah batas minimal; verifikator tambahan tetap tercatat.",
+        );
+    }
+
+    private function verificationSummary(Question $question, Request $request): array
+    {
+        $count = $question->verifications->count();
+
+        return [
+            'required' => Question::REQUIRED_VERIFICATIONS,
+            'count' => $count,
+            'remaining' => max(0, Question::REQUIRED_VERIFICATIONS - $count),
+            'currentUserVerified' => $question->verifications->contains('verifier_id', $request->user()->id),
+            'verifiers' => $question->verifications->map(fn ($verification): array => [
+                'id' => $verification->verifier_id,
+                'name' => $verification->verifier?->name ?? 'Guru tidak aktif',
+                'verifiedAt' => $verification->verified_at,
+            ])->values(),
+        ];
     }
 
     private function ensureAccessible(Request $request, AiGeneration $generation): void

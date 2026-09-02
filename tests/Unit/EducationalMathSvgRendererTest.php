@@ -98,4 +98,26 @@ class EducationalMathSvgRendererTest extends TestCase
         $this->assertStringNotContainsString('65°', $svg);
         $this->assertStringNotContainsString('65 derajat', $svg);
     }
+
+    public function test_bar_chart_has_a_readable_axis_scale_without_printing_values_above_bars(): void
+    {
+        $svg = (new EducationalMathSvgRenderer)->render([
+            'type' => 'data_chart',
+            'style' => 'bar',
+            'title' => 'Penjualan Buku Harian',
+            'items' => [
+                ['label' => 'Senin', 'value' => 25],
+                ['label' => 'Selasa', 'value' => 40],
+                ['label' => 'Rabu', 'value' => 30],
+                ['label' => 'Kamis', 'value' => 55],
+                ['label' => 'Jumat', 'value' => 35],
+            ],
+        ]);
+
+        foreach ([0, 10, 20, 30, 40, 50, 60] as $tick) {
+            $this->assertStringContainsString('class="axis-value">'.$tick.'</text>', $svg);
+        }
+
+        $this->assertStringNotContainsString('class="bar-value"', $svg);
+    }
 }

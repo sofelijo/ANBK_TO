@@ -17,12 +17,10 @@ export default function Login({
     canResetPassword: boolean;
 }) {
     const [mode, setMode] = useState<LoginMode>('student');
-    const [showNameModal, setShowNameModal] = useState(false);
+    const [showPassword, setShowPassword] = useState(false);
     const studentForm = useForm({
         npsn: '',
         nisn: '',
-        name: '',
-        grade_level: 6,
     });
     const staffForm = useForm({
         email: '',
@@ -32,13 +30,7 @@ export default function Login({
 
     const submitStudent: FormEventHandler = (event) => {
         event.preventDefault();
-        studentForm.post(route('student-login'), {
-            onError: (errors) => {
-                if (errors.name) {
-                    setShowNameModal(true);
-                }
-            },
-        });
+        studentForm.post(route('student-login'));
     };
 
     const submitStaff: FormEventHandler = (event) => {
@@ -98,8 +90,11 @@ export default function Login({
             {mode === 'student' ? (
                 <form onSubmit={submitStudent}>
                     <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-4 text-sm text-indigo-900">
-                        Belum punya akun? Isi data di bawah. Akun akan dibuat
-                        otomatis.
+                        Belum punya akun murid?{' '}
+                        <Link href={route('register', { account_type: 'student' })} className="font-bold underline">
+                            Daftar terlebih dahulu
+                        </Link>
+                        . Akun dapat digunakan setelah disetujui operator sekolah.
                     </div>
 
                     <div className="mt-5">
@@ -190,20 +185,61 @@ export default function Login({
 
                     <div className="mt-4">
                         <InputLabel htmlFor="password" value="Password" />
-                        <TextInput
-                            id="password"
-                            type="password"
-                            name="password"
-                            value={staffForm.data.password}
-                            className="mt-1 block w-full"
-                            autoComplete="current-password"
-                            onChange={(event) =>
-                                staffForm.setData(
-                                    'password',
-                                    event.target.value,
-                                )
-                            }
-                        />
+                        <div className="relative mt-1">
+                            <TextInput
+                                id="password"
+                                type={showPassword ? 'text' : 'password'}
+                                name="password"
+                                value={staffForm.data.password}
+                                className="block w-full pe-12"
+                                autoComplete="current-password"
+                                onChange={(event) =>
+                                    staffForm.setData(
+                                        'password',
+                                        event.target.value,
+                                    )
+                                }
+                            />
+                            <button
+                                type="button"
+                                onClick={() => setShowPassword((value) => !value)}
+                                className="absolute inset-y-0 end-0 flex w-12 items-center justify-center rounded-e-md text-gray-500 transition hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500"
+                                aria-label={
+                                    showPassword
+                                        ? 'Sembunyikan password'
+                                        : 'Tampilkan password'
+                                }
+                                aria-pressed={showPassword}
+                            >
+                                {showPassword ? (
+                                    <svg
+                                        className="h-5 w-5"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        aria-hidden="true"
+                                    >
+                                        <path d="m3 3 18 18" />
+                                        <path d="M10.6 10.7a2 2 0 0 0 2.7 2.7" />
+                                        <path d="M9.9 4.2A10.7 10.7 0 0 1 12 4c5.5 0 9 6 9 6a15.8 15.8 0 0 1-2.1 2.9" />
+                                        <path d="M6.6 6.6C4.4 8 3 10 3 10s3.5 6 9 6a9.7 9.7 0 0 0 3.4-.6" />
+                                    </svg>
+                                ) : (
+                                    <svg
+                                        className="h-5 w-5"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        aria-hidden="true"
+                                    >
+                                        <path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6Z" />
+                                        <circle cx="12" cy="12" r="2.5" />
+                                    </svg>
+                                )}
+                            </button>
+                        </div>
                         <InputError
                             message={staffForm.errors.password}
                             className="mt-2"
@@ -244,99 +280,26 @@ export default function Login({
                             Masuk
                         </PrimaryButton>
                     </div>
+
+                    <div className="mt-6 border-t border-gray-200 pt-5 text-center">
+                        <p className="text-sm text-gray-600">
+                            Belum memiliki akun guru atau operator?
+                        </p>
+                        <Link
+                            href={route('register', {
+                                account_type: 'teacher',
+                            })}
+                            className="mt-3 inline-flex w-full items-center justify-center rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm font-semibold text-indigo-700 transition hover:border-indigo-300 hover:bg-indigo-100"
+                        >
+                            Daftar Guru / Operator
+                        </Link>
+                        <p className="mt-3 text-xs leading-5 text-gray-500">
+                            Pendaftaran guru atau operator harus disetujui admin sekolah.
+                        </p>
+                    </div>
                 </form>
             )}
 
-            {showNameModal && (
-                <div
-                    className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 backdrop-blur-sm"
-                    role="dialog"
-                    aria-modal="true"
-                    aria-labelledby="student-name-title"
-                >
-                    <form
-                        onSubmit={submitStudent}
-                        className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl sm:p-8"
-                    >
-                        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-100 text-xl font-bold text-emerald-700">
-                            👋
-                        </div>
-                        <h2
-                            id="student-name-title"
-                            className="mt-5 text-2xl font-bold text-slate-900"
-                        >
-                            Selamat datang!
-                        </h2>
-                        <p className="mt-2 text-sm leading-6 text-slate-600">
-                            NISN ini belum pernah masuk. Tuliskan nama lengkapmu
-                            untuk membuat akun.
-                        </p>
-
-                        <div className="mt-6">
-                            <InputLabel
-                                htmlFor="student-name"
-                                value="Nama Lengkap"
-                            />
-                            <TextInput
-                                id="student-name"
-                                name="name"
-                                type="text"
-                                autoComplete="name"
-                                value={studentForm.data.name}
-                                className="mt-1 block w-full px-4 py-3 text-lg"
-                                isFocused
-                                onChange={(event) =>
-                                    studentForm.setData(
-                                        'name',
-                                        event.target.value,
-                                    )
-                                }
-                            />
-                            <InputError
-                                message={studentForm.errors.name}
-                                className="mt-2"
-                            />
-                        </div>
-
-                        <div className="mt-5">
-                            <InputLabel htmlFor="student-grade" value="Kelas" />
-                            <select
-                                id="student-grade"
-                                value={studentForm.data.grade_level}
-                                onChange={(event) => studentForm.setData('grade_level', Number(event.target.value))}
-                                className="mt-1 block w-full rounded-xl border-gray-300 px-4 py-3 text-base shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                            >
-                                <option value={6}>Kelas 6</option>
-                                <option value={9}>Kelas 9</option>
-                                <option value={12}>Kelas 12</option>
-                            </select>
-                            <InputError message={studentForm.errors.grade_level} className="mt-2" />
-                        </div>
-
-                        <div className="mt-6 flex gap-3">
-                            <button
-                                type="button"
-                                className="flex-1 rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"
-                                onClick={() => {
-                                    setShowNameModal(false);
-                                    studentForm.setData('name', '');
-                                    studentForm.clearErrors('name');
-                                }}
-                            >
-                                Kembali
-                            </button>
-                            <PrimaryButton
-                                className="flex-1 justify-center py-3 text-sm"
-                                disabled={studentForm.processing}
-                            >
-                                {studentForm.processing
-                                    ? 'Menyimpan...'
-                                    : 'Simpan & Masuk'}
-                            </PrimaryButton>
-                        </div>
-                    </form>
-                </div>
-            )}
         </GuestLayout>
     );
 }

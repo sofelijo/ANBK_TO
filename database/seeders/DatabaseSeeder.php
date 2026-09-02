@@ -198,5 +198,7 @@ class DatabaseSeeder extends Seeder
                 $question->id => ['position' => $index + 1, 'points' => 1],
             ])->all(),
         );
+
+        $this->call(BahasaIndonesiaQuestionTypeSeeder::class);
     }
 }

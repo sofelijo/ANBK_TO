@@ -1,7 +1,12 @@
 import InputError from '@/Components/InputError';
+import GeometryTemplatePreview, { GeometryTemplate } from '@/Components/GeometryTemplatePreview';
+import GeometryCalculationInfo from '@/Components/GeometryCalculationInfo';
+import Modal from '@/Components/Modal';
+import PositionedImage from '@/Components/PositionedImage';
+import StimulusVisual, { StimulusVisualData } from '@/Components/StimulusVisual';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, Link, useForm } from '@inertiajs/react';
-import { FormEvent, useMemo } from 'react';
+import { FormEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 type Competency = {
     id: number;
@@ -17,6 +22,40 @@ type MatchingPair = { left_id?: string; left: string; right_id?: string; right: 
 type MatchingDistractor = { id?: string; content: string };
 type MatrixColumn = { id?: string; label: string };
 type MatrixRow = { id?: string; statement: string; correct_column_index: number };
+type StimulusVisualType = 'none' | 'table' | 'bar_chart' | 'pictogram' | 'pie_chart';
+type StimulusChartItem = { label: string; value: string };
+type StimulusGroupedChartCategory = { label: string; values: string[] };
+type FractionModel = { numerator: string; denominator: string; shaded_parts?: number[] };
+type StimulusSvgTemplateOption = {
+    value: GeometryTemplate;
+    category: string;
+    category_label: string;
+    family: string;
+    family_label: string;
+    subfamily?: string;
+    subfamily_label?: string;
+    label: string;
+    dimension_a_label: string;
+    dimension_b_label?: string;
+    dimension_c_label?: string;
+    uses_unit?: boolean;
+    allow_signed_dimensions?: boolean;
+    integer_dimensions?: boolean;
+    custom_fraction_models?: boolean;
+};
+
+const svgTemplateDefaults: Partial<Record<GeometryTemplate, [string, string?, string?]>> = {
+    parallel_lines: ['5'], perpendicular_lines: ['8'], intersecting_lines: ['60'],
+    angle_acute: ['45'], angle_right: ['90'], angle_obtuse: ['120'], angle_straight: ['180'], angle_reflex: ['270'],
+    circle_sector: ['7', '60'], annulus: ['10', '6'],
+    composite_square_semicircle: ['14'], composite_square_quarter_circle: ['14', '7'], composite_square_four_quarters: ['14'], shaded_square_diagonal: ['14'], shaded_square_circle: ['14', '7'],
+    composite_rectangle_semicircle: ['14', '8'], composite_stadium: ['14', '7'], composite_rectangle_two_quarters: ['16', '8'], composite_l_shape: ['16', '12', '4'], shaded_rectangle_circle: ['16', '12', '5'],
+    composite_triangle_semicircle: ['14', '10'], composite_triangle_rectangle: ['14', '8', '10'], shaded_triangle_midsegment: ['14', '10'],
+    shaded_circle_square: ['7'], shaded_circle_sector: ['7', '90'], shaded_annulus: ['10', '6'],
+    fraction_circle: ['1', '2'], fraction_bar: ['3', '4'], fraction_equivalent_circles: ['1', '2', '2'], fraction_equivalent_bars: ['1', '2', '4'],
+    cartesian_point: ['2', '3'], cartesian_line: ['1', '0'], translation: ['3', '2'], reflection: ['0'], rotation: ['90'], dilation: ['2'],
+    ruler: ['10'], clock: ['10', '10'], protractor: ['45'], number_line: ['-5', '5'], scale_bar: ['100', '5'],
+};
 type QuestionBlueprint = { id: number; subject_id: number; code: string; name: string; competency_ids: number[] };
 type Assessment = {
     id: number;
@@ -35,11 +74,47 @@ type QuestionForm = {
     type: 'single_choice' | 'multiple_choice' | 'short_answer' | 'matching' | 'category_matrix';
     title: string;
     stimulus: string;
+    stimulus_visual_type: StimulusVisualType;
+    stimulus_visual_title: string;
+    stimulus_table_headers: string[];
+    stimulus_table_rows: string[][];
+    stimulus_chart_items: StimulusChartItem[];
+    stimulus_chart_mode: 'single' | 'grouped';
+    stimulus_chart_series_labels: string[];
+    stimulus_chart_grouped_categories: StimulusGroupedChartCategory[];
+    stimulus_chart_x_axis_label: string;
+    stimulus_chart_y_axis_label: string;
+    stimulus_chart_maximum: string;
+    stimulus_pictogram_symbol: string;
+    stimulus_pictogram_legend_value: string;
+    stimulus_pictogram_unit: string;
+    stimulus_pictogram_items: StimulusChartItem[];
+    stimulus_pie_unit: string;
+    stimulus_pie_show_percentages: boolean;
+    stimulus_pie_items: StimulusChartItem[];
     stimulus_image: File | null;
+    stimulus_image_source: 'upload' | 'template';
+    stimulus_svg_template: GeometryTemplate;
+    stimulus_svg_dimension_a: string;
+    stimulus_svg_dimension_b: string;
+    stimulus_svg_dimension_c: string;
+    stimulus_svg_unit: string;
+    stimulus_svg_zoom: number;
+    stimulus_svg_offset_x: number;
+    stimulus_svg_offset_y: number;
+    stimulus_fraction_models: FractionModel[];
+    stimulus_image_width: number;
+    stimulus_image_height: number;
+    stimulus_upload_zoom: number;
+    stimulus_upload_offset_x: number;
+    stimulus_upload_offset_y: number;
     stimulus_image_alt: string;
     remove_stimulus_image: boolean;
     prompt: string;
     explanation: string;
+    explanation_image: File | null;
+    explanation_image_alt: string;
+    remove_explanation_image: boolean;
     difficulty: number;
     grade_level: number;
     cognitive_level: string;
@@ -50,6 +125,90 @@ type QuestionForm = {
     matrix_columns: MatrixColumn[];
     matrix_rows: MatrixRow[];
     target_assessment_id: number | '';
+};
+
+type QuestionTypeOption = {
+    value: QuestionForm['type'];
+    label: string;
+    active: boolean;
+};
+
+const defaultQuestionTypes: QuestionTypeOption[] = [
+    { value: 'single_choice', label: 'Pilihan tunggal', active: true },
+    { value: 'multiple_choice', label: 'Pilihan kompleks (MCMA)', active: true },
+    { value: 'short_answer', label: 'Isian singkat', active: true },
+    { value: 'matching', label: 'Menjodohkan', active: true },
+    { value: 'category_matrix', label: 'Pilihan kategori (tabel)', active: true },
+];
+
+const stimulusVisualFromForm = (data: QuestionForm): StimulusVisualData | null => {
+    if (data.stimulus_visual_type === 'table') {
+        return {
+            type: 'table',
+            title: data.stimulus_visual_title.trim(),
+            headers: data.stimulus_table_headers,
+            rows: data.stimulus_table_rows,
+        };
+    }
+
+    if (data.stimulus_visual_type === 'bar_chart') {
+        const maximum = Number(data.stimulus_chart_maximum);
+        const common = {
+            type: 'bar_chart',
+            title: data.stimulus_visual_title.trim(),
+            x_axis_label: data.stimulus_chart_x_axis_label.trim(),
+            y_axis_label: data.stimulus_chart_y_axis_label.trim(),
+            maximum: data.stimulus_chart_maximum.trim() !== '' && Number.isFinite(maximum) ? maximum : undefined,
+        } as const;
+
+        if (data.stimulus_chart_mode === 'grouped') {
+            return {
+                ...common,
+                categories: data.stimulus_chart_grouped_categories.map((category) => category.label),
+                series: data.stimulus_chart_series_labels.map((label, seriesIndex) => ({
+                    label,
+                    values: data.stimulus_chart_grouped_categories.map((category) => Number(category.values[seriesIndex])),
+                })),
+            };
+        }
+
+        return {
+            ...common,
+            items: data.stimulus_chart_items.map((item) => ({
+                label: item.label,
+                value: Number(item.value),
+            })),
+        };
+    }
+
+    if (data.stimulus_visual_type === 'pictogram') {
+        return {
+            type: 'pictogram',
+            title: data.stimulus_visual_title.trim(),
+            symbol: data.stimulus_pictogram_symbol.trim() || '●',
+            legend_value: Number(data.stimulus_pictogram_legend_value) || 1,
+            unit: data.stimulus_pictogram_unit.trim(),
+            items: data.stimulus_pictogram_items.map((item) => ({
+                label: item.label,
+                value: Number(item.value),
+            })),
+        };
+    }
+
+    if (data.stimulus_visual_type === 'pie_chart') {
+        return {
+            type: 'pie_chart',
+            title: data.stimulus_visual_title.trim(),
+            unit: data.stimulus_pie_unit.trim(),
+            show_percentages: data.stimulus_pie_show_percentages,
+            items: data.stimulus_pie_items.map((item) => ({
+                label: item.label,
+                value: Number(item.value),
+            })),
+        };
+    }
+
+    return null;
 };
 
 type ExistingQuestion = {
@@ -67,10 +226,13 @@ type ExistingQuestion = {
     grade_level: number;
     cognitive_level?: string;
     illustration_url?: string;
+    explanation_image_url?: string;
     options: { content: string; is_correct: boolean }[];
     metadata?: {
         accepted_answers?: string[];
-        illustration?: { alt?: string };
+        illustration?: { alt?: string; path?: string; source?: string; display_width?: number; display_height?: number; display_zoom?: number; display_offset_x?: number; display_offset_y?: number; template?: GeometryTemplate; dimension_a?: number; dimension_b?: number; dimension_c?: number; unit?: string; zoom?: number; offset_x?: number; offset_y?: number; fraction_models?: { numerator: number; denominator: number; shaded_parts?: number[] }[] };
+        explanation_illustration?: { alt?: string };
+        stimulus_visual?: StimulusVisualData;
         matching_pairs?: MatchingPair[];
         matching_distractors?: MatchingDistractor[];
         matrix_columns?: MatrixColumn[];
@@ -78,7 +240,9 @@ type ExistingQuestion = {
     };
 };
 
-export default function Create({ subjects, competencies, questionBlueprints, assessments, question, selectedSubjectId, returnGeneration }: { subjects: { id: number; code: string; name: string }[]; competencies: Competency[]; questionBlueprints: QuestionBlueprint[]; assessments: Assessment[]; question?: ExistingQuestion; selectedSubjectId?: number | null; returnGeneration?: { id: number; format: 'direct' | 'story' } | null }) {
+export default function Create({ subjects, competencies, questionBlueprints, assessments, questionTypes = defaultQuestionTypes, question, selectedSubjectId, returnGeneration, stimulusSvgTemplates = [] }: { subjects: { id: number; code: string; name: string }[]; competencies: Competency[]; questionBlueprints: QuestionBlueprint[]; assessments: Assessment[]; questionTypes?: QuestionTypeOption[]; question?: ExistingQuestion; selectedSubjectId?: number | null; returnGeneration?: { id: number; format: 'direct' | 'story' } | null; stimulusSvgTemplates?: StimulusSvgTemplateOption[] }) {
+    const [previewOpen, setPreviewOpen] = useState(false);
+    const [activeStimulusTab, setActiveStimulusTab] = useState<'text' | 'visual' | 'image' | null>(null);
     const defaultOptions = [
             { content: '', is_correct: true },
             { content: '', is_correct: false },
@@ -99,20 +263,70 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
     ];
     const questionCompetency = question ? competencies.find((competency) => competency.id === question.competency_id) : undefined;
     const initialRootCompetencyId = questionCompetency?.parent_id || questionCompetency?.id;
+    const existingStimulusVisual = question?.metadata?.stimulus_visual;
     const { data, setData, post, transform, processing, errors } = useForm<QuestionForm>({
         return_generation_id: returnGeneration?.id || null,
         subject_id: questionCompetency ? String(questionCompetency.subject_id) : selectedSubjectId ? String(selectedSubjectId) : '',
         root_competency_id: initialRootCompetencyId ? String(initialRootCompetencyId) : '',
         competency_id: question ? String(question.competency_id) : '',
         question_blueprint_id: question?.question_blueprint_id ? String(question.question_blueprint_id) : '',
-        type: question?.type || 'single_choice',
+        type: question?.type || questionTypes[0]?.value || 'single_choice',
         title: question?.title || '',
         stimulus: question?.stimulus || '',
+        stimulus_visual_type: existingStimulusVisual?.type || 'none',
+        stimulus_visual_title: existingStimulusVisual?.title || '',
+        stimulus_table_headers: existingStimulusVisual?.type === 'table' ? existingStimulusVisual.headers : ['Kategori', 'Nilai'],
+        stimulus_table_rows: existingStimulusVisual?.type === 'table' ? existingStimulusVisual.rows : [['', ''], ['', ''], ['', '']],
+        stimulus_chart_items: existingStimulusVisual?.type === 'bar_chart'
+            ? (existingStimulusVisual.items || []).map((item) => ({ label: item.label, value: String(item.value) }))
+            : [{ label: '', value: '' }, { label: '', value: '' }, { label: '', value: '' }],
+        stimulus_chart_mode: existingStimulusVisual?.type === 'bar_chart' && (existingStimulusVisual.series?.length || 0) >= 2 ? 'grouped' : 'single',
+        stimulus_chart_series_labels: existingStimulusVisual?.type === 'bar_chart' && existingStimulusVisual.series?.length
+            ? existingStimulusVisual.series.map((series) => series.label)
+            : ['Seri 1', 'Seri 2'],
+        stimulus_chart_grouped_categories: existingStimulusVisual?.type === 'bar_chart' && existingStimulusVisual.categories?.length && existingStimulusVisual.series?.length
+            ? existingStimulusVisual.categories.map((label, categoryIndex) => ({
+                label,
+                values: existingStimulusVisual.series!.map((series) => String(series.values[categoryIndex] ?? '')),
+            }))
+            : [{ label: '', values: ['', ''] }, { label: '', values: ['', ''] }, { label: '', values: ['', ''] }],
+        stimulus_chart_x_axis_label: existingStimulusVisual?.type === 'bar_chart' ? existingStimulusVisual.x_axis_label || '' : '',
+        stimulus_chart_y_axis_label: existingStimulusVisual?.type === 'bar_chart' ? existingStimulusVisual.y_axis_label || '' : '',
+        stimulus_chart_maximum: existingStimulusVisual?.type === 'bar_chart' && existingStimulusVisual.maximum != null ? String(existingStimulusVisual.maximum) : '',
+        stimulus_pictogram_symbol: existingStimulusVisual?.type === 'pictogram' ? existingStimulusVisual.symbol : '📘',
+        stimulus_pictogram_legend_value: existingStimulusVisual?.type === 'pictogram' ? String(existingStimulusVisual.legend_value) : '5',
+        stimulus_pictogram_unit: existingStimulusVisual?.type === 'pictogram' ? existingStimulusVisual.unit || '' : 'buku',
+        stimulus_pictogram_items: existingStimulusVisual?.type === 'pictogram'
+            ? existingStimulusVisual.items.map((item) => ({ label: item.label, value: String(item.value) }))
+            : [{ label: '', value: '' }, { label: '', value: '' }, { label: '', value: '' }],
+        stimulus_pie_unit: existingStimulusVisual?.type === 'pie_chart' ? existingStimulusVisual.unit || '' : '',
+        stimulus_pie_show_percentages: existingStimulusVisual?.type === 'pie_chart' ? Boolean(existingStimulusVisual.show_percentages) : false,
+        stimulus_pie_items: existingStimulusVisual?.type === 'pie_chart'
+            ? existingStimulusVisual.items.map((item) => ({ label: item.label, value: String(item.value) }))
+            : [{ label: '', value: '' }, { label: '', value: '' }, { label: '', value: '' }],
         stimulus_image: null,
+        stimulus_image_source: question?.metadata?.illustration?.source === 'template-svg' ? 'template' : 'upload',
+        stimulus_svg_template: question?.metadata?.illustration?.template || 'square',
+        stimulus_svg_dimension_a: question?.metadata?.illustration?.dimension_a != null ? String(question.metadata.illustration.dimension_a) : '',
+        stimulus_svg_dimension_b: question?.metadata?.illustration?.dimension_b != null ? String(question.metadata.illustration.dimension_b) : '',
+        stimulus_svg_dimension_c: question?.metadata?.illustration?.dimension_c != null ? String(question.metadata.illustration.dimension_c) : '',
+        stimulus_svg_unit: question?.metadata?.illustration?.unit || 'cm',
+        stimulus_svg_zoom: question?.metadata?.illustration?.zoom || 1,
+        stimulus_svg_offset_x: question?.metadata?.illustration?.offset_x || 0,
+        stimulus_svg_offset_y: question?.metadata?.illustration?.offset_y || 0,
+        stimulus_fraction_models: question?.metadata?.illustration?.fraction_models?.map((model) => ({ numerator: String(model.numerator), denominator: String(model.denominator), shaded_parts: model.shaded_parts || Array.from({ length: model.numerator }, (_, index) => index) })) || [{ numerator: '1', denominator: '2', shaded_parts: [0] }, { numerator: '2', denominator: '4', shaded_parts: [0, 1] }],
+        stimulus_image_width: question?.metadata?.illustration?.display_width || 800,
+        stimulus_image_height: question?.metadata?.illustration?.display_height || 450,
+        stimulus_upload_zoom: question?.metadata?.illustration?.display_zoom || 1,
+        stimulus_upload_offset_x: question?.metadata?.illustration?.display_offset_x || 0,
+        stimulus_upload_offset_y: question?.metadata?.illustration?.display_offset_y || 0,
         stimulus_image_alt: question?.metadata?.illustration?.alt || '',
         remove_stimulus_image: false,
         prompt: question?.prompt || '',
         explanation: question?.explanation || '',
+        explanation_image: null,
+        explanation_image_alt: question?.metadata?.explanation_illustration?.alt || '',
+        remove_explanation_image: false,
         difficulty: question?.difficulty || 1,
         grade_level: question?.grade_level || 6,
         cognitive_level: question?.cognitive_level || '',
@@ -128,6 +342,111 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
         matrix_rows: initialMatrixRows,
         target_assessment_id: '',
     });
+    const [selectedIllustrationUrl, setSelectedIllustrationUrl] = useState<string>();
+    const [selectedExplanationImageUrl, setSelectedExplanationImageUrl] = useState<string>();
+    const [draggingSvgPreview, setDraggingSvgPreview] = useState(false);
+    const svgDragStart = useRef({ clientX: 0, clientY: 0, offsetX: 0, offsetY: 0 });
+    const selectedSvgTemplate = stimulusSvgTemplates.find((template) => template.value === data.stimulus_svg_template);
+    const editableUploadIllustrationUrl = data.stimulus_image_source === 'upload'
+        ? selectedIllustrationUrl || (!data.remove_stimulus_image ? question?.illustration_url : undefined)
+        : undefined;
+    const selectedSvgCategory = selectedSvgTemplate?.category || '2d';
+    const svgFamilies = Array.from(new Map(stimulusSvgTemplates
+        .filter((template) => template.category === selectedSvgCategory)
+        .map((template) => [template.family, template.family_label])).entries());
+    const selectedSvgFamily = selectedSvgTemplate?.family || svgFamilies[0]?.[0];
+    const svgSubfamilies = Array.from(new Map(stimulusSvgTemplates
+        .filter((template) => template.category === selectedSvgCategory && template.family === selectedSvgFamily && template.subfamily)
+        .map((template) => [template.subfamily!, template.subfamily_label!])).entries());
+    const hasSvgSubfamilies = svgSubfamilies.length > 0;
+    const selectedSvgSubfamily = selectedSvgTemplate?.subfamily || svgSubfamilies[0]?.[0];
+    const svgVariations = stimulusSvgTemplates.filter((template) => template.category === selectedSvgCategory
+        && template.family === selectedSvgFamily
+        && (!hasSvgSubfamilies || template.subfamily === selectedSvgSubfamily));
+    const usesCustomFractionModels = selectedSvgTemplate?.custom_fraction_models === true;
+    const selectSvgTemplate = (template?: StimulusSvgTemplateOption) => {
+        if (!template) return;
+        const defaults = svgTemplateDefaults[template.value] || ['', '', ''];
+        setData((current) => ({
+            ...current,
+            stimulus_svg_template: template.value,
+            stimulus_svg_dimension_a: current.stimulus_svg_template === template.value ? current.stimulus_svg_dimension_a : defaults[0],
+            stimulus_svg_dimension_b: template.dimension_b_label ? (current.stimulus_svg_template === template.value ? current.stimulus_svg_dimension_b : defaults[1] || '') : '',
+            stimulus_svg_dimension_c: template.dimension_c_label ? (current.stimulus_svg_template === template.value ? current.stimulus_svg_dimension_c : defaults[2] || '') : '',
+            stimulus_svg_zoom: current.stimulus_svg_template === template.value ? current.stimulus_svg_zoom : 1,
+            stimulus_svg_offset_x: current.stimulus_svg_template === template.value ? current.stimulus_svg_offset_x : 0,
+            stimulus_svg_offset_y: current.stimulus_svg_template === template.value ? current.stimulus_svg_offset_y : 0,
+            stimulus_fraction_models: current.stimulus_svg_template === template.value
+                ? current.stimulus_fraction_models
+                : template.custom_fraction_models ? [{ numerator: '1', denominator: '2', shaded_parts: [0] }, { numerator: '2', denominator: '4', shaded_parts: [0, 1] }] : current.stimulus_fraction_models,
+        }));
+    };
+    const updateFractionModels = (models: FractionModel[]) => setData((current) => ({
+        ...current,
+        stimulus_fraction_models: models,
+        stimulus_svg_dimension_a: models[0]?.numerator || '1',
+        stimulus_svg_dimension_b: models[0]?.denominator || '2',
+        stimulus_svg_dimension_c: String(models.length),
+    }));
+    const toggleFractionPart = (modelIndex: number, partIndex: number) => updateFractionModels(data.stimulus_fraction_models.map((model, index) => {
+        if (index !== modelIndex) return model;
+        const selected = new Set(model.shaded_parts || Array.from({ length: Number(model.numerator) || 0 }, (_, selectedIndex) => selectedIndex));
+        selected.has(partIndex) ? selected.delete(partIndex) : selected.add(partIndex);
+        const shadedParts = Array.from(selected).sort((left, right) => left - right);
+        return { ...model, numerator: String(shadedParts.length), shaded_parts: shadedParts };
+    }));
+    const startSvgDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+        if (event.button !== 0) return;
+        if ((event.target as Element).closest('[data-fraction-part="true"]')) return;
+        event.currentTarget.setPointerCapture(event.pointerId);
+        svgDragStart.current = {
+            clientX: event.clientX,
+            clientY: event.clientY,
+            offsetX: data.stimulus_svg_offset_x,
+            offsetY: data.stimulus_svg_offset_y,
+        };
+        setDraggingSvgPreview(true);
+    };
+    const moveSvgDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+        if (!draggingSvgPreview) return;
+        const bounds = event.currentTarget.getBoundingClientRect();
+        const deltaX = ((event.clientX - svgDragStart.current.clientX) * 1000) / bounds.width;
+        const deltaY = ((event.clientY - svgDragStart.current.clientY) * 600) / bounds.height;
+        setData((current) => ({
+            ...current,
+            stimulus_svg_offset_x: Math.max(-500, Math.min(500, Math.round(svgDragStart.current.offsetX + deltaX))),
+            stimulus_svg_offset_y: Math.max(-300, Math.min(300, Math.round(svgDragStart.current.offsetY + deltaY))),
+        }));
+    };
+    const stopSvgDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+        setDraggingSvgPreview(false);
+    };
+
+    useEffect(() => {
+        if (!data.stimulus_image) {
+            setSelectedIllustrationUrl(undefined);
+            return;
+        }
+
+        const objectUrl = URL.createObjectURL(data.stimulus_image);
+        setSelectedIllustrationUrl(objectUrl);
+
+        return () => URL.revokeObjectURL(objectUrl);
+    }, [data.stimulus_image]);
+
+    useEffect(() => {
+        if (!data.explanation_image) {
+            setSelectedExplanationImageUrl(undefined);
+            return;
+        }
+
+        const objectUrl = URL.createObjectURL(data.explanation_image);
+        setSelectedExplanationImageUrl(objectUrl);
+
+        return () => URL.revokeObjectURL(objectUrl);
+    }, [data.explanation_image]);
+
     const availableCompetencies = competencies.filter(
         (competency) => competency.subject_id === Number(data.subject_id) && !competency.parent_id,
     );
@@ -328,23 +647,19 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
                                 onChange={(event) => setData('type', event.target.value as QuestionForm['type'])}
                                 className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500"
                             >
-                                <option value="single_choice">Pilihan tunggal</option>
-                                <option value="multiple_choice">Pilihan kompleks</option>
-                                <option value="short_answer">Isian singkat</option>
-                                <option value="matching">Menjodohkan</option>
-                                <option value="category_matrix">Pilihan kategori (tabel)</option>
+                                {questionTypes.map((type) => <option key={type.value} value={type.value}>{type.label}{type.active ? '' : ' · nonaktif (soal lama)'}</option>)}
                             </select>
                         </label>
                         <label className="text-sm font-medium text-slate-700">
-                            Tingkat kesulitan
+                            Level soal
                             <select
                                 value={data.difficulty}
                                 onChange={(event) => setData('difficulty', Number(event.target.value))}
                                 className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500"
                             >
-                                <option value={1}>Mudah</option>
-                                <option value={2}>Sedang</option>
-                                <option value={3}>Sulit</option>
+                                <option value={1}>Level 1 · Mudah</option>
+                                <option value={2}>Level 2 · Sedang</option>
+                                <option value={3}>Level 3 · Sulit</option>
                             </select>
                         </label>
                         <label className="text-sm font-medium text-slate-700">
@@ -363,53 +678,454 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
                     <h2 className="font-semibold text-slate-900">Isi soal</h2>
                     <div className="mt-4 space-y-4">
                         <label className="block text-sm font-medium text-slate-700">
-                            Judul internal
-                            <input value={data.title} onChange={(event) => setData('title', event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500" />
+                            Judul internal <span className="font-normal text-slate-500">(opsional)</span>
+                            <input value={data.title} onChange={(event) => setData('title', event.target.value)} placeholder="Contoh: Diagram kandungan makanan" className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500" />
+                            <span className="mt-1 block text-xs font-normal text-slate-500">Hanya untuk membantu guru mengenali soal di bank soal. Tidak ditampilkan kepada siswa.</span>
                         </label>
-                        <label className="block text-sm font-medium text-slate-700">
-                            Stimulus atau cerita <span className="font-normal text-slate-500">(opsional)</span>
-                            <textarea value={data.stimulus} onChange={(event) => setData('stimulus', event.target.value)} rows={5} className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500" />
-                            <span className="mt-1 block text-xs font-normal text-slate-500">Kosongkan jika soal dapat dijawab tanpa teks, gambar, tabel, atau cerita pendamping.</span>
-                        </label>
-                        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4">
-                            <label className="block text-sm font-medium text-slate-700">
-                                Gambar stimulus <span className="font-normal text-slate-500">(opsional)</span>
-                                <input
-                                    type="file"
-                                    accept="image/jpeg,image/png,image/webp"
-                                    onChange={(event) => {
-                                        setData('stimulus_image', event.target.files?.[0] || null);
-                                        setData('remove_stimulus_image', false);
-                                    }}
-                                    className="mt-2 block w-full text-sm text-slate-600 file:mr-4 file:rounded-lg file:border-0 file:bg-emerald-100 file:px-4 file:py-2 file:font-semibold file:text-emerald-700 hover:file:bg-emerald-200"
-                                />
-                            </label>
-                            <p className="mt-2 text-xs text-slate-500">Format JPG, PNG, atau WebP. File awal maksimal 10 MB dan otomatis dikompresi menjadi maksimal 200 KB.</p>
-                            {data.stimulus_image && <p className="mt-2 text-sm font-medium text-emerald-700">Dipilih: {data.stimulus_image.name}</p>}
-                            {!data.stimulus_image && question?.illustration_url && !data.remove_stimulus_image && (
-                                <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center">
-                                    <img src={question.illustration_url} alt={question.metadata?.illustration?.alt || 'Gambar stimulus saat ini'} className="h-28 w-48 rounded-lg border border-slate-200 object-cover" />
-                                    <button type="button" onClick={() => setData('remove_stimulus_image', true)} className="text-left text-sm font-semibold text-rose-700">Hapus gambar saat disimpan</button>
+                        <div className="space-y-3">
+                            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Stimulus opsional</p>
+                            <div role="tablist" aria-label="Jenis stimulus" className="grid grid-cols-3 overflow-hidden rounded-xl border border-slate-200 bg-slate-50 p-1">
+                                {([
+                                    { id: 'text' as const, icon: '¶', label: 'Tulisan', filled: Boolean(data.stimulus.trim()) },
+                                    { id: 'visual' as const, icon: '▥', label: 'Tabel/diagram', filled: data.stimulus_visual_type !== 'none' },
+                                    { id: 'image' as const, icon: '▧', label: 'Gambar', filled: Boolean((data.stimulus_image_source === 'template' && data.stimulus_svg_dimension_a) || selectedIllustrationUrl || (question?.illustration_url && !data.remove_stimulus_image)) },
+                                ]).map((tab) => (
+                                    <button key={tab.id} type="button" role="tab" aria-selected={activeStimulusTab === tab.id} onClick={() => setActiveStimulusTab((current) => current === tab.id ? null : tab.id)} className={`relative flex min-h-12 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-semibold transition sm:text-sm ${activeStimulusTab === tab.id ? 'bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200' : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'}`}>
+                                        <span aria-hidden="true">{tab.icon}</span><span className="truncate">{tab.label}</span>{tab.filled && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-emerald-500" title="Terisi" />}
+                                    </button>
+                                ))}
+                            </div>
+                            {activeStimulusTab === 'text' && (
+                                <div role="tabpanel" className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                                    <label className="block p-4 text-sm font-medium text-slate-700">
+                                        Teks stimulus
+                                        <textarea value={data.stimulus} onChange={(event) => setData('stimulus', event.target.value)} rows={5} className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500" />
+                                        <span className="mt-1 block text-xs font-normal text-slate-500">Gunakan untuk bacaan, cerita, atau informasi tertulis pendamping soal.</span>
+                                    </label>
                                 </div>
                             )}
-                            {data.remove_stimulus_image && <button type="button" onClick={() => setData('remove_stimulus_image', false)} className="mt-3 text-sm font-semibold text-indigo-700">Batalkan penghapusan gambar</button>}
-                            <InputError message={errors.stimulus_image} className="mt-2" />
                         </div>
-                        {(data.stimulus_image || (question?.illustration_url && !data.remove_stimulus_image)) && (
-                            <label className="block text-sm font-medium text-slate-700">
-                                Teks alternatif gambar <span className="font-normal text-slate-500">(untuk aksesibilitas)</span>
-                                <input value={data.stimulus_image_alt} onChange={(event) => setData('stimulus_image_alt', event.target.value)} placeholder="Contoh: Diagram jumlah buku yang dibaca siswa" className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500" />
-                                <InputError message={errors.stimulus_image_alt} className="mt-1" />
-                            </label>
-                        )}
+                        {activeStimulusTab === 'visual' && <div role="tabpanel" className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-4">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                                <label className="block flex-1 text-sm font-medium text-slate-700">
+                                    Bentuk stimulus terstruktur <span className="font-normal text-slate-500">(opsional)</span>
+                                    <select value={data.stimulus_visual_type} onChange={(event) => setData('stimulus_visual_type', event.target.value as StimulusVisualType)} className="mt-1 block w-full rounded-lg border-slate-300 bg-white focus:border-indigo-500 focus:ring-indigo-500">
+                                        <option value="none">Tanpa tabel atau diagram</option>
+                                        <option value="table">Tabel data</option>
+                                        <option value="bar_chart">Diagram batang</option>
+                                        <option value="pictogram">Piktogram</option>
+                                        <option value="pie_chart">Diagram lingkaran</option>
+                                    </select>
+                                </label>
+                                {data.stimulus_visual_type !== 'none' && (
+                                    <label className="block flex-1 text-sm font-medium text-slate-700">
+                                        Judul tabel/diagram <span className="font-normal text-slate-500">(opsional)</span>
+                                        <input value={data.stimulus_visual_title} onChange={(event) => setData('stimulus_visual_title', event.target.value)} placeholder="Contoh: Penjualan Buku Harian" className="mt-1 block w-full rounded-lg border-slate-300 bg-white focus:border-indigo-500 focus:ring-indigo-500" />
+                                    </label>
+                                )}
+                            </div>
+
+                            {data.stimulus_visual_type === 'table' && (
+                                <div className="mt-4 space-y-4">
+                                    <div>
+                                        <div className="flex items-center justify-between gap-3">
+                                            <p className="text-sm font-semibold text-slate-800">Judul kolom</p>
+                                            <button
+                                                type="button"
+                                                disabled={data.stimulus_table_headers.length >= 6}
+                                                onClick={() => setData((current) => ({
+                                                    ...current,
+                                                    stimulus_table_headers: [...current.stimulus_table_headers, `Kolom ${current.stimulus_table_headers.length + 1}`],
+                                                    stimulus_table_rows: current.stimulus_table_rows.map((row) => [...row, '']),
+                                                }))}
+                                                className="text-xs font-bold text-indigo-700 disabled:opacity-40"
+                                            >+ Tambah kolom</button>
+                                        </div>
+                                        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                                            {data.stimulus_table_headers.map((header, columnIndex) => (
+                                                <div key={columnIndex} className="flex gap-2">
+                                                    <input
+                                                        value={header}
+                                                        aria-label={`Judul kolom ${columnIndex + 1}`}
+                                                        onChange={(event) => {
+                                                            const headers = [...data.stimulus_table_headers];
+                                                            headers[columnIndex] = event.target.value;
+                                                            setData('stimulus_table_headers', headers);
+                                                        }}
+                                                        className="min-w-0 flex-1 rounded-lg border-slate-300 bg-white text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        aria-label={`Hapus kolom ${columnIndex + 1}`}
+                                                        disabled={data.stimulus_table_headers.length <= 2}
+                                                        onClick={() => setData((current) => ({
+                                                            ...current,
+                                                            stimulus_table_headers: current.stimulus_table_headers.filter((_, index) => index !== columnIndex),
+                                                            stimulus_table_rows: current.stimulus_table_rows.map((row) => row.filter((_, index) => index !== columnIndex)),
+                                                        }))}
+                                                        className="rounded-lg px-2 text-rose-600 disabled:opacity-30"
+                                                    >×</button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full min-w-[520px] border-separate border-spacing-2">
+                                            <thead><tr>{data.stimulus_table_headers.map((header, index) => <th key={index} className="text-left text-xs font-semibold text-slate-500">{header || `Kolom ${index + 1}`}</th>)}<th className="w-8" /></tr></thead>
+                                            <tbody>
+                                                {data.stimulus_table_rows.map((row, rowIndex) => (
+                                                    <tr key={rowIndex}>
+                                                        {data.stimulus_table_headers.map((_, columnIndex) => (
+                                                            <td key={columnIndex}>
+                                                                <input
+                                                                    value={row[columnIndex] || ''}
+                                                                    aria-label={`Baris ${rowIndex + 1}, kolom ${columnIndex + 1}`}
+                                                                    onChange={(event) => {
+                                                                        const rows = data.stimulus_table_rows.map((item) => [...item]);
+                                                                        rows[rowIndex][columnIndex] = event.target.value;
+                                                                        setData('stimulus_table_rows', rows);
+                                                                    }}
+                                                                    className="w-full rounded-lg border-slate-300 bg-white text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                                                />
+                                                            </td>
+                                                        ))}
+                                                        <td><button type="button" aria-label={`Hapus baris ${rowIndex + 1}`} disabled={data.stimulus_table_rows.length <= 1} onClick={() => setData('stimulus_table_rows', data.stimulus_table_rows.filter((_, index) => index !== rowIndex))} className="px-2 text-rose-600 disabled:opacity-30">×</button></td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <button type="button" disabled={data.stimulus_table_rows.length >= 15} onClick={() => setData('stimulus_table_rows', [...data.stimulus_table_rows, data.stimulus_table_headers.map(() => '')])} className="text-sm font-semibold text-indigo-700 disabled:opacity-40">+ Tambah baris</button>
+                                    <InputError message={errors.stimulus_table_headers || errors.stimulus_table_rows} />
+                                </div>
+                            )}
+
+                            {data.stimulus_visual_type === 'bar_chart' && (
+                                <div className="mt-4 space-y-4">
+                                    <div className="grid gap-3 sm:grid-cols-4">
+                                        <label className="text-sm font-medium text-slate-700">Jenis diagram batang<select value={data.stimulus_chart_mode} onChange={(event) => setData('stimulus_chart_mode', event.target.value as 'single' | 'grouped')} className="mt-1 block w-full rounded-lg border-slate-300 bg-white text-sm focus:border-indigo-500 focus:ring-indigo-500"><option value="single">Tunggal · satu seri</option><option value="grouped">Berkelompok · beberapa seri</option></select></label>
+                                        <label className="text-sm font-medium text-slate-700">Label sumbu X <span className="font-normal text-slate-500">(opsional)</span><input value={data.stimulus_chart_x_axis_label} onChange={(event) => setData('stimulus_chart_x_axis_label', event.target.value)} placeholder="Contoh: Hari" className="mt-1 block w-full rounded-lg border-slate-300 bg-white text-sm focus:border-indigo-500 focus:ring-indigo-500" /></label>
+                                        <label className="text-sm font-medium text-slate-700">Label sumbu Y <span className="font-normal text-slate-500">(opsional)</span><input value={data.stimulus_chart_y_axis_label} onChange={(event) => setData('stimulus_chart_y_axis_label', event.target.value)} placeholder="Contoh: Jumlah buku" className="mt-1 block w-full rounded-lg border-slate-300 bg-white text-sm focus:border-indigo-500 focus:ring-indigo-500" /></label>
+                                        <label className="text-sm font-medium text-slate-700">Batas maksimum Y <span className="font-normal text-slate-500">(otomatis)</span><input type="number" min="0.01" step="any" value={data.stimulus_chart_maximum} onChange={(event) => setData('stimulus_chart_maximum', event.target.value)} placeholder="Otomatis" className="mt-1 block w-full rounded-lg border-slate-300 bg-white text-sm focus:border-indigo-500 focus:ring-indigo-500" /></label>
+                                    </div>
+                                    {data.stimulus_chart_mode === 'single' ? <div>
+                                        <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">Untuk membuat label legenda seperti <strong>Lemak</strong> dan <strong>Protein</strong>, ubah jenis diagram menjadi <strong>Berkelompok · beberapa seri</strong>.</p>
+                                        <div className="grid grid-cols-[minmax(0,1fr)_minmax(100px,0.45fr)_32px] gap-2 text-xs font-semibold text-slate-500"><span>Label/kategori</span><span>Nilai</span><span /></div>
+                                        <div className="mt-2 space-y-2">
+                                            {data.stimulus_chart_items.map((item, index) => (
+                                                <div key={index} className="grid grid-cols-[minmax(0,1fr)_minmax(100px,0.45fr)_32px] gap-2">
+                                                    <input value={item.label} aria-label={`Label data ${index + 1}`} onChange={(event) => {
+                                                        const items = [...data.stimulus_chart_items];
+                                                        items[index] = { ...items[index], label: event.target.value };
+                                                        setData('stimulus_chart_items', items);
+                                                    }} placeholder={`Kategori ${index + 1}`} className="min-w-0 rounded-lg border-slate-300 bg-white text-sm focus:border-indigo-500 focus:ring-indigo-500" />
+                                                    <input type="number" min="0" step="any" value={item.value} aria-label={`Nilai data ${index + 1}`} onChange={(event) => {
+                                                        const items = [...data.stimulus_chart_items];
+                                                        items[index] = { ...items[index], value: event.target.value };
+                                                        setData('stimulus_chart_items', items);
+                                                    }} className="min-w-0 rounded-lg border-slate-300 bg-white text-sm focus:border-indigo-500 focus:ring-indigo-500" />
+                                                    <button type="button" aria-label={`Hapus data ${index + 1}`} disabled={data.stimulus_chart_items.length <= 2} onClick={() => setData('stimulus_chart_items', data.stimulus_chart_items.filter((_, itemIndex) => itemIndex !== index))} className="text-rose-600 disabled:opacity-30">×</button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <button type="button" disabled={data.stimulus_chart_items.length >= 12} onClick={() => setData('stimulus_chart_items', [...data.stimulus_chart_items, { label: '', value: '' }])} className="mt-3 text-sm font-semibold text-indigo-700 disabled:opacity-40">+ Tambah data</button>
+                                    </div> : <div className="space-y-4">
+                                        <div>
+                                            <div className="flex items-center justify-between gap-3">
+                                                <div>
+                                                    <p className="text-sm font-semibold text-slate-800">Label seri dan legenda</p>
+                                                    <p className="mt-0.5 text-xs text-slate-500">Isi nama pembanding yang akan tampil pada legenda, misalnya Lemak dan Protein.</p>
+                                                </div>
+                                                <button type="button" disabled={data.stimulus_chart_series_labels.length >= 4} onClick={() => setData((current) => ({
+                                                    ...current,
+                                                    stimulus_chart_series_labels: [...current.stimulus_chart_series_labels, `Seri ${current.stimulus_chart_series_labels.length + 1}`],
+                                                    stimulus_chart_grouped_categories: current.stimulus_chart_grouped_categories.map((category) => ({ ...category, values: [...category.values, ''] })),
+                                                }))} className="text-xs font-bold text-indigo-700 disabled:opacity-40">+ Tambah seri</button>
+                                            </div>
+                                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                                                {data.stimulus_chart_series_labels.map((label, seriesIndex) => (
+                                                    <label key={seriesIndex} className="block text-xs font-semibold text-slate-600">
+                                                        Label seri/legenda {seriesIndex + 1}
+                                                        <div className="mt-1 flex gap-2">
+                                                            <span className="mt-2 h-5 w-5 shrink-0 rounded" style={{ backgroundColor: ['#38bdf8', '#f59e0b', '#34d399', '#a78bfa'][seriesIndex] }} />
+                                                            <input value={label} aria-label={`Label seri/legenda ${seriesIndex + 1}`} onChange={(event) => {
+                                                                const labels = [...data.stimulus_chart_series_labels];
+                                                                labels[seriesIndex] = event.target.value;
+                                                                setData('stimulus_chart_series_labels', labels);
+                                                            }} placeholder={seriesIndex === 0 ? 'Contoh: Lemak' : seriesIndex === 1 ? 'Contoh: Protein' : `Seri ${seriesIndex + 1}`} className="min-w-0 flex-1 rounded-lg border-slate-300 bg-white text-sm font-normal focus:border-indigo-500 focus:ring-indigo-500" />
+                                                            <button type="button" aria-label={`Hapus seri ${seriesIndex + 1}`} disabled={data.stimulus_chart_series_labels.length <= 2} onClick={() => setData((current) => ({
+                                                                ...current,
+                                                                stimulus_chart_series_labels: current.stimulus_chart_series_labels.filter((_, index) => index !== seriesIndex),
+                                                                stimulus_chart_grouped_categories: current.stimulus_chart_grouped_categories.map((category) => ({ ...category, values: category.values.filter((_, index) => index !== seriesIndex) })),
+                                                            }))} className="px-2 text-rose-600 disabled:opacity-30">×</button>
+                                                        </div>
+                                                    </label>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full min-w-[620px] border-separate border-spacing-2">
+                                                <thead><tr><th className="text-left text-xs font-semibold text-slate-500">Kategori</th>{data.stimulus_chart_series_labels.map((label, index) => <th key={index} className="text-left text-xs font-semibold text-slate-500">{label || `Seri ${index + 1}`}</th>)}<th className="w-8" /></tr></thead>
+                                                <tbody>{data.stimulus_chart_grouped_categories.map((category, categoryIndex) => (
+                                                    <tr key={categoryIndex}>
+                                                        <td><input value={category.label} aria-label={`Kategori kelompok ${categoryIndex + 1}`} onChange={(event) => {
+                                                            const categories = data.stimulus_chart_grouped_categories.map((item) => ({ ...item, values: [...item.values] }));
+                                                            categories[categoryIndex].label = event.target.value;
+                                                            setData('stimulus_chart_grouped_categories', categories);
+                                                        }} placeholder={`Kategori ${categoryIndex + 1}`} className="w-full rounded-lg border-slate-300 bg-white text-sm focus:border-indigo-500 focus:ring-indigo-500" /></td>
+                                                        {data.stimulus_chart_series_labels.map((_, seriesIndex) => <td key={seriesIndex}><input type="number" min="0" step="any" value={category.values[seriesIndex] || ''} aria-label={`Nilai kategori ${categoryIndex + 1}, seri ${seriesIndex + 1}`} onChange={(event) => {
+                                                            const categories = data.stimulus_chart_grouped_categories.map((item) => ({ ...item, values: [...item.values] }));
+                                                            categories[categoryIndex].values[seriesIndex] = event.target.value;
+                                                            setData('stimulus_chart_grouped_categories', categories);
+                                                        }} className="w-full rounded-lg border-slate-300 bg-white text-sm focus:border-indigo-500 focus:ring-indigo-500" /></td>)}
+                                                        <td><button type="button" aria-label={`Hapus kategori ${categoryIndex + 1}`} disabled={data.stimulus_chart_grouped_categories.length <= 2} onClick={() => setData('stimulus_chart_grouped_categories', data.stimulus_chart_grouped_categories.filter((_, index) => index !== categoryIndex))} className="px-2 text-rose-600 disabled:opacity-30">×</button></td>
+                                                    </tr>
+                                                ))}</tbody>
+                                            </table>
+                                        </div>
+                                        <button type="button" disabled={data.stimulus_chart_grouped_categories.length >= 8} onClick={() => setData('stimulus_chart_grouped_categories', [...data.stimulus_chart_grouped_categories, { label: '', values: data.stimulus_chart_series_labels.map(() => '') }])} className="text-sm font-semibold text-indigo-700 disabled:opacity-40">+ Tambah kategori</button>
+                                    </div>}
+                                    <InputError message={errors.stimulus_chart_items || errors.stimulus_chart_series_labels || errors.stimulus_chart_grouped_categories || errors.stimulus_chart_maximum} />
+                                </div>
+                            )}
+
+                            {data.stimulus_visual_type === 'pictogram' && (
+                                <div className="mt-4 space-y-4">
+                                    <div className="grid gap-3 sm:grid-cols-3">
+                                        <label className="text-sm font-medium text-slate-700">
+                                            Simbol
+                                            <input value={data.stimulus_pictogram_symbol} onChange={(event) => setData('stimulus_pictogram_symbol', event.target.value)} placeholder="Contoh: 📘 atau ●" className="mt-1 block w-full rounded-lg border-slate-300 bg-white text-sm focus:border-indigo-500 focus:ring-indigo-500" />
+                                        </label>
+                                        <label className="text-sm font-medium text-slate-700">
+                                            Nilai tiap simbol
+                                            <input type="number" min="0.01" step="any" value={data.stimulus_pictogram_legend_value} onChange={(event) => setData('stimulus_pictogram_legend_value', event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300 bg-white text-sm focus:border-indigo-500 focus:ring-indigo-500" />
+                                        </label>
+                                        <label className="text-sm font-medium text-slate-700">
+                                            Satuan <span className="font-normal text-slate-500">(opsional)</span>
+                                            <input value={data.stimulus_pictogram_unit} onChange={(event) => setData('stimulus_pictogram_unit', event.target.value)} placeholder="Contoh: buku" className="mt-1 block w-full rounded-lg border-slate-300 bg-white text-sm focus:border-indigo-500 focus:ring-indigo-500" />
+                                        </label>
+                                    </div>
+                                    <div>
+                                        <div className="grid grid-cols-[minmax(0,1fr)_minmax(100px,0.45fr)_32px] gap-2 text-xs font-semibold text-slate-500"><span>Label/kategori</span><span>Jumlah sebenarnya</span><span /></div>
+                                        <div className="mt-2 space-y-2">
+                                            {data.stimulus_pictogram_items.map((item, index) => (
+                                                <div key={index} className="grid grid-cols-[minmax(0,1fr)_minmax(100px,0.45fr)_32px] gap-2">
+                                                    <input value={item.label} aria-label={`Label piktogram ${index + 1}`} onChange={(event) => {
+                                                        const items = [...data.stimulus_pictogram_items];
+                                                        items[index] = { ...items[index], label: event.target.value };
+                                                        setData('stimulus_pictogram_items', items);
+                                                    }} placeholder={`Kategori ${index + 1}`} className="min-w-0 rounded-lg border-slate-300 bg-white text-sm focus:border-indigo-500 focus:ring-indigo-500" />
+                                                    <input type="number" min="0" step="any" value={item.value} aria-label={`Nilai piktogram ${index + 1}`} onChange={(event) => {
+                                                        const items = [...data.stimulus_pictogram_items];
+                                                        items[index] = { ...items[index], value: event.target.value };
+                                                        setData('stimulus_pictogram_items', items);
+                                                    }} className="min-w-0 rounded-lg border-slate-300 bg-white text-sm focus:border-indigo-500 focus:ring-indigo-500" />
+                                                    <button type="button" aria-label={`Hapus data piktogram ${index + 1}`} disabled={data.stimulus_pictogram_items.length <= 2} onClick={() => setData('stimulus_pictogram_items', data.stimulus_pictogram_items.filter((_, itemIndex) => itemIndex !== index))} className="text-rose-600 disabled:opacity-30">×</button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <button type="button" disabled={data.stimulus_pictogram_items.length >= 12} onClick={() => setData('stimulus_pictogram_items', [...data.stimulus_pictogram_items, { label: '', value: '' }])} className="mt-3 text-sm font-semibold text-indigo-700 disabled:opacity-40">+ Tambah data</button>
+                                        <p className="mt-2 text-xs text-slate-500">Nilai yang tidak genap terhadap legenda akan ditampilkan sebagai bagian dari simbol.</p>
+                                    </div>
+                                    <InputError message={errors.stimulus_pictogram_symbol || errors.stimulus_pictogram_legend_value || errors.stimulus_pictogram_items} />
+                                </div>
+                            )}
+
+                            {data.stimulus_visual_type === 'pie_chart' && (
+                                <div className="mt-4 space-y-4">
+                                    <div className="grid gap-3 sm:grid-cols-2">
+                                        <label className="text-sm font-medium text-slate-700">
+                                            Satuan data <span className="font-normal text-slate-500">(opsional)</span>
+                                            <input value={data.stimulus_pie_unit} onChange={(event) => setData('stimulus_pie_unit', event.target.value)} placeholder="Contoh: siswa" className="mt-1 block w-full rounded-lg border-slate-300 bg-white text-sm focus:border-indigo-500 focus:ring-indigo-500" />
+                                        </label>
+                                        <label className="flex items-center gap-3 rounded-lg border border-indigo-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 sm:self-end">
+                                            <input type="checkbox" checked={data.stimulus_pie_show_percentages} onChange={(event) => setData('stimulus_pie_show_percentages', event.target.checked)} className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+                                            Tampilkan persentase pada diagram
+                                        </label>
+                                    </div>
+                                    <div>
+                                        <div className="grid grid-cols-[minmax(0,1fr)_minmax(100px,0.45fr)_32px] gap-2 text-xs font-semibold text-slate-500"><span>Label/kategori</span><span>Nilai</span><span /></div>
+                                        <div className="mt-2 space-y-2">
+                                            {data.stimulus_pie_items.map((item, index) => (
+                                                <div key={index} className="grid grid-cols-[minmax(0,1fr)_minmax(100px,0.45fr)_32px] gap-2">
+                                                    <input value={item.label} aria-label={`Label diagram lingkaran ${index + 1}`} onChange={(event) => {
+                                                        const items = [...data.stimulus_pie_items];
+                                                        items[index] = { ...items[index], label: event.target.value };
+                                                        setData('stimulus_pie_items', items);
+                                                    }} placeholder={`Kategori ${index + 1}`} className="min-w-0 rounded-lg border-slate-300 bg-white text-sm focus:border-indigo-500 focus:ring-indigo-500" />
+                                                    <input type="number" min="0" step="any" value={item.value} aria-label={`Nilai diagram lingkaran ${index + 1}`} onChange={(event) => {
+                                                        const items = [...data.stimulus_pie_items];
+                                                        items[index] = { ...items[index], value: event.target.value };
+                                                        setData('stimulus_pie_items', items);
+                                                    }} className="min-w-0 rounded-lg border-slate-300 bg-white text-sm focus:border-indigo-500 focus:ring-indigo-500" />
+                                                    <button type="button" aria-label={`Hapus data diagram lingkaran ${index + 1}`} disabled={data.stimulus_pie_items.length <= 2} onClick={() => setData('stimulus_pie_items', data.stimulus_pie_items.filter((_, itemIndex) => itemIndex !== index))} className="text-rose-600 disabled:opacity-30">×</button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <button type="button" disabled={data.stimulus_pie_items.length >= 12} onClick={() => setData('stimulus_pie_items', [...data.stimulus_pie_items, { label: '', value: '' }])} className="mt-3 text-sm font-semibold text-indigo-700 disabled:opacity-40">+ Tambah data</button>
+                                        <p className="mt-2 text-xs text-slate-500">Ukuran irisan dihitung otomatis dari perbandingan seluruh nilai. Persentase dapat disembunyikan agar soal lebih menantang.</p>
+                                    </div>
+                                    <InputError message={errors.stimulus_pie_items || errors.stimulus_pie_unit} />
+                                </div>
+                            )}
+
+                            {data.stimulus_visual_type !== 'none' && (
+                                <div className="mt-5 border-t border-indigo-200 pt-4">
+                                    <p className="mb-2 text-xs font-bold uppercase tracking-wide text-indigo-700">Preview stimulus</p>
+                                    <StimulusVisual visual={stimulusVisualFromForm(data)} />
+                                </div>
+                            )}
+                            </div>}
+                        {activeStimulusTab === 'image' && <div role="tabpanel" className="rounded-xl border border-dashed border-slate-300 bg-white p-4">
+                            <div className="grid grid-cols-2 rounded-lg bg-slate-100 p-1" role="tablist" aria-label="Sumber gambar stimulus">
+                                <button type="button" role="tab" aria-selected={data.stimulus_image_source === 'upload'} onClick={() => setData((current) => ({ ...current, stimulus_image_source: 'upload', remove_stimulus_image: current.stimulus_image_source !== 'upload' && !current.stimulus_image }))} className={`rounded-md px-3 py-2 text-sm font-semibold ${data.stimulus_image_source === 'upload' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-600'}`}>Upload gambar</button>
+                                <button type="button" role="tab" aria-selected={data.stimulus_image_source === 'template'} onClick={() => setData((current) => ({ ...current, stimulus_image_source: 'template', remove_stimulus_image: false }))} className={`rounded-md px-2 py-2 text-sm font-semibold ${data.stimulus_image_source === 'template' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600'}`}>Template gambar</button>
+                            </div>
+                            {data.stimulus_image_source === 'upload' ? <div className="mt-4">
+                                <label className="block text-sm font-medium text-slate-700">
+                                    File gambar <span className="font-normal text-slate-500">(opsional)</span>
+                                    <input
+                                        type="file"
+                                        accept="image/jpeg,image/png,image/webp"
+                                        onChange={(event) => {
+                                            setData('stimulus_image', event.target.files?.[0] || null);
+                                            setData('remove_stimulus_image', false);
+                                            setData('stimulus_upload_zoom', 1);
+                                            setData('stimulus_upload_offset_x', 0);
+                                            setData('stimulus_upload_offset_y', 0);
+                                        }}
+                                        className="mt-2 block w-full text-sm text-slate-600 file:mr-4 file:rounded-lg file:border-0 file:bg-emerald-100 file:px-4 file:py-2 file:font-semibold file:text-emerald-700 hover:file:bg-emerald-200"
+                                    />
+                                </label>
+                                <p className="mt-2 text-xs text-slate-500">Format JPG, PNG, atau WebP. File awal maksimal 10 MB dan otomatis dikompresi menjadi maksimal 200 KB.</p>
+                            </div> : <div className="mt-4 space-y-4">
+                                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                    <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Pilih gambar</p>
+                                    <div className={`grid gap-2 sm:grid-cols-2 ${hasSvgSubfamilies ? 'lg:grid-cols-4' : 'lg:grid-cols-3'}`} aria-label="Katalog template gambar berjenjang">
+                                        <label className="text-xs font-semibold text-slate-600">1. Jenis
+                                            <select value={selectedSvgCategory} onChange={(event) => selectSvgTemplate(stimulusSvgTemplates.find((template) => template.category === event.target.value))} className="mt-1 block w-full rounded-lg border-slate-300 bg-white text-sm focus:border-indigo-500 focus:ring-indigo-500">
+                                                {Array.from(new Map(stimulusSvgTemplates.map((template) => [template.category, template.category_label])).entries()).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                                            </select>
+                                        </label>
+                                        <label className="text-xs font-semibold text-slate-600">2. Kelompok bentuk
+                                            <select value={selectedSvgFamily} onChange={(event) => selectSvgTemplate(stimulusSvgTemplates.find((template) => template.category === selectedSvgCategory && template.family === event.target.value))} className="mt-1 block w-full rounded-lg border-slate-300 bg-white text-sm focus:border-indigo-500 focus:ring-indigo-500">
+                                                {svgFamilies.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                                            </select>
+                                        </label>
+                                        {hasSvgSubfamilies && <label className="text-xs font-semibold text-slate-600">3. Bangun dasar
+                                            <select value={selectedSvgSubfamily} onChange={(event) => selectSvgTemplate(stimulusSvgTemplates.find((template) => template.category === selectedSvgCategory && template.family === selectedSvgFamily && template.subfamily === event.target.value))} className="mt-1 block w-full rounded-lg border-slate-300 bg-white text-sm focus:border-indigo-500 focus:ring-indigo-500">
+                                                {svgSubfamilies.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                                            </select>
+                                        </label>}
+                                        <label className="text-xs font-semibold text-slate-600">{hasSvgSubfamilies ? '4. Kombinasi/arsiran' : '3. Variasi'}
+                                            <select value={data.stimulus_svg_template} onChange={(event) => selectSvgTemplate(stimulusSvgTemplates.find((template) => template.value === event.target.value))} className="mt-1 block w-full rounded-lg border-slate-300 bg-white text-sm focus:border-indigo-500 focus:ring-indigo-500">
+                                                {svgVariations.map((template) => <option key={template.value} value={template.value}>{template.label}</option>)}
+                                            </select>
+                                        </label>
+                                    </div>
+                                    <p className="mt-2 truncate text-xs text-indigo-700">{selectedSvgTemplate?.category_label} › {selectedSvgTemplate?.family_label}{selectedSvgTemplate?.subfamily_label && <> › {selectedSvgTemplate.subfamily_label}</>} › <strong>{selectedSvgTemplate?.label}</strong></p>
+                                </div>
+                                {usesCustomFractionModels && <div className="space-y-3 rounded-xl border border-sky-200 bg-sky-50 p-4">
+                                    <label className="block text-sm font-semibold text-slate-700">Jumlah lingkaran
+                                        <select value={data.stimulus_fraction_models.length} onChange={(event) => {
+                                            const count = Number(event.target.value);
+                                            const models = Array.from({ length: count }, (_, index) => data.stimulus_fraction_models[index] || { numerator: String(index + 1), denominator: String((index + 1) * 2), shaded_parts: Array.from({ length: index + 1 }, (_, partIndex) => partIndex) });
+                                            updateFractionModels(models);
+                                        }} className="mt-1 block w-full rounded-lg border-slate-300 bg-white focus:border-indigo-500 focus:ring-indigo-500">
+                                            {[2, 3, 4].map((count) => <option key={count} value={count}>{count} lingkaran</option>)}
+                                        </select>
+                                    </label>
+                                    <div className="grid gap-3 sm:grid-cols-2">
+                                        {data.stimulus_fraction_models.map((model, index) => <div key={index} className="rounded-lg border border-sky-200 bg-white p-3">
+                                            <p className="mb-2 text-xs font-bold uppercase tracking-wide text-sky-700">Lingkaran {index + 1}</p>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <label className="text-xs font-medium text-slate-600">Diarsir<input type="number" min="0" max={Number(model.denominator) || 24} step="1" value={model.numerator} onChange={(event) => updateFractionModels(data.stimulus_fraction_models.map((item, itemIndex) => itemIndex === index ? { ...item, numerator: event.target.value, shaded_parts: Array.from({ length: Math.max(0, Math.min(Number(item.denominator) || 24, Number(event.target.value) || 0)) }, (_, partIndex) => partIndex) } : item))} className="mt-1 block w-full rounded-lg border-slate-300 text-sm" /></label>
+                                                <label className="text-xs font-medium text-slate-600">Total bagian<input type="number" min="1" max="24" step="1" value={model.denominator} onChange={(event) => updateFractionModels(data.stimulus_fraction_models.map((item, itemIndex) => {
+                                                    if (itemIndex !== index) return item;
+                                                    const denominator = Math.max(1, Math.min(24, Number(event.target.value) || 1));
+                                                    const shadedParts = (item.shaded_parts || []).filter((partIndex) => partIndex < denominator);
+                                                    return { ...item, denominator: event.target.value, numerator: String(shadedParts.length), shaded_parts: shadedParts };
+                                                }))} className="mt-1 block w-full rounded-lg border-slate-300 text-sm" /></label>
+                                            </div>
+                                        </div>)}
+                                    </div>
+                                    <p className="text-xs text-slate-500">Klik sektor pada preview untuk memilih atau menghapus arsiran. Nilai pecahan tidak ditampilkan pada gambar siswa.</p>
+                                </div>}
+                                {!usesCustomFractionModels && <div className="grid gap-3 sm:grid-cols-2">
+                                    <label className="text-sm font-medium text-slate-700">{selectedSvgTemplate?.dimension_a_label || 'Ukuran'}<input type="number" min={selectedSvgTemplate?.allow_signed_dimensions ? undefined : selectedSvgTemplate?.integer_dimensions ? 1 : 0.01} step={selectedSvgTemplate?.integer_dimensions ? 1 : 'any'} value={data.stimulus_svg_dimension_a} onChange={(event) => setData('stimulus_svg_dimension_a', event.target.value)} placeholder="Contoh: 8" className="mt-1 block w-full rounded-lg border-slate-300 focus:border-indigo-500 focus:ring-indigo-500" /></label>
+                                    {selectedSvgTemplate?.dimension_b_label && <label className="text-sm font-medium text-slate-700">{selectedSvgTemplate.dimension_b_label}<input type="number" min={selectedSvgTemplate.allow_signed_dimensions ? undefined : selectedSvgTemplate.integer_dimensions ? 1 : 0.01} step={selectedSvgTemplate.integer_dimensions ? 1 : 'any'} value={data.stimulus_svg_dimension_b} onChange={(event) => setData('stimulus_svg_dimension_b', event.target.value)} placeholder="Contoh: 5" className="mt-1 block w-full rounded-lg border-slate-300 focus:border-indigo-500 focus:ring-indigo-500" /></label>}
+                                    {selectedSvgTemplate?.dimension_c_label && <label className="text-sm font-medium text-slate-700">{selectedSvgTemplate.dimension_c_label}<input type="number" min={selectedSvgTemplate.allow_signed_dimensions ? undefined : selectedSvgTemplate.integer_dimensions ? 1 : 0.01} step={selectedSvgTemplate.integer_dimensions ? 1 : 'any'} value={data.stimulus_svg_dimension_c} onChange={(event) => setData('stimulus_svg_dimension_c', event.target.value)} placeholder="Contoh: 4" className="mt-1 block w-full rounded-lg border-slate-300 focus:border-indigo-500 focus:ring-indigo-500" /></label>}
+                                    {selectedSvgTemplate?.uses_unit !== false && <label className="text-sm font-medium text-slate-700">Satuan<input value={data.stimulus_svg_unit} onChange={(event) => setData('stimulus_svg_unit', event.target.value)} placeholder="cm" className="mt-1 block w-full rounded-lg border-slate-300 focus:border-indigo-500 focus:ring-indigo-500" /></label>}
+                                </div>}
+                                <InputError message={errors.stimulus_svg_template || errors.stimulus_svg_dimension_a || errors.stimulus_svg_dimension_b || errors.stimulus_svg_dimension_c} />
+                                <GeometryCalculationInfo
+                                    template={data.stimulus_svg_template}
+                                    dimensionA={data.stimulus_svg_dimension_a}
+                                    dimensionB={data.stimulus_svg_dimension_b}
+                                    dimensionC={data.stimulus_svg_dimension_c}
+                                    unit={data.stimulus_svg_unit}
+                                    answerCandidates={data.type === 'short_answer' ? data.accepted_answers : data.options.filter((option) => option.is_correct).map((option) => option.content)}
+                                />
+                                <figure className="relative overflow-hidden rounded-xl border border-indigo-200 bg-white p-3 pb-14">
+                                    <div
+                                        role="application"
+                                        aria-label="Preview gambar yang dapat digeser"
+                                        onPointerDown={startSvgDrag}
+                                        onPointerMove={moveSvgDrag}
+                                        onPointerUp={stopSvgDrag}
+                                        onPointerCancel={stopSvgDrag}
+                                        className={`touch-none select-none ${draggingSvgPreview ? 'cursor-grabbing' : 'cursor-grab'}`}
+                                    >
+                                        <GeometryTemplatePreview template={data.stimulus_svg_template} dimensionA={data.stimulus_svg_dimension_a} dimensionB={data.stimulus_svg_dimension_b} dimensionC={data.stimulus_svg_dimension_c} unit={data.stimulus_svg_unit} fractionModels={data.stimulus_fraction_models} onToggleFractionPart={usesCustomFractionModels ? toggleFractionPart : undefined} zoom={data.stimulus_svg_zoom} offsetX={data.stimulus_svg_offset_x} offsetY={data.stimulus_svg_offset_y} className={`${usesCustomFractionModels ? '' : 'pointer-events-none'} mx-auto h-auto w-full`} />
+                                    </div>
+                                    <div className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-xl border border-slate-200 bg-white/95 p-1.5 shadow-lg backdrop-blur">
+                                        <button type="button" aria-label="Perkecil gambar" onClick={() => setData('stimulus_svg_zoom', Math.max(0.25, Number((data.stimulus_svg_zoom - 0.1).toFixed(2))))} className="rounded-lg px-3 py-1.5 text-sm font-bold text-slate-700 hover:bg-slate-100">−</button>
+                                        <span className="min-w-12 text-center text-xs font-bold text-slate-600">{Math.round(data.stimulus_svg_zoom * 100)}%</span>
+                                        <button type="button" aria-label="Perbesar gambar" onClick={() => setData('stimulus_svg_zoom', Math.min(3, Number((data.stimulus_svg_zoom + 0.1).toFixed(2))))} className="rounded-lg px-3 py-1.5 text-sm font-bold text-slate-700 hover:bg-slate-100">+</button>
+                                        <button type="button" onClick={() => setData((current) => ({ ...current, stimulus_svg_zoom: 1, stimulus_svg_offset_x: 0, stimulus_svg_offset_y: 0 }))} className="border-l border-slate-200 px-2 py-1.5 text-xs font-semibold text-indigo-700">Reset</button>
+                                    </div>
+                                    <figcaption className="sr-only">Preview {selectedSvgTemplate?.label || 'template gambar'}; tahan dan tarik area kosong untuk menggeser.</figcaption>
+                                </figure>
+                                <p className="mt-2 text-center text-xs text-slate-500">Tarik area kosong untuk menggeser · posisi {data.stimulus_svg_offset_x}, {data.stimulus_svg_offset_y}</p>
+                            </div>}
+                            {editableUploadIllustrationUrl && <div className="mt-4">
+                                <figure className="relative rounded-xl border border-emerald-200 bg-white p-3 pb-14">
+                                    <PositionedImage
+                                        src={editableUploadIllustrationUrl}
+                                        alt={data.stimulus_image_alt || 'Preview gambar stimulus'}
+                                        width={data.stimulus_image_width}
+                                        height={data.stimulus_image_height}
+                                        zoom={data.stimulus_upload_zoom}
+                                        offsetX={data.stimulus_upload_offset_x}
+                                        offsetY={data.stimulus_upload_offset_y}
+                                        onPan={(position) => setData((current) => ({ ...current, stimulus_upload_offset_x: position.x, stimulus_upload_offset_y: position.y }))}
+                                    />
+                                    <div className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-xl border border-slate-200 bg-white/95 p-1.5 shadow-lg backdrop-blur">
+                                        <button type="button" aria-label="Perkecil gambar upload" onClick={() => setData('stimulus_upload_zoom', Math.max(0.25, Number((data.stimulus_upload_zoom - 0.1).toFixed(2))))} className="rounded-lg px-3 py-1.5 text-sm font-bold text-slate-700 hover:bg-slate-100">−</button>
+                                        <span className="min-w-12 text-center text-xs font-bold text-slate-600">{Math.round(data.stimulus_upload_zoom * 100)}%</span>
+                                        <button type="button" aria-label="Perbesar gambar upload" onClick={() => setData('stimulus_upload_zoom', Math.min(3, Number((data.stimulus_upload_zoom + 0.1).toFixed(2))))} className="rounded-lg px-3 py-1.5 text-sm font-bold text-slate-700 hover:bg-slate-100">+</button>
+                                        <button type="button" onClick={() => setData((current) => ({ ...current, stimulus_upload_zoom: 1, stimulus_upload_offset_x: 0, stimulus_upload_offset_y: 0 }))} className="border-l border-slate-200 px-2 py-1.5 text-xs font-semibold text-indigo-700">Reset</button>
+                                    </div>
+                                    <figcaption className="mt-3 flex flex-wrap items-center justify-between gap-2 pr-1 text-sm">
+                                        <span className="min-w-0 truncate font-medium text-emerald-700">{data.stimulus_image ? `Dipilih: ${data.stimulus_image.name}` : 'Gambar stimulus saat ini'} · tahan dan tarik untuk menggeser</span>
+                                        <span className="flex items-center gap-3">{data.stimulus_image && <span className="text-xs text-slate-500">{(data.stimulus_image.size / 1024).toFixed(1)} KB</span>}{!data.stimulus_image && question?.illustration_url && <button type="button" onClick={() => setData('remove_stimulus_image', true)} className="font-semibold text-rose-700">Hapus gambar</button>}</span>
+                                    </figcaption>
+                                </figure>
+                            </div>}
+                            {data.remove_stimulus_image && <button type="button" onClick={() => setData('remove_stimulus_image', false)} className="mt-3 text-sm font-semibold text-indigo-700">Batalkan penghapusan gambar</button>}
+                                <InputError message={errors.stimulus_image} className="mt-2" />
+                                {(data.stimulus_image_source === 'template' || selectedIllustrationUrl || (question?.illustration_url && !data.remove_stimulus_image)) && (
+                                    <label className="mt-4 block text-sm font-medium text-slate-700">
+                                        Teks alternatif gambar <span className="font-normal text-slate-500">(opsional, untuk aksesibilitas)</span>
+                                        <input value={data.stimulus_image_alt} onChange={(event) => setData('stimulus_image_alt', event.target.value)} placeholder="Contoh: Diagram jumlah buku yang dibaca siswa" className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500" />
+                                        <InputError message={errors.stimulus_image_alt} className="mt-1" />
+                                    </label>
+                                )}
+                            </div>}
                         <label className="block text-sm font-medium text-slate-700">
                             Pertanyaan
                             <textarea value={data.prompt} onChange={(event) => setData('prompt', event.target.value)} rows={3} className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500" />
                             <InputError message={errors.prompt} className="mt-1" />
-                        </label>
-                        <label className="block text-sm font-medium text-slate-700">
-                            Pembahasan
-                            <textarea value={data.explanation} onChange={(event) => setData('explanation', event.target.value)} rows={3} className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500" />
                         </label>
                     </div>
                 </section>
@@ -610,7 +1326,7 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
                                         onChange={(event) => updateOption(index, 'is_correct', event.target.checked)}
                                         className="border-slate-300 text-emerald-600 focus:ring-emerald-500"
                                     />
-                                    <span className="w-6 text-sm font-semibold text-slate-500">{String.fromCharCode(65 + index)}</span>
+                                    {data.type === 'single_choice' && <span className="w-6 text-sm font-semibold text-slate-500">{String.fromCharCode(65 + index)}</span>}
                                     <input value={option.content} onChange={(event) => updateOption(index, 'content', event.target.value)} className="flex-1 rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500" />
                                 </div>
                             ))}
@@ -619,11 +1335,209 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
                     )}
                 </section>
 
-                <div className="flex justify-end gap-3">
+                <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <div>
+                        <h2 className="font-semibold text-slate-900">Pembahasan setelah TO <span className="font-normal text-slate-500">(opsional)</span></h2>
+                        <p className="mt-1 text-xs leading-5 text-slate-500">Pembahasan tidak tampil saat siswa mengerjakan. Konten ini baru ditampilkan setelah try out selesai dikirim.</p>
+                    </div>
+                    <label className="mt-4 block text-sm font-medium text-slate-700">
+                        Teks pembahasan
+                        <textarea value={data.explanation} onChange={(event) => setData('explanation', event.target.value)} rows={5} placeholder="Jelaskan konsep, langkah penyelesaian, dan alasan jawaban yang benar." className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500" />
+                        <InputError message={errors.explanation} className="mt-1" />
+                    </label>
+                    <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4">
+                        <label className="block text-sm font-medium text-slate-700">
+                            Gambar pembahasan <span className="font-normal text-slate-500">(opsional)</span>
+                            <input
+                                type="file"
+                                accept="image/jpeg,image/png,image/webp"
+                                onChange={(event) => {
+                                    setData('explanation_image', event.target.files?.[0] || null);
+                                    setData('remove_explanation_image', false);
+                                }}
+                                className="mt-2 block w-full text-sm text-slate-600 file:mr-4 file:rounded-lg file:border-0 file:bg-indigo-100 file:px-4 file:py-2 file:font-semibold file:text-indigo-700 hover:file:bg-indigo-200"
+                            />
+                        </label>
+                        <p className="mt-2 text-xs text-slate-500">Format JPG, PNG, atau WebP. File maksimal 10 MB dan otomatis dikompresi menjadi maksimal 200 KB.</p>
+                        {data.explanation_image && selectedExplanationImageUrl && (
+                            <figure className="mt-3 overflow-hidden rounded-xl border border-indigo-200 bg-white p-3">
+                                <img src={selectedExplanationImageUrl} alt={data.explanation_image_alt || `Preview ${data.explanation_image.name}`} className="max-h-72 w-full rounded-lg bg-slate-50 object-contain" />
+                                <figcaption className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+                                    <span className="min-w-0 truncate font-medium text-indigo-700">Dipilih: {data.explanation_image.name}</span>
+                                    <span className="shrink-0 text-xs text-slate-500">{(data.explanation_image.size / 1024).toFixed(1)} KB</span>
+                                </figcaption>
+                            </figure>
+                        )}
+                        {!data.explanation_image && question?.explanation_image_url && !data.remove_explanation_image && (
+                            <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center">
+                                <img src={question.explanation_image_url} alt={question.metadata?.explanation_illustration?.alt || 'Gambar pembahasan saat ini'} className="h-28 w-48 rounded-lg border border-slate-200 object-cover" />
+                                <button type="button" onClick={() => setData('remove_explanation_image', true)} className="text-left text-sm font-semibold text-rose-700">Hapus gambar saat disimpan</button>
+                            </div>
+                        )}
+                        {data.remove_explanation_image && <button type="button" onClick={() => setData('remove_explanation_image', false)} className="mt-3 text-sm font-semibold text-indigo-700">Batalkan penghapusan gambar</button>}
+                        <InputError message={errors.explanation_image} className="mt-2" />
+                        {(data.explanation_image || (question?.explanation_image_url && !data.remove_explanation_image)) && (
+                            <label className="mt-4 block text-sm font-medium text-slate-700">
+                                Teks alternatif gambar <span className="font-normal text-slate-500">(opsional, untuk aksesibilitas)</span>
+                                <input value={data.explanation_image_alt} onChange={(event) => setData('explanation_image_alt', event.target.value)} placeholder="Contoh: Langkah menghitung rata-rata data" className="mt-1 block w-full rounded-lg border-slate-300 focus:border-indigo-500 focus:ring-indigo-500" />
+                                <InputError message={errors.explanation_image_alt} className="mt-1" />
+                            </label>
+                        )}
+                    </div>
+                </section>
+
+                <div className="flex flex-wrap justify-end gap-3">
                     <Link href={returnGeneration ? route(returnGeneration.format === 'direct' ? 'ai-questions.show' : 'story-questions.show', returnGeneration.id) : question ? route('questions.show', question.id) : route('questions.index')} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700">Batal</Link>
+                    <button type="button" onClick={() => setPreviewOpen(true)} className="inline-flex items-center gap-2 rounded-lg border border-indigo-300 bg-white px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50">
+                        <span aria-hidden="true">◉</span> Preview siswa
+                    </button>
                     <button disabled={processing} className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white disabled:opacity-50">{question ? 'Simpan perubahan' : 'Simpan draft'}</button>
                 </div>
             </form>
+
+            <Modal show={previewOpen} maxWidth="5xl" onClose={() => setPreviewOpen(false)}>
+                <StudentQuestionPreview
+                    data={data}
+                    existingIllustrationUrl={question?.illustration_url}
+                    uploadedIllustrationUrl={selectedIllustrationUrl}
+                    onClose={() => setPreviewOpen(false)}
+                />
+            </Modal>
         </AuthenticatedLayout>
+    );
+}
+
+function StudentQuestionPreview({ data, existingIllustrationUrl, uploadedIllustrationUrl, onClose }: { data: QuestionForm; existingIllustrationUrl?: string; uploadedIllustrationUrl?: string; onClose: () => void }) {
+    const [selectedOptions, setSelectedOptions] = useState<number[]>([]);
+    const [shortAnswer, setShortAnswer] = useState('');
+    const [matrixAnswers, setMatrixAnswers] = useState<Record<number, number>>({});
+    const [selectedLeft, setSelectedLeft] = useState<number>();
+    const [matches, setMatches] = useState<Record<number, number>>({});
+
+    useEffect(() => {
+        setSelectedOptions([]);
+        setShortAnswer('');
+        setMatrixAnswers({});
+        setSelectedLeft(undefined);
+        setMatches({});
+    }, [data.type]);
+
+    const usesGeometryTemplate = data.stimulus_image_source === 'template';
+    const illustrationUrl = usesGeometryTemplate ? undefined : uploadedIllustrationUrl
+        || (!data.remove_stimulus_image ? existingIllustrationUrl : undefined);
+    const stimulusVisual = stimulusVisualFromForm(data);
+    const hasStimulus = Boolean(data.stimulus.trim() || illustrationUrl || stimulusVisual || usesGeometryTemplate);
+    const visibleOptions = data.options.filter((option) => option.content.trim());
+    const matchingPairs = data.matching_pairs.filter((pair) => pair.left.trim() || pair.right.trim());
+    const matchingRightItems = [
+        ...matchingPairs.map((pair, index) => ({ id: index, content: pair.right })),
+        ...data.matching_distractors
+            .filter((item) => item.content.trim())
+            .map((item, index) => ({ id: matchingPairs.length + index, content: item.content })),
+    ];
+
+    const chooseOption = (index: number) => {
+        setSelectedOptions((current) => data.type === 'single_choice'
+            ? [index]
+            : current.includes(index) ? current.filter((item) => item !== index) : [...current, index]);
+    };
+
+    const chooseMatch = (rightId: number) => {
+        if (selectedLeft === undefined) return;
+
+        setMatches((current) => {
+            const next = Object.fromEntries(
+                Object.entries(current).filter(([, value]) => value !== rightId),
+            ) as Record<number, number>;
+            next[selectedLeft] = rightId;
+            return next;
+        });
+        setSelectedLeft(undefined);
+    };
+
+    return (
+        <div className="overflow-hidden bg-slate-100">
+            <header className="flex items-center justify-between gap-4 bg-slate-900 px-5 py-4 text-white">
+                <div>
+                    <p className="text-xs font-semibold uppercase tracking-widest text-emerald-300">Preview siswa</p>
+                    <h2 className="mt-1 font-bold">Simulasi Adaptif</h2>
+                </div>
+                <button type="button" onClick={onClose} aria-label="Tutup preview" className="rounded-lg p-2 text-2xl leading-none text-slate-300 hover:bg-white/10 hover:text-white">×</button>
+            </header>
+
+            <div className="max-h-[78vh] overflow-y-auto p-4 sm:p-6">
+                <div className="mx-auto mb-3 flex max-w-4xl items-center justify-between rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
+                    <span>Ini adalah tampilan latihan. Jawaban yang dipilih tidak disimpan.</span>
+                    <span className="ml-4 shrink-0 font-semibold">Soal 1 dari 1</span>
+                </div>
+
+                <main className="mx-auto grid max-w-4xl overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm lg:grid-cols-2">
+                    {hasStimulus && (
+                        <aside className="border-b border-slate-200 bg-slate-50/60 p-5 lg:border-b-0 lg:border-r">
+                            <p className="text-xs font-semibold uppercase tracking-wider text-indigo-600">Stimulus</p>
+                            {illustrationUrl && <PositionedImage src={illustrationUrl} alt={data.stimulus_image_alt || 'Ilustrasi soal'} width={data.stimulus_image_width} height={data.stimulus_image_height} zoom={data.stimulus_upload_zoom} offsetX={data.stimulus_upload_offset_x} offsetY={data.stimulus_upload_offset_y} className="mt-3" />}
+                            {usesGeometryTemplate && <GeometryTemplatePreview template={data.stimulus_svg_template} dimensionA={data.stimulus_svg_dimension_a} dimensionB={data.stimulus_svg_dimension_b} dimensionC={data.stimulus_svg_dimension_c} unit={data.stimulus_svg_unit} fractionModels={data.stimulus_fraction_models} zoom={data.stimulus_svg_zoom} offsetX={data.stimulus_svg_offset_x} offsetY={data.stimulus_svg_offset_y} className="mx-auto mt-3 h-auto w-full rounded-lg border border-slate-200 bg-white" />}
+                            {stimulusVisual && <StimulusVisual visual={stimulusVisual} className="mt-3" />}
+                            {data.stimulus.trim() && <div className="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-700">{data.stimulus}</div>}
+                        </aside>
+                    )}
+
+                    <section className={`min-w-0 p-5 ${hasStimulus ? '' : 'lg:col-span-2 lg:px-10'}`}>
+                        <p className="text-xs font-semibold text-emerald-600">Soal 1</p>
+                        <h3 className="mt-2 text-lg font-semibold leading-7 text-slate-900">
+                            {data.prompt.trim() || <span className="italic text-slate-400">Pertanyaan belum diisi.</span>}
+                        </h3>
+
+                        {data.type === 'category_matrix' ? (
+                            <div className="mt-5 space-y-2">
+                                <p className="mb-3 text-xs text-slate-600">Pilih satu jawaban untuk setiap pernyataan.</p>
+                                {data.matrix_rows.filter((row) => row.statement.trim()).map((row, rowIndex) => (
+                                    <div key={row.id || rowIndex} className="grid gap-3 rounded-lg border border-slate-200 p-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                                        <p className="text-sm leading-6 text-slate-800"><span className="mr-1.5 font-semibold text-slate-500">{rowIndex + 1}.</span>{row.statement}</p>
+                                        <div className="flex flex-wrap gap-2 sm:justify-end">
+                                            {data.matrix_columns.filter((column) => column.label.trim()).map((column, columnIndex) => {
+                                                const selected = matrixAnswers[rowIndex] === columnIndex;
+                                                return <button key={column.id || columnIndex} type="button" onClick={() => setMatrixAnswers((current) => ({ ...current, [rowIndex]: columnIndex }))} className={`min-h-10 rounded-lg border px-3 py-2 text-xs font-semibold ${selected ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 text-slate-700 hover:bg-blue-50'}`}>{column.label}</button>;
+                                            })}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : data.type === 'matching' ? (
+                            <div className="mt-5">
+                                <p className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-800">{selectedLeft === undefined ? 'Pilih satu pernyataan, kemudian pilih pasangannya.' : 'Sekarang pilih jawaban yang sesuai.'}</p>
+                                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                                    <div className="space-y-2">
+                                        <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Pernyataan</h4>
+                                        {matchingPairs.map((pair, index) => <button key={pair.left_id || index} type="button" onClick={() => setSelectedLeft(index)} className={`flex w-full items-start gap-2 rounded-lg border-2 p-3 text-left text-sm ${matches[index] !== undefined ? 'border-emerald-500 bg-emerald-50' : selectedLeft === index ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200'}`}><span className="font-bold text-slate-500">{index + 1}</span><span>{pair.left || 'Pernyataan belum diisi'}</span></button>)}
+                                    </div>
+                                    <div className="space-y-2">
+                                        <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Pilihan pasangan</h4>
+                                        {matchingRightItems.map((item) => {
+                                            const matchedLeft = Object.entries(matches).find(([, rightId]) => rightId === item.id)?.[0];
+                                            return <button key={item.id} type="button" onClick={() => chooseMatch(item.id)} className={`flex w-full items-start gap-2 rounded-lg border-2 p-3 text-left text-sm ${matchedLeft !== undefined ? 'border-emerald-500 bg-emerald-50' : selectedLeft !== undefined ? 'border-slate-200 hover:border-indigo-400' : 'border-slate-200'}`}><span className="font-bold text-slate-500">{matchedLeft !== undefined ? Number(matchedLeft) + 1 : '○'}</span><span>{item.content || 'Jawaban belum diisi'}</span></button>;
+                                        })}
+                                    </div>
+                                </div>
+                            </div>
+                        ) : data.type === 'short_answer' ? (
+                            <textarea value={shortAnswer} onChange={(event) => setShortAnswer(event.target.value)} rows={3} placeholder="Tulis jawabanmu" className="mt-5 block w-full rounded-xl border-slate-300 focus:border-emerald-500 focus:ring-emerald-500" />
+                        ) : (
+                            <div className="mt-5 space-y-3">
+                                {visibleOptions.length > 0 ? visibleOptions.map((option, index) => {
+                                    const selected = selectedOptions.includes(index);
+                                    return <button key={index} type="button" onClick={() => chooseOption(index)} className={`flex min-h-11 w-full items-center gap-3 rounded-xl border p-3 text-left ${selected ? 'border-emerald-500 bg-emerald-50 ring-1 ring-emerald-500' : 'border-slate-200 hover:border-slate-300'}`}>{data.type === 'multiple_choice' ? <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded border-2 text-sm font-bold ${selected ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-300 text-transparent'}`}>✓</span> : <span className="w-5 font-semibold text-slate-600">{String.fromCharCode(65 + index)}</span>}<span className="text-sm leading-6 text-slate-800">{option.content}</span></button>;
+                                }) : <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">Pilihan jawaban belum diisi.</p>}
+                            </div>
+                        )}
+                    </section>
+                </main>
+
+                <div className="mx-auto mt-4 flex max-w-4xl justify-between">
+                    <button type="button" disabled className="min-h-11 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 opacity-40">Sebelumnya</button>
+                    <button type="button" onClick={onClose} className="min-h-11 rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white">Selesai preview</button>
+                </div>
+            </div>
+        </div>
     );
 }

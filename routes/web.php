@@ -1,6 +1,9 @@
 <?php
 
 use App\Http\Controllers\Admin\AiQuotaController;
+use App\Http\Controllers\Admin\IndonesianBundleController;
+use App\Http\Controllers\Admin\QuestionTypeSettingController;
+use App\Http\Controllers\Admin\TeacherVerificationAnalyticsController;
 use App\Http\Controllers\Admin\UserController as AdminUserController;
 use App\Http\Controllers\AiQuestionController;
 use App\Http\Controllers\AiQuestionReviewController;
@@ -15,10 +18,13 @@ use App\Http\Controllers\CensoredWordController;
 use App\Http\Controllers\ChatMessageController;
 use App\Http\Controllers\CompetencyController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\ManualIndonesianBundleController;
+use App\Http\Controllers\MonitoringAiAnalysisController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\QuestionBlueprintController;
 use App\Http\Controllers\QuestionController;
 use App\Http\Controllers\QuestionImportController;
+use App\Http\Controllers\RankingController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\SchoolProfileController;
 use App\Http\Controllers\SchoolStudentController;
@@ -46,6 +52,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/assessments', [AssessmentController::class, 'index'])->name('assessments.index');
 
     Route::middleware('role:admin,teacher')->group(function () {
+        Route::get('/rankings', RankingController::class)->name('rankings.index');
         Route::get('/student-chats', [TeacherChatController::class, 'index'])->name('teacher-chat.index');
         Route::get('/student-chats/{student}', [TeacherChatController::class, 'show'])->name('teacher-chat.show');
         Route::get('/censored-words', [CensoredWordController::class, 'index'])->name('censored-words.index');
@@ -60,6 +67,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('/questions/import', [QuestionImportController::class, 'create'])->name('questions.import.create');
         Route::post('/questions/import', [QuestionImportController::class, 'store'])->name('questions.import.store');
         Route::get('/questions/import/template', [QuestionImportController::class, 'template'])->name('questions.import.template');
+        Route::get('/questions/manual-bundle/create', [ManualIndonesianBundleController::class, 'create'])->name('manual-story-bundles.create');
+        Route::post('/questions/manual-bundle', [ManualIndonesianBundleController::class, 'store'])->name('manual-story-bundles.store');
         Route::get('/story-questions/create', [AiStoryQuestionController::class, 'create'])->name('story-questions.create');
         Route::get('/ai-questions/create', [AiStoryQuestionController::class, 'create'])->name('ai-questions.create');
         Route::post('/story-questions', [AiStoryQuestionController::class, 'store'])->name('story-questions.store');
@@ -100,17 +109,27 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     Route::middleware('role:admin,operator')->group(function () {
         Route::get('/monitoring', AssessmentMonitoringController::class)->name('monitoring.index');
+        Route::post('/monitoring/{assessment}/ai-analysis', [MonitoringAiAnalysisController::class, 'store'])
+            ->middleware('throttle:5,1')
+            ->name('monitoring.ai-analysis.store');
         Route::get('/schedules', [AssessmentScheduleController::class, 'index'])->name('schedules.index');
         Route::post('/schedules', [AssessmentScheduleController::class, 'store'])->name('schedules.store');
         Route::delete('/schedules/{schedule}', [AssessmentScheduleController::class, 'destroy'])->name('schedules.destroy');
         Route::get('/school/settings', [SchoolProfileController::class, 'edit'])->name('school.edit');
         Route::patch('/school/settings', [SchoolProfileController::class, 'update'])->name('school.update');
         Route::get('/school/students', SchoolStudentController::class)->name('school.students.index');
+        Route::patch('/school/students/{student}/approve', [SchoolStudentController::class, 'approve'])->name('school.students.approve');
     });
 
     Route::middleware('role:admin')->group(function () {
+        Route::get('/admin/teacher-verifications', TeacherVerificationAnalyticsController::class)
+            ->name('admin.teacher-verifications.index');
+        Route::get('/admin/indonesian-bundles', [IndonesianBundleController::class, 'edit'])->name('admin.indonesian-bundles.edit');
+        Route::patch('/admin/indonesian-bundles', [IndonesianBundleController::class, 'update'])->name('admin.indonesian-bundles.update');
         Route::get('/admin/ai-quotas', [AiQuotaController::class, 'edit'])->name('admin.ai-quotas.edit');
         Route::patch('/admin/ai-quotas', [AiQuotaController::class, 'update'])->name('admin.ai-quotas.update');
+        Route::get('/admin/question-types', [QuestionTypeSettingController::class, 'edit'])->name('admin.question-types.edit');
+        Route::patch('/admin/question-types', [QuestionTypeSettingController::class, 'update'])->name('admin.question-types.update');
         Route::get('/admin/users', [AdminUserController::class, 'index'])->name('admin.users.index');
         Route::post('/admin/users', [AdminUserController::class, 'store'])->name('admin.users.store');
         Route::patch('/admin/users/{user}/approve', [AdminUserController::class, 'approve'])->name('admin.users.approve');

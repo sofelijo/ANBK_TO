@@ -19,6 +19,7 @@ use App\Services\StimulusImageService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
@@ -37,9 +38,13 @@ class QuestionWorkflowTest extends TestCase
 
         $this->actingAs($teacher)
             ->get(route('questions.create', ['subject_id' => $competency->subject_id]))
+            ->assertRedirect(route('manual-story-bundles.create', ['subject_id' => $competency->subject_id]));
+
+        $this->actingAs($teacher)
+            ->get(route('manual-story-bundles.create', ['subject_id' => $competency->subject_id]))
             ->assertInertia(fn (Assert $page) => $page
-                ->component('Questions/Create')
-                ->where('selectedSubjectId', $competency->subject_id));
+                ->component('Questions/ManualBundleCreate')
+                ->where('subject.id', $competency->subject_id));
 
         $this->actingAs($teacher)
             ->get(route('story-questions.create', ['subject_id' => $competency->subject_id]))
@@ -48,7 +53,7 @@ class QuestionWorkflowTest extends TestCase
                 ->where('selectedSubjectId', $competency->subject_id));
     }
 
-    public function test_teacher_can_create_and_publish_a_question(): void
+    public function test_question_is_published_only_after_three_distinct_teacher_verifications(): void
     {
         [$teacher, $competency] = $this->teacherAndCompetency();
 
@@ -78,7 +83,32 @@ class QuestionWorkflowTest extends TestCase
             ->post(route('questions.approve', $question))
             ->assertRedirect();
 
+        $this->assertSame(QuestionStatus::Review, $question->fresh()->status);
+        $this->assertDatabaseCount('question_verifications', 1);
+
+        $this->actingAs($teacher)
+            ->post(route('questions.approve', $question))
+            ->assertRedirect();
+
+        $this->assertDatabaseCount('question_verifications', 1);
+
+        [$secondTeacher, $thirdTeacher] = $this->additionalVerificationTeachers($teacher);
+        $this->actingAs($secondTeacher)->post(route('questions.approve', $question))->assertRedirect();
+        $this->assertSame(QuestionStatus::Review, $question->fresh()->status);
+        $this->actingAs($thirdTeacher)->post(route('questions.approve', $question))->assertRedirect();
+
         $this->assertSame(QuestionStatus::Published, $question->fresh()->status);
+        $this->assertSame($thirdTeacher->id, $question->fresh()->approved_by);
+        $this->assertDatabaseCount('question_verifications', 3);
+
+        $fourthTeacher = $this->verificationTeacher($teacher, 4);
+        $this->actingAs($fourthTeacher)->post(route('questions.approve', $question))->assertRedirect();
+        $this->assertSame(QuestionStatus::Published, $question->fresh()->status);
+        $this->assertSame($thirdTeacher->id, $question->fresh()->approved_by);
+        $this->assertDatabaseCount('question_verifications', 4);
+
+        $this->actingAs($fourthTeacher)->post(route('questions.approve', $question))->assertRedirect();
+        $this->assertDatabaseCount('question_verifications', 4);
     }
 
     public function test_question_form_requires_matching_subject_and_competency(): void
@@ -108,11 +138,36 @@ class QuestionWorkflowTest extends TestCase
         $this->assertDatabaseCount('questions', 0);
     }
 
-    public function test_teacher_can_upload_a_stimulus_image_and_see_the_verifier(): void
+    public function test_editing_a_question_resets_existing_teacher_verifications(): void
+    {
+        [$teacher, $competency] = $this->teacherAndCompetency();
+        $question = $this->question($teacher, $competency);
+        $question->update([
+            'status' => QuestionStatus::Draft,
+            'approved_by' => null,
+            'approved_at' => null,
+        ]);
+        [$secondTeacher] = $this->additionalVerificationTeachers($teacher);
+
+        $this->actingAs($teacher)->post(route('questions.approve', $question))->assertRedirect();
+        $this->actingAs($secondTeacher)->post(route('questions.approve', $question))->assertRedirect();
+        $this->assertSame(2, $question->verifications()->count());
+        $this->assertSame(QuestionStatus::Review, $question->fresh()->status);
+
+        $this->actingAs($teacher)
+            ->put(route('questions.update', $question), $this->payload($competency, 'Soal setelah diperbaiki?'))
+            ->assertRedirect();
+
+        $this->assertSame(QuestionStatus::Draft, $question->fresh()->status);
+        $this->assertSame(0, $question->verifications()->count());
+    }
+
+    public function test_teacher_can_upload_stimulus_and_explanation_images_and_see_the_verifier(): void
     {
         Storage::fake('public');
         [$teacher, $competency] = $this->teacherAndCompetency();
         $image = UploadedFile::fake()->image('diagram.png', 1200, 675);
+        $explanationImage = UploadedFile::fake()->image('pembahasan.png', 1000, 800);
         file_put_contents($image->getPathname(), random_bytes(300 * 1024), FILE_APPEND);
 
         $this->assertGreaterThan(StimulusImageService::MAX_BYTES, $image->getSize());
@@ -121,10 +176,16 @@ class QuestionWorkflowTest extends TestCase
             ...$this->payload($competency, 'Apa informasi yang ditunjukkan gambar?'),
             'stimulus_image' => $image,
             'stimulus_image_alt' => 'Diagram jumlah buku yang dibaca siswa',
+            'stimulus_upload_zoom' => '1.4',
+            'stimulus_upload_offset_x' => '-12.5',
+            'stimulus_upload_offset_y' => '8',
+            'explanation_image' => $explanationImage,
+            'explanation_image_alt' => 'Langkah menghitung jumlah buku',
         ])->assertRedirect();
 
         $question = Question::firstOrFail();
         $imagePath = data_get($question->metadata, 'illustration.path');
+        $explanationImagePath = data_get($question->metadata, 'explanation_illustration.path');
 
         Storage::disk('public')->assertExists($imagePath);
         $this->assertLessThanOrEqual(StimulusImageService::MAX_BYTES, Storage::disk('public')->size($imagePath));
@@ -133,18 +194,248 @@ class QuestionWorkflowTest extends TestCase
         $this->assertLessThanOrEqual(StimulusImageService::MAX_BYTES, data_get($question->metadata, 'illustration.size_bytes'));
         $this->assertSame('upload', data_get($question->metadata, 'illustration.source'));
         $this->assertSame('Diagram jumlah buku yang dibaca siswa', data_get($question->metadata, 'illustration.alt'));
+        $this->assertEquals(1.4, data_get($question->metadata, 'illustration.display_zoom'));
+        $this->assertEquals(-12.5, data_get($question->metadata, 'illustration.display_offset_x'));
+        $this->assertEquals(8.0, data_get($question->metadata, 'illustration.display_offset_y'));
+        Storage::disk('public')->assertExists($explanationImagePath);
+        $this->assertStringStartsWith('question-explanations/', $explanationImagePath);
+        $this->assertSame('Langkah menghitung jumlah buku', data_get($question->metadata, 'explanation_illustration.alt'));
 
-        $this->actingAs($teacher)
-            ->post(route('questions.approve', $question))
-            ->assertRedirect();
+        $verifiers = $this->verifyQuestionWithThreeTeachers($question, $teacher);
 
         $this->actingAs($teacher)
             ->get(route('questions.show', $question))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('Questions/Show')
                 ->where('question.author.name', 'Guru')
-                ->where('question.approver.name', 'Guru')
-                ->where('question.illustration_url', "/storage/{$imagePath}"));
+                ->where('question.approver.name', $verifiers[2]->name)
+                ->where('verification.count', 3)
+                ->where('question.illustration_url', "/storage/{$imagePath}")
+                ->where('question.explanation_image_url', "/storage/{$explanationImagePath}"));
+    }
+
+    public function test_teacher_can_generate_a_custom_svg_from_a_geometry_template(): void
+    {
+        Storage::fake('public');
+        [$teacher, $competency] = $this->teacherAndCompetency();
+
+        $this->actingAs($teacher)->post(route('questions.store'), [
+            ...$this->payload($competency, 'Berapakah luas persegi tersebut?'),
+            'stimulus_image_source' => 'template',
+            'stimulus_svg_template' => 'square',
+            'stimulus_svg_dimension_a' => '8',
+            'stimulus_svg_unit' => 'cm',
+            'stimulus_image_width' => 600,
+            'stimulus_image_height' => 360,
+            'stimulus_image_alt' => 'Persegi dengan panjang sisi delapan sentimeter',
+        ])->assertRedirect();
+
+        $question = Question::firstOrFail();
+        $path = data_get($question->metadata, 'illustration.path');
+        $this->assertSame('template-svg', data_get($question->metadata, 'illustration.source'));
+        $this->assertSame('square', data_get($question->metadata, 'illustration.template'));
+        $this->assertEquals(8.0, data_get($question->metadata, 'illustration.dimension_a'));
+        $this->assertSame(600, data_get($question->metadata, 'illustration.display_width'));
+        Storage::disk('public')->assertExists($path);
+        $this->assertStringContainsString('sisi = 8 cm', Storage::disk('public')->get($path));
+    }
+
+    public function test_geometry_templates_are_grouped_and_support_three_dimensions(): void
+    {
+        Storage::fake('public');
+        [$teacher, $competency] = $this->teacherAndCompetency();
+
+        $this->actingAs($teacher)
+            ->get(route('questions.create'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Questions/Create')
+                ->has('stimulusSvgTemplates', 88)
+                ->where('stimulusSvgTemplates.9.category', '2d')
+                ->where('stimulusSvgTemplates.9.family', 'triangle')
+                ->where('stimulusSvgTemplates.9.label', 'Siku-siku')
+                ->where('stimulusSvgTemplates.29.value', 'cuboid')
+                ->where('stimulusSvgTemplates.29.family_label', 'Kubus & balok')
+                ->where('stimulusSvgTemplates.29.dimension_c_label', 'Tinggi')
+                ->where('stimulusSvgTemplates.30.value', 'triangular_prism')
+                ->where('stimulusSvgTemplates.30.family_label', 'Prisma'));
+
+        $this->actingAs($teacher)->post(route('questions.store'), [
+            ...$this->payload($competency, 'Berapakah volume balok tersebut?'),
+            'stimulus_image_source' => 'template',
+            'stimulus_svg_template' => 'cuboid',
+            'stimulus_svg_dimension_a' => '12',
+            'stimulus_svg_dimension_b' => '8',
+            'stimulus_svg_dimension_c' => '5',
+            'stimulus_svg_unit' => 'cm',
+            'stimulus_svg_zoom' => '0.8',
+            'stimulus_svg_offset_x' => '-50',
+            'stimulus_svg_offset_y' => '25',
+        ])->assertRedirect();
+
+        $question = Question::firstOrFail();
+        $path = data_get($question->metadata, 'illustration.path');
+        $this->assertSame('cuboid', data_get($question->metadata, 'illustration.template'));
+        $this->assertEquals(5.0, data_get($question->metadata, 'illustration.dimension_c'));
+        $this->assertEquals(0.8, data_get($question->metadata, 'illustration.zoom'));
+        $this->assertEquals(-50.0, data_get($question->metadata, 'illustration.offset_x'));
+        $svg = Storage::disk('public')->get($path);
+        $this->assertStringContainsString('t = 5 cm', $svg);
+        $this->assertStringContainsString('translate(-50 25) scale(0.8)', $svg);
+    }
+
+    public function test_fraction_reasoning_template_stores_two_to_four_independent_circles_without_revealing_answers(): void
+    {
+        Storage::fake('public');
+        [$teacher, $competency] = $this->teacherAndCompetency();
+        $models = [
+            ['numerator' => 1, 'denominator' => 2, 'shaded_parts' => [1]],
+            ['numerator' => 2, 'denominator' => 5, 'shaded_parts' => [1, 4]],
+            ['numerator' => 3, 'denominator' => 8, 'shaded_parts' => [0, 3, 7]],
+            ['numerator' => 4, 'denominator' => 9, 'shaded_parts' => [1, 2, 5, 8]],
+        ];
+
+        $this->actingAs($teacher)->post(route('questions.store'), [
+            ...$this->payload($competency, 'Bandingkan bagian yang diarsir.'),
+            'stimulus_image_source' => 'template',
+            'stimulus_svg_template' => 'fraction_equivalent_circles',
+            'stimulus_svg_dimension_a' => '1',
+            'stimulus_svg_dimension_b' => '2',
+            'stimulus_svg_dimension_c' => '4',
+            'stimulus_fraction_models' => $models,
+        ])->assertRedirect();
+
+        $question = Question::firstOrFail();
+        $this->assertSame($models, data_get($question->metadata, 'illustration.fraction_models'));
+        $svg = Storage::disk('public')->get(data_get($question->metadata, 'illustration.path'));
+        $this->assertStringContainsString('Model 4', $svg);
+        $this->assertStringNotContainsString('1/2', $svg);
+        $this->assertStringNotContainsString('2/5', $svg);
+    }
+
+    public function test_advanced_templates_support_signed_coordinates_and_specific_validation(): void
+    {
+        Storage::fake('public');
+        [$teacher, $competency] = $this->teacherAndCompetency();
+
+        $this->actingAs($teacher)->post(route('questions.store'), [
+            ...$this->payload($competency, 'Pada kuadran berapakah titik P berada?'),
+            'stimulus_image_source' => 'template',
+            'stimulus_svg_template' => 'cartesian_point',
+            'stimulus_svg_dimension_a' => '-3',
+            'stimulus_svg_dimension_b' => '4',
+        ])->assertRedirect();
+
+        $question = Question::firstOrFail();
+        $this->assertStringContainsString('Titik P(-3, 4)', Storage::disk('public')->get(data_get($question->metadata, 'illustration.path')));
+
+        $this->actingAs($teacher)->post(route('questions.store'), [
+            ...$this->payload($competency, 'Pukul berapakah waktu pada jam?'),
+            'stimulus_image_source' => 'template',
+            'stimulus_svg_template' => 'clock',
+            'stimulus_svg_dimension_a' => '24',
+            'stimulus_svg_dimension_b' => '60',
+        ])->assertSessionHasErrors('stimulus_svg_dimension_a');
+    }
+
+    public function test_teacher_can_create_custom_table_single_and_grouped_bar_pictogram_and_pie_chart_stimuli(): void
+    {
+        [$teacher, $competency] = $this->teacherAndCompetency();
+
+        $this->actingAs($teacher)->post(route('questions.store'), [
+            ...$this->payload($competency, 'Kelas mana yang memiliki siswa terbanyak?'),
+            'title' => 'Data jumlah siswa',
+            'stimulus_visual_type' => 'table',
+            'stimulus_visual_title' => 'Jumlah Siswa per Kelas',
+            'stimulus_table_headers' => ['Kelas', 'Jumlah siswa'],
+            'stimulus_table_rows' => [['A', '28'], ['B', '32']],
+        ])->assertRedirect();
+
+        $tableQuestion = Question::where('title', 'Data jumlah siswa')->firstOrFail();
+        $this->assertSame('table', data_get($tableQuestion->metadata, 'stimulus_visual.type'));
+        $this->assertSame(['Kelas', 'Jumlah siswa'], data_get($tableQuestion->metadata, 'stimulus_visual.headers'));
+        $this->assertSame([['A', '28'], ['B', '32']], data_get($tableQuestion->metadata, 'stimulus_visual.rows'));
+
+        $this->actingAs($teacher)->post(route('questions.store'), [
+            ...$this->payload($competency, 'Berapa selisih penjualan hari Senin dan Selasa?'),
+            'title' => 'Diagram penjualan',
+            'stimulus_visual_type' => 'bar_chart',
+            'stimulus_visual_title' => 'Penjualan Buku Harian',
+            'stimulus_chart_x_axis_label' => 'Hari',
+            'stimulus_chart_y_axis_label' => 'Jumlah buku',
+            'stimulus_chart_maximum' => '50',
+            'stimulus_chart_items' => [
+                ['label' => 'Senin', 'value' => '25'],
+                ['label' => 'Selasa', 'value' => '40'],
+            ],
+        ])->assertRedirect();
+
+        $chartQuestion = Question::where('title', 'Diagram penjualan')->firstOrFail();
+        $this->assertSame('bar_chart', data_get($chartQuestion->metadata, 'stimulus_visual.type'));
+        $this->assertSame('Jumlah buku', data_get($chartQuestion->metadata, 'stimulus_visual.y_axis_label'));
+        $this->assertEquals(50.0, data_get($chartQuestion->metadata, 'stimulus_visual.maximum'));
+        $this->assertEquals(40.0, data_get($chartQuestion->metadata, 'stimulus_visual.items.1.value'));
+
+        $this->actingAs($teacher)->post(route('questions.store'), [
+            ...$this->payload($competency, 'Makanan mana yang memiliki kandungan lemak tertinggi?'),
+            'title' => 'Diagram kandungan makanan',
+            'stimulus_visual_type' => 'bar_chart',
+            'stimulus_visual_title' => 'Kandungan dalam 100 Gram Makanan',
+            'stimulus_chart_mode' => 'grouped',
+            'stimulus_chart_x_axis_label' => 'Nama makanan',
+            'stimulus_chart_y_axis_label' => 'Banyak kandungan (gram)',
+            'stimulus_chart_series_labels' => ['Lemak', 'Protein'],
+            'stimulus_chart_grouped_categories' => [
+                ['label' => 'Alpukat', 'values' => ['15', '2']],
+                ['label' => 'Daging Sapi', 'values' => ['15', '26']],
+                ['label' => 'Keju', 'values' => ['33', '25']],
+            ],
+        ])->assertRedirect();
+
+        $groupedChartQuestion = Question::where('title', 'Diagram kandungan makanan')->firstOrFail();
+        $this->assertSame(['Alpukat', 'Daging Sapi', 'Keju'], data_get($groupedChartQuestion->metadata, 'stimulus_visual.categories'));
+        $this->assertSame('Lemak', data_get($groupedChartQuestion->metadata, 'stimulus_visual.series.0.label'));
+        $this->assertEquals([15.0, 15.0, 33.0], data_get($groupedChartQuestion->metadata, 'stimulus_visual.series.0.values'));
+        $this->assertSame('Protein', data_get($groupedChartQuestion->metadata, 'stimulus_visual.series.1.label'));
+
+        $this->actingAs($teacher)->post(route('questions.store'), [
+            ...$this->payload($competency, 'Berapa jumlah buku yang dibaca Beni?'),
+            'title' => 'Piktogram buku',
+            'stimulus_visual_type' => 'pictogram',
+            'stimulus_visual_title' => 'Buku yang Dibaca',
+            'stimulus_pictogram_symbol' => '📘',
+            'stimulus_pictogram_legend_value' => '2',
+            'stimulus_pictogram_unit' => 'buku',
+            'stimulus_pictogram_items' => [
+                ['label' => 'Ayu', 'value' => '4'],
+                ['label' => 'Beni', 'value' => '7'],
+            ],
+        ])->assertRedirect();
+
+        $pictogramQuestion = Question::where('title', 'Piktogram buku')->firstOrFail();
+        $this->assertSame('pictogram', data_get($pictogramQuestion->metadata, 'stimulus_visual.type'));
+        $this->assertSame('📘', data_get($pictogramQuestion->metadata, 'stimulus_visual.symbol'));
+        $this->assertEquals(2.0, data_get($pictogramQuestion->metadata, 'stimulus_visual.legend_value'));
+        $this->assertEquals(7.0, data_get($pictogramQuestion->metadata, 'stimulus_visual.items.1.value'));
+
+        $this->actingAs($teacher)->post(route('questions.store'), [
+            ...$this->payload($competency, 'Kategori mana yang memiliki bagian terbesar?'),
+            'title' => 'Diagram lingkaran hobi',
+            'stimulus_visual_type' => 'pie_chart',
+            'stimulus_visual_title' => 'Hobi Siswa',
+            'stimulus_pie_unit' => 'siswa',
+            'stimulus_pie_show_percentages' => true,
+            'stimulus_pie_items' => [
+                ['label' => 'Membaca', 'value' => '12'],
+                ['label' => 'Olahraga', 'value' => '18'],
+                ['label' => 'Musik', 'value' => '10'],
+            ],
+        ])->assertRedirect();
+
+        $pieQuestion = Question::where('title', 'Diagram lingkaran hobi')->firstOrFail();
+        $this->assertSame('pie_chart', data_get($pieQuestion->metadata, 'stimulus_visual.type'));
+        $this->assertTrue(data_get($pieQuestion->metadata, 'stimulus_visual.show_percentages'));
+        $this->assertSame('Olahraga', data_get($pieQuestion->metadata, 'stimulus_visual.items.1.label'));
+        $this->assertEquals(18.0, data_get($pieQuestion->metadata, 'stimulus_visual.items.1.value'));
     }
 
     public function test_teacher_can_create_a_matching_question_with_distractor(): void
@@ -381,6 +672,7 @@ class QuestionWorkflowTest extends TestCase
             'competency_id' => $competency->id,
             'theme' => 'Jika 3 kotak masing-masing berisi 4 pensil, berapa jumlah seluruh pensil?',
             'question_style' => 'reasoning',
+            'difficulty' => 3,
             'use_illustration' => true,
             'question_count' => 1,
         ]);
@@ -390,6 +682,7 @@ class QuestionWorkflowTest extends TestCase
         $this->assertSame('direct', $generation->request_payload['format']);
         $this->assertSame(0, $generation->request_payload['paragraph_count']);
         $this->assertSame('reasoning', $generation->request_payload['question_style']);
+        $this->assertSame(3, $generation->request_payload['difficulty']);
         $this->assertTrue($generation->request_payload['use_illustration']);
         $this->assertSame('lite', $generation->request_payload['illustration_mode']);
         $this->assertSame('Jika 3 kotak masing-masing berisi 4 pensil, berapa jumlah seluruh pensil?', $generation->request_payload['example_question']);
@@ -430,12 +723,14 @@ class QuestionWorkflowTest extends TestCase
                 ->missing('illustration.cost_microusd'));
 
         $generatedQuestion = Question::query()->findOrFail($generation->result_payload['question_ids'][0]);
+        $this->assertSame(3, $generatedQuestion->difficulty);
         $this->actingAs($teacher)
             ->from(route('ai-questions.show', $generation))
             ->put(route('generated-questions.inline-update', [$generation, $generatedQuestion]), [
                 'stimulus' => 'Tiga kelompok masing-masing berisi empat benda.',
                 'prompt' => 'Berapa hasil perhitungan yang sudah diperbaiki?',
                 'explanation' => 'Jumlah benda adalah tiga kali empat, yaitu dua belas.',
+                'difficulty' => 1,
                 'options' => [
                     ['content' => '12', 'is_correct' => true],
                     ['content' => '7', 'is_correct' => false],
@@ -452,16 +747,24 @@ class QuestionWorkflowTest extends TestCase
         $generatedQuestion->refresh();
         $this->assertSame('Berapa hasil perhitungan yang sudah diperbaiki?', $generatedQuestion->prompt);
         $this->assertSame('Jumlah benda adalah tiga kali empat, yaitu dua belas.', $generatedQuestion->explanation);
+        $this->assertSame(1, $generatedQuestion->difficulty);
         $this->assertSame('12', $generatedQuestion->options()->where('is_correct', true)->firstOrFail()->content);
 
         $this->actingAs($teacher)->post(route('ai-questions.store'), [
             'subject_id' => $subject->id,
             'root_competency_id' => $competency->id,
             'competency_id' => $competency->id,
+            // The React form initializes these hidden B. Indonesia bundle slots.
+            // Direct-subject requests must ignore them instead of failing invisibly.
+            'bundle_slots' => [
+                ['question_blueprint_id' => 0, 'answer_format' => 'single_choice', 'cognitive_level' => 'textual'],
+                ['question_blueprint_id' => 0, 'answer_format' => 'true_false', 'cognitive_level' => 'inferential'],
+                ['question_blueprint_id' => 0, 'answer_format' => 'multiple_choice', 'cognitive_level' => 'evaluation'],
+            ],
             'question_style' => 'direct',
             'use_illustration' => false,
             'question_count' => 9,
-        ])->assertRedirect();
+        ])->assertSessionHasNoErrors()->assertRedirect();
 
         $withoutExample = AiGeneration::query()
             ->where('type', AiGenerationType::StoryQuestions)
@@ -660,10 +963,7 @@ class QuestionWorkflowTest extends TestCase
                     ->all() === collect($questionIds)->sort()->values()->all()));
 
         $firstQuestion = Question::query()->findOrFail($questionIds[0]);
-        $this->actingAs($teacher)
-            ->from(route('ai-questions.show', $generation))
-            ->post(route('questions.approve', $firstQuestion))
-            ->assertRedirect(route('ai-questions.show', $generation));
+        $this->verifyQuestionWithThreeTeachers($firstQuestion, $teacher);
 
         $this->assertSame(QuestionStatus::Published, $firstQuestion->fresh()->status);
         $this->assertSame(2, Question::query()->whereIn('id', $questionIds)->where('status', QuestionStatus::Draft)->count());
@@ -708,9 +1008,10 @@ class QuestionWorkflowTest extends TestCase
         $this->assertSame(QuestionStatus::Draft, $duplicate->fresh()->status);
     }
 
-    public function test_story_question_request_requires_a_theme(): void
+    public function test_story_question_request_allows_ai_to_choose_theme_when_left_empty(): void
     {
         [$teacher, $competency] = $this->teacherAndCompetency();
+        Queue::fake();
 
         $this->actingAs($teacher)
             ->post(route('story-questions.store'), [
@@ -719,7 +1020,11 @@ class QuestionWorkflowTest extends TestCase
                 'paragraph_count' => 3,
                 'question_count' => 3,
             ])
-            ->assertSessionHasErrors('theme');
+            ->assertRedirect();
+
+        $generation = AiGeneration::firstOrFail();
+        $this->assertSame('', $generation->request_payload['theme']);
+        $this->assertSame('ai', $generation->request_payload['theme_source']);
     }
 
     public function test_teacher_can_publish_all_questions_in_a_story_bundle_at_once(): void
@@ -742,22 +1047,26 @@ class QuestionWorkflowTest extends TestCase
             fn (Question $question): bool => $question->status === QuestionStatus::Draft,
         ));
 
-        $this->actingAs($teacher)
-            ->post(route('story-questions.publish', $generation))
-            ->assertRedirect()
-            ->assertSessionHas('success');
+        $additionalTeachers = $this->additionalVerificationTeachers($teacher);
+        foreach ([$teacher, ...$additionalTeachers] as $verifier) {
+            $this->actingAs($verifier)
+                ->post(route('story-questions.publish', $generation))
+                ->assertRedirect()
+                ->assertSessionHas('success');
+        }
 
         $publishedQuestions = Question::query()->whereIn('id', $questionIds)->get();
         $this->assertTrue($publishedQuestions->every(
             fn (Question $question): bool => $question->status === QuestionStatus::Published
-                && $question->approved_by === $teacher->id
+                && $question->approved_by === $additionalTeachers[1]->id
                 && $question->approved_at !== null,
         ));
         $this->actingAs($teacher)
             ->get(route('story-questions.show', $generation))
             ->assertInertia(fn (Assert $page) => $page
                 ->where('questions.0.author.name', 'Guru')
-                ->where('questions.0.approver.name', 'Guru'));
+                ->where('questions.0.approver.name', $additionalTeachers[1]->name)
+                ->where('questions.0.verification.count', 3));
         $this->assertDatabaseHas('audit_logs', [
             'action' => 'story_bundle.published',
             'auditable_type' => (new AiGeneration)->getMorphClass(),
@@ -765,10 +1074,19 @@ class QuestionWorkflowTest extends TestCase
         ]);
         $this->assertSame(3, AuditLog::query()->where('action', 'story_bundle.published')->firstOrFail()->metadata['question_count']);
 
+        $fourthTeacher = $this->verificationTeacher($teacher, 4);
+        $this->actingAs($fourthTeacher)
+            ->post(route('story-questions.publish', $generation))
+            ->assertRedirect()
+            ->assertSessionHas('success');
+        $this->assertTrue(Question::query()->whereIn('id', $questionIds)->get()->every(
+            fn (Question $question): bool => $question->verifications()->count() === 4,
+        ));
+
         $this->actingAs($teacher)
             ->post(route('story-questions.publish', $generation))
             ->assertRedirect()
-            ->assertSessionHas('success', 'Seluruh soal dalam bundle sudah terbit.');
+            ->assertSessionHas('success', 'Anda sudah memverifikasi seluruh soal dalam bundle ini.');
     }
 
     public function test_story_questions_appear_as_one_searchable_bundle_in_question_bank(): void
@@ -1040,6 +1358,62 @@ class QuestionWorkflowTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_direct_generation_with_recoverable_visual_spec_can_create_local_svg(): void
+    {
+        config()->set('ai.driver', 'gemini');
+        config()->set('ai.image.disk', 'public');
+        Storage::fake('public');
+        Http::fake();
+        [$teacher, $competency] = $this->teacherAndCompetency();
+        $question = $this->question($teacher, $competency);
+        $generation = AiGeneration::create([
+            'school_id' => $teacher->school_id,
+            'requested_by' => $teacher->id,
+            'type' => AiGenerationType::StoryQuestions,
+            'status' => AiGenerationStatus::Completed,
+            'provider' => 'gemini',
+            'model' => 'gemini-test',
+            'input_hash' => hash('sha256', 'recoverable-direct-visual-test'),
+            'request_payload' => [
+                'format' => 'direct',
+                'theme' => 'Penjualan buku harian',
+                'use_illustration' => false,
+                'illustration_mode' => null,
+            ],
+            'result_payload' => [
+                'question_ids' => [$question->id],
+                'visual_description' => 'Grafik batang penjualan buku selama tiga hari.',
+                'visual_spec' => [
+                    'type' => 'data_chart',
+                    'style' => 'bar',
+                    'title' => 'Penjualan Buku',
+                    'items' => [
+                        ['label' => 'Senin', 'value' => 25],
+                        ['label' => 'Selasa', 'value' => 40],
+                        ['label' => 'Rabu', 'value' => 30],
+                    ],
+                ],
+            ],
+        ]);
+
+        $this->actingAs($teacher)
+            ->post(route('ai-questions.illustration.store', $generation))
+            ->assertSessionHasNoErrors()
+            ->assertRedirect();
+
+        $illustration = AiGeneration::query()
+            ->where('type', AiGenerationType::StoryIllustration)
+            ->firstOrFail();
+        $question->refresh();
+
+        $this->assertSame(AiGenerationStatus::Completed, $illustration->status);
+        $this->assertSame('lite', $illustration->request_payload['illustration_mode']);
+        $this->assertSame('local-svg', $illustration->provider);
+        $this->assertSame('image/svg+xml', $illustration->result_payload['mime_type']);
+        $this->assertNotNull(data_get($question->metadata, 'illustration.path'));
+        Http::assertNothingSent();
+    }
+
     public function test_lite_clock_spec_is_rendered_as_local_svg_without_printing_digital_time(): void
     {
         config()->set('ai.driver', 'gemini');
@@ -1273,9 +1647,7 @@ class QuestionWorkflowTest extends TestCase
         $this->assertSame(2, $revision->version);
         $this->assertSame('question-illustrations/test.png', data_get($revision->metadata, 'illustration.path'));
 
-        $this->actingAs($teacher)
-            ->post(route('questions.approve', $revision))
-            ->assertRedirect();
+        $this->verifyQuestionWithThreeTeachers($revision, $teacher);
         $this->assertSame(QuestionStatus::Archived, $question->fresh()->status);
         $this->assertSame($revision->id, $question->fresh()->superseded_by_id);
         $this->assertSame(QuestionStatus::Published, $revision->fresh()->status);
@@ -1379,6 +1751,40 @@ class QuestionWorkflowTest extends TestCase
         ]);
 
         return $question;
+    }
+
+    /** @return array{User, User} */
+    private function additionalVerificationTeachers(User $teacher): array
+    {
+        return collect([2, 3])->map(fn (int $number): User => $this->verificationTeacher($teacher, $number))->all();
+    }
+
+    private function verificationTeacher(User $teacher, int $number): User
+    {
+        return User::create([
+            'school_id' => $teacher->school_id,
+            'name' => "Guru Verifikator {$number}",
+            'email' => "guru-verifikator-{$number}@example.com",
+            'password' => 'password',
+            'role' => UserRole::Teacher,
+            'is_active' => true,
+            'approved_at' => now(),
+            'email_verified_at' => now(),
+        ]);
+    }
+
+    /** @return array{User, User, User} */
+    private function verifyQuestionWithThreeTeachers(Question $question, User $teacher): array
+    {
+        $verifiers = [$teacher, ...$this->additionalVerificationTeachers($teacher)];
+
+        foreach ($verifiers as $verifier) {
+            $this->actingAs($verifier)
+                ->post(route('questions.approve', $question))
+                ->assertRedirect();
+        }
+
+        return $verifiers;
     }
 
     private function payload(Competency $competency, string $prompt): array

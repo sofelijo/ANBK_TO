@@ -11,6 +11,7 @@ type Competency = {
     grade_level: number;
     subject?: { id: number; code: string; name: string };
     parent?: { id: number; code: string; name: string };
+    question_blueprints: { id: number; code: string; name: string; position: number }[];
     questions_count: number;
     children_count: number;
     can_manage: boolean;
@@ -66,7 +67,7 @@ export default function Index({
                             Klasifikasi Bank Soal
                         </p>
                         <h1 className="mt-1 text-2xl font-bold text-slate-900">
-                            Kompetensi & Subkompetensi
+                            Kompetensi, Subkompetensi & Tipe Soal
                         </h1>
                     </div>
                     <div className="flex flex-wrap gap-2"><Link href={route('question-types.index')} className="inline-flex justify-center rounded-xl border border-indigo-200 bg-white px-5 py-3 text-sm font-bold text-indigo-700">Tipe Soal B. Indonesia</Link><Link href={route('competencies.create')} className="inline-flex justify-center rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white hover:bg-emerald-500">Tambah kompetensi</Link></div>
@@ -189,6 +190,12 @@ export default function Index({
                                                                 <span className="font-bold text-slate-900">{competency.parent.name}</span>
                                                             </div>
                                                         )}
+                                                        {competency.subject?.code === 'BIND' && competency.question_blueprints.length > 0 && <div className="mt-3 grid gap-1.5">
+                                                            {competency.question_blueprints.map((blueprint, index) => <div key={blueprint.id} className="flex items-center gap-2 text-xs">
+                                                                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-100 font-bold text-indigo-700">{index + 1}</span>
+                                                                <span className="rounded-md bg-indigo-50 px-2 py-1 font-medium text-indigo-800" title={blueprint.code}>{blueprint.name}</span>
+                                                            </div>)}
+                                                        </div>}
                                                     </div>
                                                 </td>
                                             <td className="px-5 py-4 text-sm text-slate-600">
@@ -213,6 +220,7 @@ export default function Index({
                                                         subkompetensi
                                                     </p>
                                                 )}
+                                                {competency.subject?.code === 'BIND' && competency.question_blueprints.length > 0 && <p className="mt-1 text-xs text-indigo-500">{competency.question_blueprints.length} tipe soal</p>}
                                             </td>
                                             <td className="px-5 py-4">
                                                 {competency.can_manage ? (

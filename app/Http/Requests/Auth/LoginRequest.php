@@ -49,9 +49,12 @@ class LoginRequest extends FormRequest
         if ($user && Hash::check($this->string('password')->toString(), $user->password) && ! $user->is_active) {
             RateLimiter::hit($this->throttleKey());
 
-            $message = $user->role === UserRole::Teacher && $user->approved_at === null
-                ? 'Akun guru Anda masih menunggu persetujuan admin sekolah.'
-                : 'Akun Anda sedang dinonaktifkan. Hubungi admin sekolah.';
+            $message = match (true) {
+                $user->role === UserRole::Student && $user->approved_at === null => 'Akun murid Anda masih menunggu persetujuan operator sekolah.',
+                $user->role === UserRole::Teacher && $user->approved_at === null => 'Akun guru Anda masih menunggu persetujuan admin sekolah.',
+                $user->role === UserRole::Operator && $user->approved_at === null => 'Akun operator Anda masih menunggu persetujuan admin sekolah.',
+                default => 'Akun Anda sedang dinonaktifkan. Hubungi admin sekolah.',
+            };
 
             throw ValidationException::withMessages(['email' => $message]);
         }

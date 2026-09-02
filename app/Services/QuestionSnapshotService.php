@@ -80,6 +80,18 @@ class QuestionSnapshotService
         return StorageUrl::for($disk, $path);
     }
 
+    public function explanationImageUrl(array $snapshot): ?string
+    {
+        $disk = data_get($snapshot, 'metadata.explanation_illustration.disk');
+        $path = data_get($snapshot, 'metadata.explanation_illustration.path');
+
+        if (! is_string($disk) || $disk === '' || ! is_string($path) || $path === '') {
+            return null;
+        }
+
+        return StorageUrl::for($disk, $path);
+    }
+
     private function decode(mixed $snapshot): ?array
     {
         if (is_string($snapshot)) {

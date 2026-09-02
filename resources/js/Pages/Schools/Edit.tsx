@@ -6,6 +6,7 @@ import { FormEvent, ReactNode } from 'react';
 type School = {
     name: string;
     npsn: string;
+    subdistrict: string | null;
     timezone: string;
     address: string;
     province: string;
@@ -16,7 +17,7 @@ type School = {
 
 type Timezone = { value: string; label: string };
 
-export default function Edit({ school, timezones }: { school: School; timezones: Timezone[] }) {
+export default function Edit({ school, timezones, subdistricts }: { school: School; timezones: Timezone[]; subdistricts: string[] }) {
     const { data, setData, patch, processing, errors, recentlySuccessful } = useForm(school);
 
     const submit = (event: FormEvent) => {
@@ -32,6 +33,18 @@ export default function Edit({ school, timezones }: { school: School; timezones:
                     <div className="grid gap-5 sm:grid-cols-2">
                         <Field label="Nama sekolah" error={errors.name}><input value={data.name} onChange={(event) => setData('name', event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300" /></Field>
                         <Field label="NPSN" error={errors.npsn}><input inputMode="numeric" maxLength={8} value={data.npsn} onChange={(event) => setData('npsn', event.target.value.replace(/\D/g, '').slice(0, 8))} className="mt-1 block w-full rounded-lg border-slate-300" /><p className="mt-1 text-xs text-amber-700">Perubahan NPSN otomatis diterapkan ke jadwal sekolah.</p></Field>
+                        <Field label="Kecamatan" error={errors.subdistrict}>
+                            <select
+                                value={data.subdistrict ?? ''}
+                                onChange={(event) => setData('subdistrict', event.target.value)}
+                                className="mt-1 block w-full rounded-lg border-slate-300"
+                                required
+                            >
+                                <option value="">Pilih kecamatan</option>
+                                {subdistricts.map((subdistrict) => <option key={subdistrict} value={subdistrict}>{subdistrict}</option>)}
+                            </select>
+                            <p className="mt-1 text-xs text-slate-500">Digunakan pada analisis wilayah Sudin Pendidikan Jakarta Utara Wilayah II.</p>
+                        </Field>
                         <Field label="Nama kepala sekolah" error={errors.principal_name}><input value={data.principal_name} onChange={(event) => setData('principal_name', event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300" /></Field>
                         <Field label="Nomor telepon" error={errors.phone}><input value={data.phone} onChange={(event) => setData('phone', event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300" /></Field>
                         <Field label="Provinsi" error={errors.province}><input value={data.province} onChange={(event) => setData('province', event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300" /></Field>

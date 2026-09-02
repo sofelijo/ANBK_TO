@@ -5,8 +5,9 @@ import { useState } from 'react';
 type Result = { id: number; percentage: number; correct_count: number; question_count: number; competency: { code: string; domain: string; name: string } };
 type Recommendation = { id: number; reason: string; competency: { code: string; name: string }; question: { id: number; prompt: string; stimulus?: string } };
 type Attempt = { public_id: string; score: number; max_score: number; summary: string; assessment: { title: string }; competency_results: Result[]; recommendations: Recommendation[] };
+type QuestionReview = { id: number; position: number; prompt: string; explanation?: string; explanation_image_url?: string; explanation_image_alt?: string; is_correct: boolean };
 
-export default function ResultPage({ attempt }: { attempt: Attempt }) {
+export default function ResultPage({ attempt, questionReviews }: { attempt: Attempt; questionReviews: QuestionReview[] }) {
     const [openingChat, setOpeningChat] = useState(false);
     const percentage = attempt.max_score > 0 ? Math.round((attempt.score / attempt.max_score) * 100) : 0;
     const openPracticeChat = () => {
@@ -48,6 +49,26 @@ export default function ResultPage({ attempt }: { attempt: Attempt }) {
                                 <div className="flex justify-between gap-4 text-sm"><span className="font-medium text-slate-800">{result.competency.name}</span><span className="text-slate-500">{result.percentage}%</span></div>
                                 <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100"><div className={`h-full rounded-full ${result.percentage < 50 ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${result.percentage}%` }} /></div>
                             </div>
+                        ))}
+                    </div>
+                </section>
+
+                <section>
+                    <h2 className="text-lg font-semibold text-slate-900">Pembahasan soal</h2>
+                    <p className="mt-1 text-sm text-slate-500">Pelajari kembali jawaban setelah try out selesai.</p>
+                    <div className="mt-4 space-y-4">
+                        {questionReviews.map((question) => (
+                            <article key={question.id} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Soal {question.position}</p>
+                                    <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${question.is_correct ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>{question.is_correct ? 'Benar' : 'Perlu dipelajari'}</span>
+                                </div>
+                                <p className="mt-3 font-medium leading-7 text-slate-900">{question.prompt}</p>
+                                {question.explanation
+                                    ? <p className="mt-4 whitespace-pre-wrap rounded-lg bg-indigo-50 p-4 text-sm leading-7 text-slate-700">{question.explanation}</p>
+                                    : !question.explanation_image_url && <p className="mt-4 text-sm italic text-slate-400">Belum ada pembahasan untuk soal ini.</p>}
+                                {question.explanation_image_url && <img src={question.explanation_image_url} alt={question.explanation_image_alt || 'Gambar pembahasan soal'} className="mt-4 max-h-[32rem] w-full rounded-xl border border-slate-200 bg-white object-contain" />}
+                            </article>
                         ))}
                     </div>
                 </section>

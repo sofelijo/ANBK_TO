@@ -70,6 +70,7 @@ class AssessmentScheduleWorkflowTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page
                 ->has('assessments', 1)
                 ->has('assessments.0.schedules', 1)
+                ->where('assessments.0.average_difficulty', 1)
                 ->where('assessments.0.settings.type', Assessment::TYPE_TOGETHER));
 
         $this->actingAs($otherStudent)

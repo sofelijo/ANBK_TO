@@ -10,7 +10,6 @@ use App\Models\User;
 use App\Services\AuditLogger;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class StudentAccessController extends Controller
@@ -30,8 +29,6 @@ class StudentAccessController extends Controller
                 ->where('student_identifier', $nisn)
                 ->first()
             : null;
-        $wasCreated = false;
-
         if ($student && $student->role !== UserRole::Student) {
             $request->recordFailedAttempt();
 
@@ -44,38 +41,18 @@ class StudentAccessController extends Controller
             $request->recordFailedAttempt();
 
             throw ValidationException::withMessages([
-                'nisn' => 'Akun siswa sedang dinonaktifkan. Hubungi guru, operator, atau admin sekolah.',
+                'nisn' => $student->approved_at === null
+                    ? 'Pendaftaran akun masih menunggu persetujuan operator sekolah.'
+                    : 'Akun siswa sedang dinonaktifkan. Hubungi operator atau admin sekolah.',
             ]);
         }
 
         if (! $student) {
-            $name = Str::squish($request->string('name')->toString());
+            $request->recordFailedAttempt();
 
-            if ($name === '') {
-                $request->recordFailedAttempt();
-
-                throw ValidationException::withMessages([
-                    'name' => 'Isi nama lengkap untuk membuat akun pertama kali.',
-                ]);
-            }
-
-            $school ??= School::firstOrCreate(
-                ['npsn' => $npsn],
-                ['name' => "Sekolah NPSN {$npsn}"]
-            );
-
-            $student = User::create([
-                'school_id' => $school->id,
-                'name' => $name,
-                'email' => "student.{$school->id}.{$nisn}@toa.local",
-                'password' => Str::random(40),
-                'role' => UserRole::Student,
-                'student_identifier' => $nisn,
-                'grade_level' => $request->integer('grade_level', 6),
-                'email_verified_at' => now(),
-                'is_active' => true,
+            throw ValidationException::withMessages([
+                'nisn' => 'Akun belum terdaftar. Silakan daftar sebagai murid terlebih dahulu.',
             ]);
-            $wasCreated = true;
         }
 
         Auth::login($student);
@@ -85,7 +62,7 @@ class StudentAccessController extends Controller
 
         $auditLogger->log(
             $request,
-            $wasCreated ? 'student.auto_registered' : 'student.logged_in_without_password',
+            'student.logged_in_without_password',
             $student,
             ['npsn' => $school->npsn]
         );

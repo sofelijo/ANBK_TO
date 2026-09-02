@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 #[Fillable([
-    'school_id', 'requested_by', 'source_question_id', 'attempt_id', 'type',
+    'school_id', 'requested_by', 'source_question_id', 'attempt_id', 'assessment_id', 'type',
     'status', 'provider', 'model', 'input_hash', 'request_payload',
     'result_payload', 'input_tokens', 'output_tokens', 'cost_microusd', 'error',
 ])]
@@ -46,5 +46,10 @@ class AiGeneration extends Model
     public function attempt(): BelongsTo
     {
         return $this->belongsTo(Attempt::class);
+    }
+
+    public function assessment(): BelongsTo
+    {
+        return $this->belongsTo(Assessment::class);
     }
 }

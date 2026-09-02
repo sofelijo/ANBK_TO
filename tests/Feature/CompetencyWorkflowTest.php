@@ -7,6 +7,7 @@ use App\Enums\QuestionType;
 use App\Enums\UserRole;
 use App\Models\Competency;
 use App\Models\Question;
+use App\Models\QuestionBlueprint;
 use App\Models\School;
 use App\Models\Subject;
 use App\Models\User;
@@ -140,6 +141,42 @@ class CompetencyWorkflowTest extends TestCase
                         default => false,
                     }
                 )));
+    }
+
+    public function test_bahasa_indonesia_competency_displays_its_three_ordered_question_types(): void
+    {
+        [$teacher] = $this->users();
+        $subject = Subject::create([
+            'school_id' => $teacher->school_id,
+            'code' => 'BIND',
+            'name' => 'Bahasa Indonesia',
+            'ai_question_format' => 'story',
+        ]);
+        $competency = Competency::create([
+            'school_id' => $teacher->school_id,
+            'subject_id' => $subject->id,
+            'code' => 'BIND-DESKRIPSI',
+            'domain' => 'Informasi',
+            'name' => 'Informasi – Teks Deskripsi',
+            'grade_level' => 6,
+        ]);
+        foreach (['Objek berdasarkan kosakata', 'Informasi tersurat', 'Ide pokok'] as $index => $name) {
+            $blueprint = QuestionBlueprint::create([
+                'school_id' => $teacher->school_id,
+                'subject_id' => $subject->id,
+                'code' => 'TIPE-'.($index + 1),
+                'name' => $name,
+            ]);
+            $blueprint->competencies()->attach($competency->id, ['position' => $index + 1]);
+        }
+
+        $this->actingAs($teacher)
+            ->get(route('competencies.index', ['subject_id' => $subject->id]))
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('competencies', 1)
+                ->where('competencies.0.question_blueprints.0.name', 'Objek berdasarkan kosakata')
+                ->where('competencies.0.question_blueprints.1.name', 'Informasi tersurat')
+                ->where('competencies.0.question_blueprints.2.name', 'Ide pokok'));
     }
 
     public function test_legacy_grade_is_normalized_when_competency_is_updated(): void

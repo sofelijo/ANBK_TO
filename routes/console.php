@@ -9,3 +9,4 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('ai:poll-image-batches')->everyFiveMinutes()->withoutOverlapping();
+Schedule::command('attempts:submit-expired')->everyMinute()->withoutOverlapping(5);

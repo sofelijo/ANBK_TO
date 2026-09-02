@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\AssessmentSchedule;
+use App\Models\School;
 use App\Services\AuditLogger;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -28,6 +29,7 @@ class SchoolProfileController extends Controller
             'school' => [
                 'name' => $school->name,
                 'npsn' => $school->npsn,
+                'subdistrict' => $school->subdistrict,
                 'timezone' => $school->timezone,
                 'address' => data_get($school->settings, 'address', ''),
                 'province' => data_get($school->settings, 'province', ''),
@@ -38,6 +40,7 @@ class SchoolProfileController extends Controller
             'timezones' => collect(self::TIMEZONES)
                 ->map(fn (string $label, string $value): array => compact('value', 'label'))
                 ->values(),
+            'subdistricts' => School::SUBDISTRICTS,
         ]);
     }
 
@@ -47,6 +50,7 @@ class SchoolProfileController extends Controller
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'npsn' => ['required', 'digits:8', Rule::unique('schools', 'npsn')->ignore($school->id)],
+            'subdistrict' => ['required', Rule::in(School::SUBDISTRICTS)],
             'timezone' => ['required', Rule::in(array_keys(self::TIMEZONES))],
             'address' => ['nullable', 'string', 'max:1000'],
             'province' => ['nullable', 'string', 'max:100'],
@@ -56,6 +60,7 @@ class SchoolProfileController extends Controller
         ]);
 
         $oldNpsn = $school->npsn;
+        $oldSubdistrict = $school->subdistrict;
         $settings = array_replace(
             $school->settings ?? [],
             Arr::only($data, ['address', 'province', 'city', 'principal_name', 'phone']),
@@ -65,6 +70,7 @@ class SchoolProfileController extends Controller
             $school->update([
                 'name' => $data['name'],
                 'npsn' => $data['npsn'],
+                'subdistrict' => $data['subdistrict'],
                 'timezone' => $data['timezone'],
                 'settings' => $settings,
             ]);
@@ -79,6 +85,8 @@ class SchoolProfileController extends Controller
         $auditLogger->log($request, 'school.updated', $school, [
             'old_npsn' => $oldNpsn,
             'new_npsn' => $school->npsn,
+            'old_subdistrict' => $oldSubdistrict,
+            'new_subdistrict' => $school->subdistrict,
         ]);
 
         return back()->with('success', 'Data sekolah berhasil diperbarui.');

@@ -13,6 +13,7 @@ type Question = {
     grade_level: number;
     difficulty: number;
     variants_count: number;
+    verifications_count: number;
     story_generation_id?: number;
     story_generation?: {
         id: number;
@@ -21,6 +22,7 @@ type Question = {
     };
     bundle_question_count: number;
     bundle_draft_count: number;
+    bundle_review_count: number;
     bundle_published_count: number;
     bundle_archived_count: number;
     competency: { code: string; name: string; subject?: { code: string; name: string } };
@@ -108,7 +110,7 @@ export default function Index({ questions, subjects, filters }: Props) {
                             >
                                 <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-600 text-lg font-bold text-white">AI</div>
                                 <h3 className="mt-4 font-bold text-slate-900 group-hover:text-indigo-700">Buat dengan AI</h3>
-                                <p className="mt-2 text-sm leading-6 text-slate-600">AI membuat cerita beserta 2–4 soal berdasarkan mapel dan kompetensi yang dipilih.</p>
+                                <p className="mt-2 text-sm leading-6 text-slate-600">Bahasa Indonesia dibuat sebagai 1 cerita + 3 soal sesuai tipe jawaban dan Level 1–3. Mapel lain mengikuti format AI masing-masing.</p>
                                 <span className="mt-4 inline-block text-sm font-semibold text-indigo-700">Pilih mapel →</span>
                             </button>
 
@@ -119,7 +121,7 @@ export default function Index({ questions, subjects, filters }: Props) {
                             >
                                 <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-600 text-xl font-bold text-white">✎</div>
                                 <h3 className="mt-4 font-bold text-slate-900 group-hover:text-emerald-700">Buat manual</h3>
-                                <p className="mt-2 text-sm leading-6 text-slate-600">Tulis sendiri stimulus, tipe jawaban, kompetensi, kunci, serta pembahasan.</p>
+                                <p className="mt-2 text-sm leading-6 text-slate-600">Bahasa Indonesia memakai form 1 bacaan + 3 soal. Mapel lain tetap dibuat satu soal per form.</p>
                                 <span className="mt-4 inline-block text-sm font-semibold text-emerald-700">Pilih mapel →</span>
                             </button>
                         </div>
@@ -135,11 +137,12 @@ export default function Index({ questions, subjects, filters }: Props) {
                                             key={subject.id}
                                             href={route(createMethod === 'ai'
                                                 ? subject.ai_question_format === 'story' ? 'story-questions.create' : 'ai-questions.create'
-                                                : 'questions.create', { subject_id: subject.id })}
+                                                : subject.code === 'BIND' ? 'manual-story-bundles.create' : 'questions.create', { subject_id: subject.id })}
                                             className="rounded-xl border border-slate-200 p-4 transition hover:border-emerald-400 hover:bg-emerald-50"
                                         >
                                             <span className="text-xs font-bold uppercase tracking-wide text-emerald-600">{subject.code}</span>
                                             <h3 className="mt-1 font-semibold text-slate-900">{subject.name}</h3>
+                                            {subject.code === 'BIND' && <span className="mt-2 block text-xs font-medium text-indigo-600">1 bacaan · 3 soal · Level 1–3</span>}
                                             <span className="mt-3 inline-block text-sm font-semibold text-slate-500">Pilih mapel →</span>
                                         </Link>
                                     ))}
@@ -168,6 +171,7 @@ export default function Index({ questions, subjects, filters }: Props) {
                     >
                         <option value="">Semua status</option>
                         <option value="draft">Draft</option>
+                        <option value="review">Menunggu verifikasi</option>
                         <option value="published">Terbit</option>
                         <option value="archived">Arsip</option>
                     </select>
@@ -201,17 +205,19 @@ export default function Index({ questions, subjects, filters }: Props) {
                                                         <>
                                                             <span className="rounded-full bg-indigo-100 px-2.5 py-1 text-xs font-semibold text-indigo-700">Bundel cerita</span>
                                                             {question.bundle_draft_count > 0 && <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700">{question.bundle_draft_count} draft</span>}
+                                                            {question.bundle_review_count > 0 && <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">{question.bundle_review_count} menunggu verifikasi</span>}
                                                             {question.bundle_published_count > 0 && <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">{question.bundle_published_count} terbit</span>}
                                                             {question.bundle_archived_count > 0 && <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">{question.bundle_archived_count} arsip</span>}
                                                         </>
                                                     ) : (
                                                         <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${question.status === 'published' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-                                                            {question.status}
+                                                            {question.status === 'review' ? 'menunggu verifikasi' : question.status}
                                                         </span>
                                                     )}
                                                     <span className="text-xs text-slate-500">Kelas {question.grade_level}</span>
                                                     {!bundled && <span className="text-xs text-slate-500">Kesulitan {question.difficulty}</span>}
                                                     {!bundled && question.version > 1 && <span className="text-xs font-semibold text-indigo-600">Versi {question.version}</span>}
+                                                    {!bundled && <span className="text-xs font-semibold text-blue-600">{question.verifications_count}{question.status === 'published' ? '' : '/3'} verifikasi</span>}
                                                 </div>
                                                 <h2 className="mt-2 font-semibold text-slate-900">
                                                     {bundled
