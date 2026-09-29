@@ -87,6 +87,56 @@ class AdminUserWorkflowTest extends TestCase
         $this->assertAuthenticatedAs($teacher);
     }
 
+    public function test_admin_can_see_and_approve_pending_teacher_from_another_school(): void
+    {
+        [$admin] = $this->users();
+        $otherSchool = School::create(['name' => 'Sekolah Lain', 'npsn' => '10000007']);
+        $teacher = User::create([
+            'school_id' => $otherSchool->id,
+            'name' => 'Guru Lintas Sekolah',
+            'email' => 'guru-lintas-sekolah@example.com',
+            'password' => 'password',
+            'role' => UserRole::Teacher,
+            'is_active' => false,
+        ]);
+
+        $this->actingAs($admin)
+            ->get(route('admin.users.index', ['status' => 'pending']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('pendingCount', 1)
+                ->where('users.data.0.id', $teacher->id)
+                ->where('users.data.0.school.npsn', '10000007'));
+
+        $this->actingAs($admin)
+            ->patch(route('admin.users.approve', $teacher))
+            ->assertRedirect()
+            ->assertSessionHas('success');
+
+        $teacher->refresh();
+        $this->assertTrue($teacher->is_active);
+        $this->assertSame($admin->id, $teacher->approved_by);
+    }
+
+    public function test_admin_cannot_approve_operator_from_another_school(): void
+    {
+        [$admin] = $this->users();
+        $otherSchool = School::create(['name' => 'Sekolah Lain', 'npsn' => '10000017']);
+        $operator = User::create([
+            'school_id' => $otherSchool->id,
+            'name' => 'Operator Sekolah Lain',
+            'email' => 'operator-sekolah-lain@example.com',
+            'password' => 'password',
+            'role' => UserRole::Operator,
+            'is_active' => false,
+        ]);
+
+        $this->actingAs($admin)
+            ->patch(route('admin.users.approve', $operator))
+            ->assertNotFound();
+
+        $this->assertFalse($operator->fresh()->is_active);
+    }
+
     public function test_admin_can_create_school_operator(): void
     {
         [$admin] = $this->users();

@@ -13,6 +13,10 @@ type User = {
     is_active: boolean;
     approved_at?: string;
     last_login_at?: string;
+    school?: {
+        name: string;
+        npsn: string;
+    };
 };
 
 type Props = {
@@ -53,7 +57,7 @@ export default function Index({ users, filters, schoolNpsn, pendingCount }: Prop
     };
 
     return (
-                <AuthenticatedLayout header={<div><div className="flex flex-wrap items-center gap-3"><div><p className="text-sm font-medium text-emerald-600">Administrasi</p><h1 className="mt-1 text-2xl font-bold text-slate-900">Pengguna Sekolah</h1><p className="mt-1 text-sm text-slate-500">NPSN sekolah: <span className="font-semibold text-slate-700">{schoolNpsn}</span></p></div>{pendingCount > 0 && <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-800">{pendingCount} guru/operator menunggu persetujuan</span>}</div></div>}>
+                <AuthenticatedLayout header={<div><div className="flex flex-wrap items-center gap-3"><div><p className="text-sm font-medium text-emerald-600">Administrasi</p><h1 className="mt-1 text-2xl font-bold text-slate-900">Pengguna Sekolah</h1><p className="mt-1 text-sm text-slate-500">NPSN sekolah: <span className="font-semibold text-slate-700">{schoolNpsn}</span></p></div>{pendingCount > 0 && <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-800">{pendingCount} guru lintas sekolah/operator menunggu persetujuan</span>}</div></div>}>
             <Head title="Pengguna" />
             <div className="mx-auto grid max-w-7xl gap-6 px-4 py-8 sm:px-6 lg:grid-cols-[320px_minmax(0,1fr)] lg:px-8">
                 <form onSubmit={submit} className="h-fit rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -80,7 +84,7 @@ export default function Index({ users, filters, schoolNpsn, pendingCount }: Prop
                             {users.data.map((user) => {
                                 const pending = (user.role === 'teacher' || user.role === 'operator') && !user.is_active && !user.approved_at;
 
-                                return <div key={user.id} className={`flex flex-col justify-between gap-3 p-5 xl:flex-row xl:items-center ${pending ? 'bg-amber-50/60' : ''}`}><div><div className="flex flex-wrap items-center gap-2"><p className="font-semibold text-slate-900">{user.name}</p><span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${pending ? 'bg-amber-100 text-amber-800' : user.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{pending ? 'menunggu persetujuan' : user.is_active ? 'aktif' : 'nonaktif'}</span></div><p className="mt-1 text-sm text-slate-500">{user.email} · {roleLabels[user.role]}{user.grade_level ? ` · kelas ${user.grade_level}` : ''}</p></div>{pending ? <button onClick={() => router.patch(route('admin.users.approve', user.id), {}, { preserveScroll: true })} className="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500">Setujui {roleLabels[user.role]}</button> : <button onClick={() => router.patch(route('admin.users.toggle-active', user.id), {}, { preserveScroll: true })} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700">{user.is_active ? 'Nonaktifkan' : 'Aktifkan'}</button>}</div>;
+                                return <div key={user.id} className={`flex flex-col justify-between gap-3 p-5 xl:flex-row xl:items-center ${pending ? 'bg-amber-50/60' : ''}`}><div><div className="flex flex-wrap items-center gap-2"><p className="font-semibold text-slate-900">{user.name}</p><span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${pending ? 'bg-amber-100 text-amber-800' : user.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{pending ? 'menunggu persetujuan' : user.is_active ? 'aktif' : 'nonaktif'}</span></div><p className="mt-1 text-sm text-slate-500">{user.email} · {roleLabels[user.role]}{user.grade_level ? ` · kelas ${user.grade_level}` : ''}{user.school ? ` · ${user.school.name} (${user.school.npsn})` : ''}</p></div>{pending ? <button onClick={() => router.patch(route('admin.users.approve', user.id), {}, { preserveScroll: true })} className="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500">Setujui {roleLabels[user.role]}</button> : <button onClick={() => router.patch(route('admin.users.toggle-active', user.id), {}, { preserveScroll: true })} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700">{user.is_active ? 'Nonaktifkan' : 'Aktifkan'}</button>}</div>;
                             })}
                         </div>
                     </div>
