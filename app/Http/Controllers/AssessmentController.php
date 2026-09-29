@@ -6,6 +6,7 @@ use App\Enums\AssessmentStatus;
 use App\Enums\QuestionStatus;
 use App\Enums\QuestionType;
 use App\Enums\UserRole;
+use App\Models\AiGeneration;
 use App\Models\Assessment;
 use App\Models\Competency;
 use App\Models\Question;
@@ -31,7 +32,50 @@ class AssessmentController extends Controller
             return to_route('schedules.index');
         }
 
+        $subjects = Subject::query()
+            ->orderBy('name')
+            ->get(['id', 'code', 'name']);
+        $subjectOptions = $subjects
+            ->groupBy(fn (Subject $subject) => mb_strtolower(trim($subject->name)))
+            ->map(function (Collection $matchingSubjects, string $normalizedName): array {
+                $canonicalSubject = $matchingSubjects
+                    ->sortBy(fn (Subject $subject) => [mb_strlen($subject->code), $subject->code])
+                    ->first();
+
+                return [
+                    'value' => "subject:{$normalizedName}",
+                    'code' => $canonicalSubject->code,
+                    'name' => $canonicalSubject->name,
+                ];
+            })
+            ->values();
+        $subjectFilter = $request->string('subject')->toString();
+        $typeFilter = $request->string('type')->toString();
+        $questionSubjectCount = fn () => DB::table('assessment_question')
+            ->join('questions', 'questions.id', '=', 'assessment_question.question_id')
+            ->join('competencies', 'competencies.id', '=', 'questions.competency_id')
+            ->join('subjects', 'subjects.id', '=', 'competencies.subject_id')
+            ->whereColumn('assessment_question.assessment_id', 'assessments.id')
+            ->selectRaw('COUNT(DISTINCT LOWER(TRIM(subjects.name)))');
+        $questionSubjectId = fn () => DB::table('assessment_question')
+            ->join('questions', 'questions.id', '=', 'assessment_question.question_id')
+            ->join('competencies', 'competencies.id', '=', 'questions.competency_id')
+            ->whereColumn('assessment_question.assessment_id', 'assessments.id')
+            ->selectRaw('MIN(competencies.subject_id)');
+        $questionSubjectName = fn () => DB::table('assessment_question')
+            ->join('questions', 'questions.id', '=', 'assessment_question.question_id')
+            ->join('competencies', 'competencies.id', '=', 'questions.competency_id')
+            ->join('subjects', 'subjects.id', '=', 'competencies.subject_id')
+            ->whereColumn('assessment_question.assessment_id', 'assessments.id')
+            ->selectRaw('MIN(subjects.name)');
+
         $query = Assessment::query()
+            ->select('assessments.*')
+            ->addSelect([
+                'question_subject_count' => $questionSubjectCount(),
+                'question_subject_id' => $questionSubjectId(),
+                'question_subject_name' => $questionSubjectName(),
+            ])
             ->withCount(['questions', 'attempts'])
             ->withAvg('questions as average_difficulty', 'difficulty')
             ->latest();
@@ -43,18 +87,59 @@ class AssessmentController extends Controller
                 ->with(['schedules' => fn ($schedules) => $schedules->where('school_npsn', $schoolNpsn)])
                 ->with(['attempts' => fn ($attempts) => $attempts->where('user_id', $user->id)]);
         } else {
-            $query->where('school_id', $user->school_id)
-                ->withCount('schedules')
+            $query->withCount('schedules')
                 ->with(['questions:id,competency_id', 'questions.competency:id,parent_id,code,name']);
         }
 
+        if ($subjectFilter === 'mixed') {
+            $query->where($questionSubjectCount(), '>', 1);
+        } elseif (str_starts_with($subjectFilter, 'subject:') && $subjectOptions->contains('value', $subjectFilter)) {
+            $normalizedSubjectName = mb_substr($subjectFilter, mb_strlen('subject:'));
+            $query->where(function ($filtered) use ($questionSubjectCount, $normalizedSubjectName) {
+                $filtered->where(function ($withQuestions) use ($questionSubjectCount, $normalizedSubjectName) {
+                    $withQuestions->where($questionSubjectCount(), '=', 1)
+                        ->whereExists(fn ($questionSubjects) => $questionSubjects
+                            ->selectRaw('1')
+                            ->from('assessment_question')
+                            ->join('questions', 'questions.id', '=', 'assessment_question.question_id')
+                            ->join('competencies', 'competencies.id', '=', 'questions.competency_id')
+                            ->join('subjects', 'subjects.id', '=', 'competencies.subject_id')
+                            ->whereColumn('assessment_question.assessment_id', 'assessments.id')
+                            ->whereRaw('LOWER(TRIM(subjects.name)) = ?', [$normalizedSubjectName]));
+                })->orWhere(function ($withoutQuestions) use ($questionSubjectCount, $normalizedSubjectName) {
+                    $withoutQuestions->where($questionSubjectCount(), '=', 0)
+                        ->whereHas('subject', fn ($subject) => $subject
+                            ->whereRaw('LOWER(TRIM(name)) = ?', [$normalizedSubjectName]));
+                });
+            });
+        } elseif (ctype_digit($subjectFilter) && $subjects->contains('id', (int) $subjectFilter)) {
+            $subjectId = (int) $subjectFilter;
+            $query->where(function ($filtered) use ($questionSubjectCount, $questionSubjectId, $subjectId) {
+                $filtered->where(function ($withQuestions) use ($questionSubjectCount, $questionSubjectId, $subjectId) {
+                    $withQuestions->where($questionSubjectCount(), '=', 1)
+                        ->where($questionSubjectId(), '=', $subjectId);
+                })->orWhere(function ($withoutQuestions) use ($questionSubjectCount, $subjectId) {
+                    $withoutQuestions->where($questionSubjectCount(), '=', 0)
+                        ->where('subject_id', $subjectId);
+                });
+            });
+        }
+
+        if ($typeFilter === Assessment::TYPE_TOGETHER) {
+            $query->where('settings->type', Assessment::TYPE_TOGETHER);
+        } elseif ($typeFilter === Assessment::TYPE_REGULAR) {
+            $query->where(fn ($regular) => $regular
+                ->whereNull('settings->type')
+                ->orWhere('settings->type', Assessment::TYPE_REGULAR));
+        }
+
         $assessments = $query->get();
+        $subjectsById = $subjects->keyBy('id');
 
         // Build sub-competency coverage per assessment for the manage view
         $subCompetencies = [];
         if ($user->hasRole(UserRole::Admin, UserRole::Teacher)) {
             $subCompetencies = Competency::query()
-                ->where(fn ($q) => $q->whereNull('school_id')->orWhere('school_id', $user->school_id))
                 ->whereNotNull('parent_id')
                 ->get(['id', 'parent_id', 'code', 'name', 'grade_level', 'subject_id'])
                 ->keyBy('id');
@@ -71,6 +156,18 @@ class AssessmentController extends Controller
                 'average_difficulty' => $a->average_difficulty !== null
                     ? round((float) $a->average_difficulty, 2)
                     : null,
+                'subject_label' => (int) $a->question_subject_count > 1
+                    ? 'Campuran'
+                    : ($a->question_subject_name
+                        ?: $subjectsById->get((int) $a->subject_id)?->name
+                        ?: 'Belum ditentukan'),
+                'subject_kind' => (int) $a->question_subject_count > 1
+                    ? 'mixed'
+                    : ($a->question_subject_name
+                        ? 'subject:'.mb_strtolower(trim($a->question_subject_name))
+                        : ($subjectsById->get((int) $a->subject_id)
+                            ? 'subject:'.mb_strtolower(trim($subjectsById->get((int) $a->subject_id)->name))
+                            : 'unassigned')),
                 'competency_coverage' => $user->hasRole(UserRole::Admin, UserRole::Teacher)
                     ? $a->questions
                         ->pluck('competency')
@@ -79,11 +176,19 @@ class AssessmentController extends Controller
                         ->groupBy('id')
                         ->map->count()
                     : null,
+                'can_manage' => $user->hasRole(UserRole::Admin, UserRole::Teacher),
             ]),
             'canManage' => $user->hasRole(UserRole::Admin, UserRole::Teacher),
             'subCompetencies' => $user->hasRole(UserRole::Admin, UserRole::Teacher)
                 ? $subCompetencies->values()
                 : [],
+            'subjects' => $subjectOptions,
+            'filters' => [
+                'subject' => $subjectFilter,
+                'type' => in_array($typeFilter, [Assessment::TYPE_REGULAR, Assessment::TYPE_TOGETHER], true)
+                    ? $typeFilter
+                    : '',
+            ],
         ]);
     }
 
@@ -100,7 +205,6 @@ class AssessmentController extends Controller
 
         $assessment = DB::transaction(function () use ($data, $questions, $candidateQuestionIds, $request): Assessment {
             $assessment = Assessment::create([
-                'school_id' => $request->user()->school_id,
                 'created_by' => $request->user()->id,
                 ...$this->attributes($data, candidateQuestionIds: $candidateQuestionIds),
                 'status' => AssessmentStatus::Draft,
@@ -115,7 +219,7 @@ class AssessmentController extends Controller
 
     public function show(Request $request, Assessment $assessment): Response
     {
-        $this->ensureSameSchool($request, $assessment);
+        $canManage = $request->user()->hasRole(UserRole::Admin, UserRole::Teacher);
 
         $assessment->load([
             'subject:id,code,name',
@@ -153,38 +257,87 @@ class AssessmentController extends Controller
             ]);
 
         $attachedQuestionIds = $questions->pluck('id')->all();
+        $seenBundleIds = [];
+        $availableBankQuestions = collect();
 
-        $availableBankQuestions = Question::query()
-            ->where('school_id', $request->user()->school_id)
-            ->where('grade_level', $assessment->grade_level)
-            ->where('status', QuestionStatus::Published)
-            ->when($assessment->subject_id, function ($q) use ($assessment) {
-                $q->whereHas('competency', fn ($c) => $c->where('subject_id', $assessment->subject_id));
-            })
-            ->whereNotIn('id', $attachedQuestionIds)
-            ->with(['competency:id,parent_id,code,name', 'competency.parent:id,name', 'options'])
-            ->latest()
-            ->limit(100)
-            ->get()
-            ->map(fn ($q) => [
-                'id' => $q->id,
-                'prompt' => $q->prompt,
-                'stimulus' => $q->stimulus,
-                'explanation' => $q->explanation,
-                'type' => $q->type,
-                'difficulty' => $q->difficulty,
-                'competency_id' => $q->competency?->id,
-                'competency_name' => $q->competency?->name ?? '-',
-                'competency_code' => $q->competency?->code ?? '-',
-                'parent_competency_name' => $q->competency?->parent?->name ?? '',
-                'options' => $q->options->map(fn ($opt) => [
-                    'id' => $opt->id,
-                    'label' => $opt->label,
-                    'content' => $opt->content,
-                    'option_text' => $opt->content ?? $opt->label ?? '',
-                    'is_correct' => (bool) $opt->is_correct,
-                ]),
-            ]);
+        if ($canManage) {
+            $availableBankQuestions = Question::query()
+                ->where('grade_level', $assessment->grade_level)
+                ->where('status', QuestionStatus::Published)
+                ->when($assessment->subject_id, function ($q) use ($assessment) {
+                    $q->whereHas('competency', fn ($c) => $c->where('subject_id', $assessment->subject_id));
+                })
+                ->whereNotIn('id', $attachedQuestionIds)
+                ->with([
+                    'competency:id,parent_id,code,name',
+                    'competency.parent:id,name',
+                    'options',
+                    'storyGeneration:id,request_payload,result_payload',
+                    'bundleQuestions' => fn ($bundleQuestions) => $bundleQuestions
+                        ->with([
+                            'competency:id,parent_id,code,name',
+                            'competency.parent:id,name',
+                            'options',
+                        ])
+                        ->orderBy('id'),
+                ])
+                ->withCount('bundleQuestions as bundle_question_count')
+                ->latest()
+                ->limit(100)
+                ->get()
+                ->map(function ($q) use (&$seenBundleIds): array {
+                    $isBundle = $q->story_generation_id !== null
+                        && data_get($q->storyGeneration?->request_payload, 'format') !== 'direct';
+                    $includeBundleQuestions = $isBundle && ! in_array($q->story_generation_id, $seenBundleIds, true);
+
+                    if ($includeBundleQuestions) {
+                        $seenBundleIds[] = $q->story_generation_id;
+                    }
+
+                    return [
+                        'id' => $q->id,
+                        'prompt' => $q->prompt,
+                        'stimulus' => $q->stimulus,
+                        'explanation' => $q->explanation,
+                        'type' => $q->type,
+                        'difficulty' => $q->difficulty,
+                        'competency_id' => $q->competency?->id,
+                        'competency_name' => $q->competency?->name ?? '-',
+                        'competency_code' => $q->competency?->code ?? '-',
+                        'parent_competency_name' => $q->competency?->parent?->name ?? '',
+                        'is_bundle' => $isBundle,
+                        'story_generation_id' => $isBundle ? $q->story_generation_id : null,
+                        'bundle_title' => $isBundle
+                            ? data_get($q->storyGeneration?->result_payload, 'title')
+                            : null,
+                        'bundle_question_count' => $isBundle ? $q->bundle_question_count : 1,
+                        'bundle_questions' => $includeBundleQuestions
+                            ? $q->bundleQuestions->map(fn (Question $bundleQuestion): array => [
+                                'id' => $bundleQuestion->id,
+                                'prompt' => $bundleQuestion->prompt,
+                                'explanation' => $bundleQuestion->explanation,
+                                'type' => $bundleQuestion->type,
+                                'difficulty' => $bundleQuestion->difficulty,
+                                'competency_name' => $bundleQuestion->competency?->name ?? '-',
+                                'options' => $bundleQuestion->options->map(fn ($option): array => [
+                                    'id' => $option->id,
+                                    'label' => $option->label,
+                                    'content' => $option->content,
+                                    'option_text' => $option->content ?? $option->label ?? '',
+                                    'is_correct' => (bool) $option->is_correct,
+                                ]),
+                            ])->values()
+                            : [],
+                        'options' => $q->options->map(fn ($opt) => [
+                            'id' => $opt->id,
+                            'label' => $opt->label,
+                            'content' => $opt->content,
+                            'option_text' => $opt->content ?? $opt->label ?? '',
+                            'is_correct' => (bool) $opt->is_correct,
+                        ]),
+                    ];
+                });
+        }
 
         return Inertia::render('Assessments/Show', [
             'assessment' => [
@@ -229,12 +382,134 @@ class AssessmentController extends Controller
             ]),
             'subCompetencies' => $subCompetencies,
             'availableBankQuestions' => $availableBankQuestions,
+            'canManage' => $canManage,
+            'canPreview' => $questions->isNotEmpty(),
+        ]);
+    }
+
+    public function preview(
+        Request $request,
+        Assessment $assessment,
+        QuestionSnapshotService $snapshotService,
+    ): Response {
+        $assessment->load(['questions.options']);
+        abort_if($assessment->questions->isEmpty(), 409, 'Tambahkan soal sebelum membuka pratinjau siswa.');
+
+        $settings = $assessment->settings ?? [];
+        $previewKey = "assessment-preview:{$assessment->id}";
+        $shuffleQuestions = (bool) data_get($settings, 'shuffle_questions', false);
+        $shuffleOptions = (bool) data_get($settings, 'shuffle_options', false);
+        $questions = $assessment->questions;
+
+        if ($shuffleQuestions) {
+            $questions = $questions->sortBy(
+                fn (Question $question): string => hash('sha256', "{$previewKey}:question:{$question->id}"),
+            )->values();
+        }
+
+        return Inertia::render('Attempts/Show', [
+            'preview' => true,
+            'attempt' => [
+                'public_id' => $previewKey,
+                'remaining_seconds' => $assessment->duration_minutes * 60,
+                'assessment' => [
+                    'title' => $assessment->title,
+                    'duration_minutes' => $assessment->duration_minutes,
+                    'type_label' => config("assessment.types.{$assessment->assessmentType()}", 'Try Out Adaptif'),
+                    'show_navigation' => (bool) data_get($settings, 'show_navigation', true),
+                    'require_all_answers' => (bool) data_get($settings, 'require_all_answers', false),
+                ],
+                'questions' => $questions->values()->map(function (Question $question, int $questionIndex) use ($previewKey, $shuffleOptions, $snapshotService): array {
+                    $snapshot = $snapshotService->forQuestion($question);
+                    $type = QuestionType::from($snapshot['type']);
+                    $metadata = $snapshot['metadata'] ?? [];
+                    $options = collect($snapshot['options'] ?? []);
+
+                    if ($shuffleOptions) {
+                        $options = $options->sortBy(
+                            fn (array $option): string => hash('sha256', "{$previewKey}:question:{$question->id}:option:{$option['id']}"),
+                        )->values();
+                    }
+
+                    $matching = null;
+                    if ($type === QuestionType::Matching) {
+                        $pairs = collect($metadata['matching_pairs'] ?? []);
+                        $rightItems = $pairs->map(fn (array $pair): array => [
+                            'id' => $pair['right_id'],
+                            'content' => $pair['right'],
+                        ])->merge(collect($metadata['matching_distractors'] ?? [])->map(fn (array $distractor): array => [
+                            'id' => $distractor['id'],
+                            'content' => $distractor['content'],
+                        ]));
+
+                        if ($shuffleOptions) {
+                            $rightItems = $rightItems->sortBy(
+                                fn (array $item): string => hash('sha256', "{$previewKey}:question:{$question->id}:match:{$item['id']}"),
+                            );
+                        }
+
+                        $matching = [
+                            'left_items' => $pairs->map(fn (array $pair): array => [
+                                'id' => $pair['left_id'],
+                                'content' => $pair['left'],
+                            ])->values(),
+                            'right_items' => $rightItems->values(),
+                        ];
+                    }
+
+                    $matrix = null;
+                    if ($type === QuestionType::CategoryMatrix) {
+                        $columns = collect($metadata['matrix_columns'] ?? []);
+                        if ($shuffleOptions) {
+                            $columns = $columns->sortBy(
+                                fn (array $column): string => hash('sha256', "{$previewKey}:question:{$question->id}:matrix:{$column['id']}"),
+                            );
+                        }
+
+                        $matrix = [
+                            'columns' => $columns->map(fn (array $column): array => [
+                                'id' => $column['id'],
+                                'label' => $column['label'],
+                            ])->values(),
+                            'rows' => collect($metadata['matrix_rows'] ?? [])->map(fn (array $row): array => [
+                                'id' => $row['id'],
+                                'statement' => $row['statement'],
+                            ])->values(),
+                        ];
+                    }
+
+                    return [
+                        'id' => $question->id,
+                        'type' => $type->value,
+                        'stimulus' => $snapshot['stimulus'],
+                        'stimulus_visual' => $metadata['stimulus_visual'] ?? null,
+                        'illustration_url' => $snapshotService->illustrationUrl($snapshot),
+                        'illustration_display' => [
+                            'width' => (int) data_get($metadata, 'illustration.display_width', 800),
+                            'height' => (int) data_get($metadata, 'illustration.display_height', 450),
+                            'zoom' => (float) data_get($metadata, 'illustration.display_zoom', 1),
+                            'offset_x' => (float) data_get($metadata, 'illustration.display_offset_x', 0),
+                            'offset_y' => (float) data_get($metadata, 'illustration.display_offset_y', 0),
+                        ],
+                        'prompt' => $snapshot['prompt'],
+                        'position' => $questionIndex + 1,
+                        'matching' => $matching,
+                        'matrix' => $matrix,
+                        'options' => $options->values()->map(fn (array $option, int $optionIndex): array => [
+                            'id' => $option['id'],
+                            'label' => chr(65 + $optionIndex),
+                            'content' => $option['content'],
+                        ]),
+                        'response' => null,
+                    ];
+                }),
+            ],
         ]);
     }
 
     public function removeQuestion(Request $request, Assessment $assessment, Question $question): RedirectResponse
     {
-        $this->ensureSameSchool($request, $assessment);
+        $this->ensureManageable($request);
 
         $assessment->questions()->detach($question->id);
 
@@ -250,7 +525,7 @@ class AssessmentController extends Controller
 
     public function swapQuestion(Request $request, Assessment $assessment): RedirectResponse
     {
-        $this->ensureSameSchool($request, $assessment);
+        $this->ensureManageable($request);
 
         $data = $request->validate([
             'old_question_id' => ['required', 'integer'],
@@ -275,21 +550,65 @@ class AssessmentController extends Controller
 
     public function attachQuestion(Request $request, Assessment $assessment): RedirectResponse
     {
-        $this->ensureSameSchool($request, $assessment);
+        $this->ensureManageable($request);
 
         $data = $request->validate([
-            'question_id' => ['required', 'integer', 'exists:questions,id'],
+            'question_id' => ['nullable', 'required_without:story_generation_id', 'integer', 'exists:questions,id'],
+            'story_generation_id' => ['nullable', 'required_without:question_id', 'integer', 'exists:ai_generations,id'],
         ]);
 
-        if (! $assessment->questions()->where('question_id', $data['question_id'])->exists()) {
-            $nextPos = $assessment->questions()->count() + 1;
-            $assessment->questions()->attach($data['question_id'], [
-                'position' => $nextPos,
+        if (filled($data['story_generation_id'] ?? null)) {
+            $generation = AiGeneration::findOrFail($data['story_generation_id']);
+            $questions = Question::query()
+                ->where('story_generation_id', $generation->id)
+                ->whereNull('superseded_by_id')
+                ->orderBy('id')
+                ->get();
+
+            abort_unless(
+                data_get($generation->request_payload, 'format') !== 'direct'
+                && $questions->isNotEmpty()
+                && $questions->every(fn (Question $question): bool => $this->questionCanBeAttached($assessment, $question)),
+                422,
+                'Seluruh soal dalam bundel harus sudah terbit dan sesuai dengan paket.',
+            );
+
+            $attachedIds = $assessment->questions()->pluck('questions.id');
+            $questions = $questions->whereNotIn('id', $attachedIds);
+
+            DB::transaction(function () use ($assessment, $questions): void {
+                $nextPosition = ((int) $assessment->questions()->max('assessment_question.position')) + 1;
+
+                foreach ($questions as $question) {
+                    $assessment->questions()->attach($question->id, [
+                        'position' => $nextPosition++,
+                        'points' => 1,
+                    ]);
+                }
+            });
+
+            return back()->with('success', $questions->count().' soal dalam bundel berhasil ditambahkan ke paket.');
+        }
+
+        $question = Question::findOrFail($data['question_id']);
+        abort_unless($this->questionCanBeAttached($assessment, $question), 422, 'Soal tidak sesuai dengan paket.');
+
+        if (! $assessment->questions()->where('question_id', $question->id)->exists()) {
+            $nextPosition = ((int) $assessment->questions()->max('assessment_question.position')) + 1;
+            $assessment->questions()->attach($question->id, [
+                'position' => $nextPosition,
                 'points' => 1,
             ]);
         }
 
         return back()->with('success', 'Soal berhasil ditambahkan ke paket.');
+    }
+
+    private function questionCanBeAttached(Assessment $assessment, Question $question): bool
+    {
+        return $question->grade_level === $assessment->grade_level
+            && $question->status === QuestionStatus::Published
+            && ($assessment->subject_id === null || $question->competency()->where('subject_id', $assessment->subject_id)->exists());
     }
 
     public function edit(Request $request, Assessment $assessment): Response
@@ -356,7 +675,7 @@ class AssessmentController extends Controller
         Assessment $assessment,
         QuestionSnapshotService $snapshotService,
     ): RedirectResponse {
-        $this->ensureSameSchool($request, $assessment);
+        $this->ensureManageable($request);
         abort_if($assessment->questions()->count() === 0, 422, 'Paket belum memiliki soal.');
         $assessment->load('questions.options');
         abort_if(
@@ -475,7 +794,6 @@ class AssessmentController extends Controller
     private function resolveQuestions(Request $request, array $data, ?Assessment $assessment = null): Collection
     {
         $questionQuery = Question::query()
-            ->where('school_id', $request->user()->school_id)
             ->where('grade_level', $data['grade_level'])
             ->when(! empty($data['subject_id']), function ($q) use ($data) {
                 $q->whereHas('competency', fn ($comp) => $comp->where('subject_id', $data['subject_id']));
@@ -636,7 +954,6 @@ class AssessmentController extends Controller
         }
 
         $query = Question::query()
-            ->where('school_id', $request->user()->school_id)
             ->where('grade_level', $data['grade_level'])
             ->when(! empty($data['subject_id']), function ($q) use ($data) {
                 $q->whereHas('competency', fn ($comp) => $comp->where('subject_id', $data['subject_id']));
@@ -684,20 +1001,13 @@ class AssessmentController extends Controller
                 QuestionType::CategoryMatrix->value => 'Pilihan kategori (tabel)',
             ],
             'subjects' => Subject::query()
-                ->where(fn ($query) => $query
-                    ->whereNull('school_id')
-                    ->orWhere('school_id', $request->user()->school_id))
                 ->orderBy('name')
                 ->get(['id', 'code', 'name']),
             'competencies' => Competency::query()
-                ->where(fn ($query) => $query
-                    ->whereNull('school_id')
-                    ->orWhere('school_id', $request->user()->school_id))
                 ->orderBy('grade_level')
                 ->orderBy('code')
                 ->get(['id', 'parent_id', 'code', 'name', 'grade_level', 'subject_id']),
             'questions' => Question::query()
-                ->where('school_id', $request->user()->school_id)
                 ->where(fn ($query) => $query
                     ->where('status', QuestionStatus::Published)
                     ->when($includedQuestionIds !== [], fn ($nested) => $nested->orWhereIn('id', $includedQuestionIds)))
@@ -708,13 +1018,13 @@ class AssessmentController extends Controller
         ];
     }
 
-    private function ensureSameSchool(Request $request, Assessment $assessment): void
+    private function ensureManageable(Request $request): void
     {
-        abort_unless($assessment->school_id === $request->user()->school_id, 404);
+        abort_unless($request->user()->hasRole(UserRole::Admin, UserRole::Teacher), 403);
     }
 
     private function ensureEditable(Request $request, Assessment $assessment): void
     {
-        $this->ensureSameSchool($request, $assessment);
+        $this->ensureManageable($request);
     }
 }

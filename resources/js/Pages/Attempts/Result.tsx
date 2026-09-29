@@ -21,11 +21,11 @@ export default function ResultPage({ attempt, questionReviews }: { attempt: Atte
         <AuthenticatedLayout header={<div><p className="text-sm font-medium text-emerald-600">Hasil Try Out</p><h1 className="mt-1 text-2xl font-bold text-slate-900">{attempt.assessment.title}</h1></div>}>
             <Head title="Hasil Try Out" />
             <div className="mx-auto max-w-5xl space-y-6 px-4 py-8 sm:px-6">
-                <section className="grid gap-5 rounded-2xl bg-slate-900 p-8 text-white md:grid-cols-[180px_1fr] md:items-center">
+                <section className="grid gap-5 rounded-2xl bg-slate-900 p-8 text-white md:grid-cols-[180px_minmax(0,1fr)] md:items-center">
                     <div>
                         <p className="text-sm text-slate-300">Capaian</p>
                         <p className="mt-1 text-5xl font-bold text-emerald-400">{percentage}%</p>
-                        <p className="mt-2 text-sm text-slate-400">{attempt.score} dari {attempt.max_score} poin</p>
+                        <p className="mt-2 text-sm text-slate-300">{attempt.score} dari {attempt.max_score} poin</p>
                         <button
                             type="button"
                             disabled={openingChat}
@@ -34,7 +34,7 @@ export default function ResultPage({ attempt, questionReviews }: { attempt: Atte
                         >
                             {openingChat ? 'Membuka chat…' : 'Latihan dengan AI →'}
                         </button>
-                        <p className="mt-2 text-xs leading-5 text-slate-400">
+                        <p className="mt-2 text-xs leading-5 text-slate-300">
                             AI membuat contoh soal dari materi yang paling banyak salah.
                         </p>
                     </div>

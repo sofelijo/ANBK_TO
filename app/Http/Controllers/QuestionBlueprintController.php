@@ -19,19 +19,26 @@ class QuestionBlueprintController extends Controller
     public function index(Request $request): Response
     {
         $schoolId = $request->user()->school_id;
-        $blueprints = QuestionBlueprint::query()
+        $allBlueprints = QuestionBlueprint::query()
             ->where(fn ($query) => $query->whereNull('school_id')->orWhere('school_id', $schoolId))
             ->whereHas('subject', fn ($query) => $query->where('code', 'BIND'))
             ->with(['subject:id,code,name', 'competencies:id,code,name'])
             ->withCount('questions')
             ->orderBy('name')
-            ->get()
+            ->get();
+
+        $schoolCodes = $allBlueprints->where('school_id', $schoolId)->pluck('code')->all();
+
+        $blueprints = $allBlueprints
+            ->reject(fn (QuestionBlueprint $blueprint): bool => $blueprint->school_id === null && in_array($blueprint->code, $schoolCodes, true))
+            ->values()
             ->map(fn (QuestionBlueprint $blueprint): array => [
                 ...$blueprint->only(['id', 'code', 'name', 'description']),
                 'subject' => $blueprint->subject,
                 'competencies' => $blueprint->competencies,
                 'questions_count' => $blueprint->questions_count,
                 'can_manage' => $blueprint->school_id === $schoolId,
+                'is_global' => $blueprint->school_id === null,
             ]);
 
         return Inertia::render('QuestionBlueprints/Index', ['blueprints' => $blueprints]);
@@ -60,17 +67,43 @@ class QuestionBlueprintController extends Controller
 
     public function edit(Request $request, QuestionBlueprint $questionType): Response
     {
-        $this->ensureManageable($request, $questionType);
+        $this->ensureAccess($request, $questionType);
 
         return $this->form($request, $questionType);
     }
 
     public function update(Request $request, QuestionBlueprint $questionType, AuditLogger $auditLogger): RedirectResponse
     {
-        $this->ensureManageable($request, $questionType);
+        $this->ensureAccess($request, $questionType);
+        $schoolId = $request->user()->school_id;
+
         $data = $this->validatedData($request, $questionType);
         $competencyIds = $data['competency_ids'];
         unset($data['competency_ids']);
+
+        if ($questionType->school_id === null) {
+            $target = QuestionBlueprint::query()
+                ->where('school_id', $schoolId)
+                ->where('subject_id', $data['subject_id'])
+                ->where('code', $data['code'])
+                ->first();
+
+            if (! $target) {
+                $target = QuestionBlueprint::create([
+                    ...$data,
+                    'school_id' => $schoolId,
+                ]);
+            } else {
+                $target->update($data);
+            }
+
+            $this->syncCompetencies($target, $competencyIds);
+            $auditLogger->log($request, 'question_blueprint.customized', $target, [
+                'original_blueprint_id' => $questionType->id,
+            ]);
+
+            return to_route('question-types.index')->with('success', 'Tipe soal berhasil disesuaikan untuk sekolah Anda.');
+        }
 
         $questionType->update($data);
         $this->syncCompetencies($questionType, $competencyIds);
@@ -100,6 +133,7 @@ class QuestionBlueprintController extends Controller
         return Inertia::render('QuestionBlueprints/Form', [
             'blueprint' => $blueprint ? [
                 ...$blueprint->only(['id', 'subject_id', 'code', 'name', 'description']),
+                'is_global' => $blueprint->school_id === null,
                 'competency_ids' => $blueprint->competencies()->pluck('competencies.id'),
             ] : null,
             'subjects' => $subjects,
@@ -119,6 +153,19 @@ class QuestionBlueprintController extends Controller
             'code' => Str::upper(trim($request->string('code')->toString())),
             'name' => Str::squish($request->string('name')->toString()),
         ]);
+
+        $existingSchoolBlueprint = $blueprint && $blueprint->school_id === null
+            ? QuestionBlueprint::query()
+                ->where('school_id', $request->user()->school_id)
+                ->where('subject_id', $request->integer('subject_id'))
+                ->where('code', $request->string('code')->toString())
+                ->first()
+            : null;
+
+        $ignoreId = $blueprint?->school_id === $request->user()->school_id
+            ? $blueprint->id
+            : $existingSchoolBlueprint?->id;
+
         $data = $request->validate([
             'subject_id' => ['required', 'integer'],
             'code' => [
@@ -126,7 +173,7 @@ class QuestionBlueprintController extends Controller
                 Rule::unique('question_blueprints', 'code')
                     ->where('school_id', $request->user()->school_id)
                     ->where('subject_id', $request->integer('subject_id'))
-                    ->ignore($blueprint),
+                    ->ignore($ignoreId),
             ],
             'name' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:2000'],
@@ -168,6 +215,14 @@ class QuestionBlueprintController extends Controller
             ->where(fn ($query) => $query->whereNull('school_id')->orWhere('school_id', $request->user()->school_id))
             ->orderByDesc('school_id')
             ->get(['id', 'code', 'name']);
+    }
+
+    private function ensureAccess(Request $request, QuestionBlueprint $blueprint): void
+    {
+        abort_unless(
+            $blueprint->school_id === null || $blueprint->school_id === $request->user()->school_id,
+            404,
+        );
     }
 
     private function ensureManageable(Request $request, QuestionBlueprint $blueprint): void

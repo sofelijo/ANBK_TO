@@ -46,7 +46,24 @@ class LoginRequest extends FormRequest
         $this->ensureIsNotRateLimited();
 
         $user = User::query()->where('email', $this->string('email')->lower()->toString())->first();
-        if ($user && Hash::check($this->string('password')->toString(), $user->password) && ! $user->is_active) {
+
+        if (! $user) {
+            RateLimiter::hit($this->throttleKey());
+
+            throw ValidationException::withMessages([
+                'email' => 'Email tidak terdaftar. Periksa kembali email Anda atau daftar akun baru.',
+            ]);
+        }
+
+        if (! Hash::check($this->string('password')->toString(), $user->password)) {
+            RateLimiter::hit($this->throttleKey());
+
+            throw ValidationException::withMessages([
+                'password' => 'Password salah. Periksa kembali password Anda.',
+            ]);
+        }
+
+        if (! $user->is_active) {
             RateLimiter::hit($this->throttleKey());
 
             $message = match (true) {
@@ -59,16 +76,7 @@ class LoginRequest extends FormRequest
             throw ValidationException::withMessages(['email' => $message]);
         }
 
-        if (! Auth::attempt([
-            ...$this->only('email', 'password'),
-            'is_active' => true,
-        ], $this->boolean('remember'))) {
-            RateLimiter::hit($this->throttleKey());
-
-            throw ValidationException::withMessages([
-                'email' => trans('auth.failed'),
-            ]);
-        }
+        Auth::login($user, $this->boolean('remember'));
 
         RateLimiter::clear($this->throttleKey());
         $this->user()->update(['last_login_at' => now()]);

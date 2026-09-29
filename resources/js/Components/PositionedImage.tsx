@@ -34,7 +34,7 @@ export default function PositionedImage({ src, alt, width = 800, height = 450, z
             onPointerUp={stopDrag}
             onPointerCancel={stopDrag}
             style={{ maxWidth: `${width}px`, aspectRatio: `${width} / ${height}` }}
-            className={`relative mx-auto w-full overflow-hidden rounded-lg border border-slate-200 bg-white touch-none select-none ${onPan ? dragging ? 'cursor-grabbing' : 'cursor-grab' : ''} ${className}`}
+            className={`relative mx-auto w-full overflow-hidden rounded-lg border border-slate-200 bg-white select-none ${onPan ? dragging ? 'touch-none cursor-grabbing' : 'touch-none cursor-grab' : ''} ${className}`}
         >
             <img
                 src={src}

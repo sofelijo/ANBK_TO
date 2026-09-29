@@ -109,7 +109,7 @@ class MatrixAnalysisDemoSeeder extends Seeder
             ));
             $questions = $this->questions($school, $verifiers, $competencies);
             $assessment = Assessment::query()->updateOrCreate(
-                ['school_id' => $school->id, 'title' => self::ASSESSMENT_TITLE],
+                ['title' => self::ASSESSMENT_TITLE],
                 [
                     'subject_id' => $subject->id,
                     'created_by' => $verifiers->first()->id,
@@ -204,11 +204,11 @@ class MatrixAnalysisDemoSeeder extends Seeder
             ['Luas Persegi Panjang', 'Luas persegi panjang berukuran 12 cm × 8 cm adalah ...', ['20 cm²', '40 cm²', '88 cm²', '96 cm²'], 3],
             ['Volume Kubus', 'Volume kubus dengan panjang rusuk 5 cm adalah ...', ['25 cm³', '75 cm³', '100 cm³', '125 cm³'], 3],
         ];
-        $questions = collect($singleChoice)->map(function (array $specification, int $index) use ($school, $verifiers, $competencies): Question {
+        $questions = collect($singleChoice)->map(function (array $specification, int $index) use ($verifiers, $competencies): Question {
             [$title, $prompt, $options, $correctPosition] = $specification;
             $number = $index + 1;
             $question = Question::query()->updateOrCreate(
-                ['school_id' => $school->id, 'title' => "Demo Matrix {$number} · {$title}"],
+                ['title' => "Demo Matrix {$number} · {$title}"],
                 [
                     'author_id' => $verifiers->first()->id,
                     'competency_id' => $index < 5 ? $competencies[0]->id : $competencies[1]->id,
@@ -284,7 +284,7 @@ class MatrixAnalysisDemoSeeder extends Seeder
             'correct_column_id' => $columns[$row[1]]['id'],
         ]);
         $question = Question::query()->updateOrCreate(
-            ['school_id' => $school->id, 'title' => "Demo Matrix {$number} · {$specification['title']}"],
+            ['title' => "Demo Matrix {$number} · {$specification['title']}"],
             [
                 'author_id' => $verifiers->first()->id,
                 'competency_id' => $competency->id,

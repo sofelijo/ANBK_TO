@@ -39,6 +39,20 @@ class AuthenticationTest extends TestCase
         $this->post('/login', [
             'email' => $user->email,
             'password' => 'wrong-password',
+        ])->assertSessionHasErrors([
+            'password' => 'Password salah. Periksa kembali password Anda.',
+        ]);
+
+        $this->assertGuest();
+    }
+
+    public function test_unknown_staff_email_shows_a_specific_error(): void
+    {
+        $this->post('/login', [
+            'email' => 'tidak.terdaftar@toa.local',
+            'password' => 'password',
+        ])->assertSessionHasErrors([
+            'email' => 'Email tidak terdaftar. Periksa kembali email Anda atau daftar akun baru.',
         ]);
 
         $this->assertGuest();

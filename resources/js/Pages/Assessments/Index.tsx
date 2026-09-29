@@ -23,6 +23,8 @@ type Assessment = {
     questions_count: number;
     attempts_count: number;
     average_difficulty: number | null;
+    subject_label: string;
+    subject_kind: string;
     starts_at?: string;
     ends_at?: string;
     schedules_count?: number;
@@ -30,16 +32,22 @@ type Assessment = {
     settings?: { type?: 'regular' | 'together'; type_label?: string; selection_mode?: string };
     attempts?: { public_id: string; status: string }[];
     competency_coverage?: Record<number, number>;
+    can_manage?: boolean;
+    source_school?: string;
 };
 
 export default function Index({
     assessments,
     canManage,
     subCompetencies,
+    subjects,
+    filters,
 }: {
     assessments: Assessment[];
     canManage: boolean;
     subCompetencies: SubCompetency[];
+    subjects: { value: string; code: string; name: string }[];
+    filters: { subject?: string; type?: '' | 'regular' | 'together' };
 }) {
     const [difficultySort, setDifficultySort] = useState<'default' | 'easiest' | 'hardest'>('default');
     const displayedAssessments = useMemo(() => {
@@ -66,7 +74,7 @@ export default function Index({
     return (
         <AuthenticatedLayout
             header={
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                         <p className="text-sm font-medium text-emerald-600">Pelaksanaan</p>
                         <h1 className="mt-1 text-2xl font-bold text-slate-900">
@@ -86,18 +94,36 @@ export default function Index({
         >
             <Head title={canManage ? 'Paket Ujian' : 'Try Out'} />
             <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-                {!canManage && assessments.length > 1 && (
-                    <div className="mb-5 flex justify-end">
+                <div className="mb-5 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-end sm:justify-between">
+                    <div className="flex flex-col gap-3 sm:flex-row">
+                        <label className="text-sm font-semibold text-slate-700">
+                            Mata pelajaran
+                            <select value={filters.subject || ''} onChange={(event) => router.get(route('assessments.index'), { subject: event.target.value, type: filters.type || '' }, { preserveState: true, preserveScroll: true })} className="mt-1 block w-full min-w-0 sm:w-64 rounded-lg border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500 sm:mt-2">
+                                <option value="">Semua mata pelajaran</option>
+                                {subjects.map((subject) => <option key={subject.value} value={subject.value}>{subject.code} · {subject.name}</option>)}
+                                <option value="mixed">Campuran (lebih dari satu mapel)</option>
+                            </select>
+                        </label>
+                        <label className="text-sm font-semibold text-slate-700">
+                            Jenis try out
+                            <select value={filters.type || ''} onChange={(event) => router.get(route('assessments.index'), { subject: filters.subject || '', type: event.target.value }, { preserveState: true, preserveScroll: true })} className="mt-1 block w-full min-w-0 sm:w-44 rounded-lg border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500 sm:mt-2">
+                                <option value="">Semua</option>
+                                <option value="regular">Reguler</option>
+                                <option value="together">Bersama</option>
+                            </select>
+                        </label>
+                    </div>
+                    {!canManage && assessments.length > 1 && (
                         <label className="text-sm font-semibold text-slate-700">
                             Urutkan berdasarkan level
-                            <select value={difficultySort} onChange={(event) => setDifficultySort(event.target.value as typeof difficultySort)} className="ml-3 rounded-lg border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500">
+                            <select value={difficultySort} onChange={(event) => setDifficultySort(event.target.value as typeof difficultySort)} className="mt-1 block rounded-lg border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500 sm:mt-2">
                                 <option value="default">Terbaru</option>
                                 <option value="easiest">Termudah</option>
                                 <option value="hardest">Tersulit</option>
                             </select>
                         </label>
-                    </div>
-                )}
+                    )}
+                </div>
                 {assessments.length === 0 ? (
                     <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">
                         Belum ada paket yang tersedia.
@@ -106,6 +132,7 @@ export default function Index({
                     <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
                         {displayedAssessments.map((assessment) => {
                             const attempt = assessment.attempts?.[0];
+                            const canManageAssessment = canManage && assessment.can_manage !== false;
                             const isTogether = assessment.settings?.type === 'together';
                             const schoolSchedule = assessment.schedules?.[0];
                             const effectiveStart = isTogether ? schoolSchedule?.starts_at : assessment.starts_at;
@@ -129,7 +156,7 @@ export default function Index({
                                     key={assessment.id}
                                     className="flex flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
                                 >
-                                    <div className="flex items-center justify-between">
+                                    <div className="flex flex-wrap items-center justify-between gap-3">
                                         <span
                                             className={`rounded-full px-2.5 py-1 text-xs font-semibold ${assessment.status === 'published' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}
                                         >
@@ -142,6 +169,8 @@ export default function Index({
                                     <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-indigo-600">
                                         {assessment.settings?.type_label || 'Try Out Reguler'}
                                     </p>
+                                    {!canManageAssessment && assessment.source_school && <p className="mt-1 text-xs text-slate-400">Disediakan oleh {assessment.source_school}</p>}
+                                    <span className={`mt-2 w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${assessment.subject_kind === 'mixed' ? 'bg-fuchsia-50 text-fuchsia-700' : 'bg-blue-50 text-blue-700'}`}>{assessment.subject_label}</span>
                                     <p className="mt-2 flex-1 text-sm leading-6 text-slate-500">
                                         {assessment.description || 'Paket Try Out Adaptif.'}
                                     </p>
@@ -153,7 +182,7 @@ export default function Index({
                                     )}
 
                                     {/* Sub-competency coverage badge (manager only) */}
-                                    {canManage && hasSlots && (
+                                    {canManageAssessment && hasSlots && (
                                         <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50 p-3">
                                             <div className="mb-2 flex items-center justify-between">
                                                 <span className="text-xs font-semibold text-slate-600">
@@ -205,7 +234,7 @@ export default function Index({
                                         <span title="Rata-rata level seluruh soal yang terpasang pada paket">
                                             Level {assessment.average_difficulty?.toFixed(2) ?? '-'} · {difficultyLabel(assessment.average_difficulty)}
                                         </span>
-                                        {canManage && (assessment.schedules_count || 0) > 0 && (
+                                        {canManageAssessment && (assessment.schedules_count || 0) > 0 && (
                                             <span>{assessment.schedules_count} sekolah terjadwal</span>
                                         )}
                                     </div>
@@ -222,7 +251,7 @@ export default function Index({
                                         </p>
                                     )}
 
-                                    {canManage ? (
+                                    {canManageAssessment ? (
                                         <div className="mt-4 flex flex-wrap gap-2">
                                             <Link
                                                 href={route('assessments.show', assessment.id)}
@@ -245,6 +274,13 @@ export default function Index({
                                                 </button>
                                             )}
                                         </div>
+                                    ) : canManage ? (
+                                        <Link
+                                            href={route('assessments.show', assessment.id)}
+                                            className="mt-4 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-center text-sm font-semibold text-indigo-700 hover:bg-indigo-100"
+                                        >
+                                            Lihat paket bersama
+                                        </Link>
                                     ) : isTogether && !schoolSchedule ? (
                                         <button
                                             disabled

@@ -522,7 +522,7 @@ function ProgressBar({ value, tone, hideLabel = false }: { value: number; tone: 
 function Insight({ label, value, detail }: { label: string; value: string; detail: string }) {
     return (
         <div className="border-l-2 border-emerald-400 pl-4">
-            <p className="text-xs font-semibold text-slate-400">{label}</p>
+            <p className="text-xs font-semibold text-slate-300">{label}</p>
             <p className="mt-1 text-lg font-bold">{value}</p>
             <p className="mt-1 text-sm leading-6 text-slate-300">{detail}</p>
         </div>

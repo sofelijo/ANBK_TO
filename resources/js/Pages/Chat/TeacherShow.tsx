@@ -8,7 +8,7 @@ export default function TeacherShow({ student, room, messages }: { student: { id
             <Head title={`Chat ${student.name}`} />
             <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
                 <Link href={route('teacher-chat.index')} className="mb-4 inline-flex text-sm font-semibold text-emerald-700">← Kembali ke daftar siswa</Link>
-                <div className="rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="border-b border-slate-100 bg-slate-50 px-5 py-3 text-xs text-slate-500">Mode pengawasan · Guru tidak dapat mengirim pesan ke room ini.</div><div className="h-[68vh] overflow-y-auto p-5"><ChatThread roomId={room.id} initialMessages={messages} teacherView /></div></div>
+                <div className="rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="border-b border-slate-100 bg-slate-50 px-5 py-3 text-xs text-slate-500">Mode pengawasan · Guru tidak dapat mengirim pesan ke room ini.</div><div className="h-[68dvh] overflow-y-auto overscroll-contain p-5"><ChatThread roomId={room.id} initialMessages={messages} teacherView /></div></div>
             </div>
         </AuthenticatedLayout>
     );

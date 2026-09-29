@@ -11,6 +11,7 @@ use App\Models\Attempt;
 use App\Models\Competency;
 use App\Models\Question;
 use App\Models\School;
+use App\Models\Subject;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -30,6 +31,7 @@ class AttemptWorkflowTest extends TestCase
     public function test_student_can_view_and_start_published_assessment_from_another_school(): void
     {
         [, $assessment] = $this->scenario();
+        $this->assertNull($assessment->school_id);
         $otherSchool = School::create([
             'name' => 'Sekolah Lain',
             'npsn' => '10000002',
@@ -60,6 +62,179 @@ class AttemptWorkflowTest extends TestCase
             'user_id' => $otherStudent->id,
             'status' => AttemptStatus::InProgress->value,
         ]);
+    }
+
+    public function test_teacher_can_manage_global_assessment_created_from_another_school(): void
+    {
+        [, $assessment] = $this->scenario();
+        $otherSchool = School::create(['name' => 'Sekolah Guru Lain', 'npsn' => '10000012']);
+        $otherTeacher = User::create([
+            'school_id' => $otherSchool->id,
+            'name' => 'Guru Sekolah Lain',
+            'email' => 'guru-sekolah-lain@example.com',
+            'password' => 'password',
+            'role' => UserRole::Teacher,
+            'email_verified_at' => now(),
+        ]);
+        $globalCandidate = $assessment->questions()->first()->replicate();
+        $globalCandidate->story_generation_id = null;
+        $globalCandidate->title = 'Soal Global Lintas Sekolah';
+        $globalCandidate->status = QuestionStatus::Published;
+        $globalCandidate->save();
+
+        $this->actingAs($otherTeacher)
+            ->get(route('assessments.index'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('assessments.0.id', $assessment->id)
+                ->where('assessments.0.can_manage', true));
+
+        $this->actingAs($otherTeacher)
+            ->get(route('assessments.show', $assessment))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('assessment.id', $assessment->id)
+                ->where('canManage', true)
+                ->where('canPreview', true)
+                ->where('availableBankQuestions', fn ($questions): bool => $questions
+                    ->contains('id', $globalCandidate->id)));
+
+        $this->actingAs($otherTeacher)
+            ->post(route('assessments.questions.attach', $assessment), [
+                'question_id' => $globalCandidate->id,
+            ])
+            ->assertRedirect();
+        $this->assertDatabaseHas('assessment_question', [
+            'assessment_id' => $assessment->id,
+            'question_id' => $globalCandidate->id,
+        ]);
+
+        $this->actingAs($otherTeacher)
+            ->get(route('assessments.preview', $assessment))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Attempts/Show')
+                ->where('preview', true));
+
+        $this->actingAs($otherTeacher)
+            ->get(route('assessments.edit', $assessment))
+            ->assertOk();
+
+        $emptyAssessment = Assessment::create([
+            'school_id' => $assessment->school_id,
+            'created_by' => $assessment->created_by,
+            'title' => 'Paket Publik Kosong',
+            'grade_level' => 6,
+            'duration_minutes' => 30,
+            'status' => AssessmentStatus::Published,
+        ]);
+
+        $this->actingAs($otherTeacher)
+            ->get(route('assessments.show', $emptyAssessment))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('assessment.id', $emptyAssessment->id)
+                ->where('canManage', true)
+                ->where('canPreview', false));
+
+        $this->actingAs($otherTeacher)
+            ->get(route('assessments.preview', $emptyAssessment))
+            ->assertStatus(409);
+    }
+
+    public function test_assessment_list_can_be_filtered_by_single_subject_or_mixed_subjects(): void
+    {
+        [$student, $indonesianAssessment, $indonesianQuestion, $secondIndonesianQuestion, $mathematicsQuestion, $teacher] = $this->scenario();
+        $indonesian = Subject::create(['school_id' => $teacher->school_id, 'code' => 'BIND', 'name' => 'Bahasa Indonesia']);
+        $mathematics = Subject::create(['school_id' => $teacher->school_id, 'code' => 'MAT', 'name' => 'Matematika']);
+        Subject::create(['school_id' => null, 'code' => 'MAT-MATRIX', 'name' => 'Matematika']);
+        $indonesianQuestion->competency()->update(['subject_id' => $indonesian->id]);
+        $indonesianAssessment->questions()->detach($secondIndonesianQuestion->id);
+        $mathematicsQuestion->competency()->update(['subject_id' => $mathematics->id]);
+
+        $mathematicsAssessment = Assessment::create([
+            'school_id' => $teacher->school_id,
+            'subject_id' => $mathematics->id,
+            'created_by' => $teacher->id,
+            'title' => 'Try Out Matematika',
+            'grade_level' => 6,
+            'duration_minutes' => 30,
+            'status' => AssessmentStatus::Published,
+        ]);
+        $mathematicsAssessment->questions()->attach($mathematicsQuestion->id, ['position' => 1, 'points' => 1]);
+        $mixedAssessment = Assessment::create([
+            'school_id' => $teacher->school_id,
+            'created_by' => $teacher->id,
+            'title' => 'Try Out Campuran',
+            'grade_level' => 6,
+            'duration_minutes' => 30,
+            'status' => AssessmentStatus::Published,
+        ]);
+        $mixedAssessment->questions()->attach([
+            $indonesianQuestion->id => ['position' => 1, 'points' => 1],
+            $mathematicsQuestion->id => ['position' => 2, 'points' => 1],
+        ]);
+        $otherSchool = School::create(['name' => 'Sekolah Pengguna Lain', 'npsn' => '90000009']);
+        $otherSchoolStudent = User::create([
+            'school_id' => $otherSchool->id,
+            'name' => 'Siswa Sekolah Pengguna Lain',
+            'email' => 'student-global-subject@example.com',
+            'password' => 'password',
+            'role' => UserRole::Student,
+            'grade_level' => 6,
+            'email_verified_at' => now(),
+        ]);
+
+        $this->actingAs($student)
+            ->get(route('assessments.index', ['subject' => $indonesian->id]))
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('assessments', 1)
+                ->where('assessments.0.id', $indonesianAssessment->id)
+                ->where('assessments.0.subject_label', 'Bahasa Indonesia'));
+        $this->actingAs($student)
+            ->get(route('assessments.index', ['subject' => 'subject:matematika']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('assessments', 1)
+                ->where('assessments.0.id', $mathematicsAssessment->id)
+                ->has('subjects', 2)
+                ->where('subjects.1.value', 'subject:matematika')
+                ->where('subjects.1.code', 'MAT'));
+        $this->actingAs($student)
+            ->get(route('assessments.index', ['subject' => 'mixed']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('assessments', 1)
+                ->where('assessments.0.id', $mixedAssessment->id)
+                ->where('assessments.0.subject_label', 'Campuran'));
+        $this->actingAs($otherSchoolStudent)
+            ->get(route('assessments.index', ['subject' => 'subject:matematika']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('assessments', 1)
+                ->where('assessments.0.id', $mathematicsAssessment->id)
+                ->where('subjects', fn ($subjects): bool => $subjects
+                    ->where('value', 'subject:matematika')
+                    ->count() === 1));
+    }
+
+    public function test_assessment_list_can_be_filtered_by_regular_or_together_type(): void
+    {
+        [$student, $regularAssessment] = $this->scenario();
+        $togetherAssessment = $regularAssessment->replicate();
+        $togetherAssessment->title = 'Try Out Bersama';
+        $togetherAssessment->settings = [
+            'type' => Assessment::TYPE_TOGETHER,
+            'type_label' => 'Try Out Bersama',
+        ];
+        $togetherAssessment->save();
+
+        $this->actingAs($student)
+            ->get(route('assessments.index', ['type' => 'regular']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('assessments', 1)
+                ->where('assessments.0.id', $regularAssessment->id)
+                ->where('filters.type', 'regular'));
+
+        $this->actingAs($student)
+            ->get(route('assessments.index', ['type' => 'together']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('assessments', 1)
+                ->where('assessments.0.id', $togetherAssessment->id)
+                ->where('filters.type', 'together'));
     }
 
     public function test_student_attempt_is_scored_and_receives_weakness_recommendation(): void
@@ -407,6 +582,7 @@ class AttemptWorkflowTest extends TestCase
             ->assertRedirect(route('assessments.index'));
 
         $assessment = Assessment::query()->where('title', 'Seleksi Literasi Sekolah')->firstOrFail();
+        $this->assertNull($assessment->school_id);
         $this->assertCount(2, $assessment->questions);
         $this->assertSame(45, $assessment->duration_minutes);
         $this->assertSame('Try Out Bersama', $assessment->settings['type_label']);
@@ -686,6 +862,29 @@ class AttemptWorkflowTest extends TestCase
         $this->actingAs($teacher)
             ->get(route('assessments.edit', $assessment))
             ->assertOk();
+    }
+
+    public function test_teacher_can_preview_student_assessment_view_without_creating_attempt(): void
+    {
+        [$student, $assessment, , , , $teacher] = $this->scenario();
+
+        $this->assertDatabaseCount('attempts', 0);
+
+        $this->actingAs($teacher)
+            ->get(route('assessments.preview', $assessment))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Attempts/Show')
+                ->where('preview', true)
+                ->where('attempt.public_id', "assessment-preview:{$assessment->id}")
+                ->where('attempt.assessment.title', $assessment->title)
+                ->where('attempt.remaining_seconds', 1800)
+                ->has('attempt.questions', 2)
+                ->where('attempt.questions.0.response', null));
+
+        $this->assertDatabaseCount('attempts', 0);
+        $this->actingAs($student)
+            ->get(route('assessments.preview', $assessment))
+            ->assertForbidden();
     }
 
     private function scenario(): array

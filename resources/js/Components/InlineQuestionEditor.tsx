@@ -14,6 +14,7 @@ export type InlineEditableQuestion = {
     stimulus?: string;
     prompt: string;
     explanation?: string;
+    question_blueprint?: { id: number; code: string; name: string } | null;
     options: Option[];
     metadata?: {
         accepted_answers?: string[];
@@ -98,6 +99,26 @@ export default function InlineQuestionEditor({
                     <textarea value={data.stimulus} onChange={(event) => setData('stimulus', event.target.value)} rows={3} className="mt-1 block w-full rounded-lg border-slate-300 bg-white focus:border-indigo-500 focus:ring-indigo-500" />
                 </label>
             )}
+            {question.question_blueprint && (
+                <div className="flex items-center justify-between rounded-xl border border-indigo-200 bg-white/80 p-3.5 shadow-sm">
+                    <div>
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-indigo-700">Tipe Soal</span>
+                        <div className="mt-0.5 text-sm font-semibold text-slate-900">{question.question_blueprint.name}</div>
+                    </div>
+                    <a
+                        href={route('question-types.edit', question.question_blueprint.id)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-700 shadow-sm transition hover:bg-indigo-100 hover:text-indigo-900"
+                        title="Customize tipe soal ini di tab baru"
+                    >
+                        <svg className="h-3.5 w-3.5 text-indigo-600" viewBox="0 0 20 20" fill="currentColor">
+                            <path d="m13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                        </svg>
+                        <span>Customize</span>
+                    </a>
+                </div>
+            )}
 
             <label className="block text-sm font-medium text-slate-700">
                 Level soal
@@ -128,7 +149,7 @@ export default function InlineQuestionEditor({
                 ) : question.type === 'matching' ? (
                     <div className="mt-3 space-y-3">
                         {data.matching_pairs.map((pair, index) => (
-                            <div key={pair.left_id} className="grid gap-2 sm:grid-cols-[1fr_28px_1fr] sm:items-center">
+                            <div key={pair.left_id} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_28px_minmax(0,1fr)] sm:items-center">
                                 <textarea value={pair.left} onChange={(event) => setData('matching_pairs', data.matching_pairs.map((item, pairIndex) => pairIndex === index ? { ...item, left: event.target.value } : item))} rows={2} className="rounded-lg border-slate-300 bg-white text-sm focus:border-indigo-500 focus:ring-indigo-500" />
                                 <span className="hidden text-center text-indigo-500 sm:block">→</span>
                                 <textarea value={pair.right} onChange={(event) => setData('matching_pairs', data.matching_pairs.map((item, pairIndex) => pairIndex === index ? { ...item, right: event.target.value } : item))} rows={2} className="rounded-lg border-slate-300 bg-white text-sm focus:border-indigo-500 focus:ring-indigo-500" />
@@ -152,7 +173,7 @@ export default function InlineQuestionEditor({
                             ))}
                         </div>
                         {data.matrix_rows.map((row, index) => (
-                            <div key={row.id} className="grid gap-2 sm:grid-cols-[1fr_220px]">
+                            <div key={row.id} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_220px]">
                                 <textarea value={row.statement} onChange={(event) => setData('matrix_rows', data.matrix_rows.map((item, rowIndex) => rowIndex === index ? { ...item, statement: event.target.value } : item))} rows={2} className="rounded-lg border-slate-300 bg-white text-sm focus:border-indigo-500 focus:ring-indigo-500" />
                                 <select value={row.correct_column_id} onChange={(event) => setData('matrix_rows', data.matrix_rows.map((item, rowIndex) => rowIndex === index ? { ...item, correct_column_id: event.target.value } : item))} className="rounded-lg border-slate-300 bg-white text-sm focus:border-indigo-500 focus:ring-indigo-500">
                                     {data.matrix_columns.map((column) => <option key={column.id} value={column.id}>{column.label}</option>)}

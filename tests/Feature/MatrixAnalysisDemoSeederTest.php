@@ -36,9 +36,9 @@ class MatrixAnalysisDemoSeederTest extends TestCase
             ->where('email', 'operator.matrix.test@toa.local')
             ->firstOrFail();
         $assessment = Assessment::query()
-            ->where('school_id', $school->id)
             ->where('title', 'Paket Demo Analisis Matriks Matematika')
             ->firstOrFail();
+        $this->assertNull($assessment->school_id);
         $questionIds = $assessment->questions()->pluck('questions.id');
         $attempts = Attempt::query()
             ->where('assessment_id', $assessment->id)

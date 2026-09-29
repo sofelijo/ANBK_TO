@@ -26,7 +26,6 @@ class AttemptQuestionSelector
         $candidateIds = collect(data_get($settings, 'candidate_question_ids', []))->map(fn ($id): int => (int) $id);
         $baseQuery = Question::query()
             ->with('options')
-            ->where('school_id', $assessment->school_id)
             ->where('grade_level', $assessment->grade_level)
             ->when(
                 $candidateIds->isNotEmpty(),

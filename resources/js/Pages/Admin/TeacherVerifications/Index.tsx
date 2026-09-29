@@ -65,7 +65,7 @@ export default function Index({ teachers, stats, trend, filters, subdistricts }:
         >
             <Head title="Analisis Verifikasi Guru" />
             <div className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
-                <form onSubmit={applyFilters} className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-[180px_200px_1fr_auto] sm:items-end">
+                <form onSubmit={applyFilters} className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-[180px_200px_minmax(0,1fr)_auto] sm:items-end">
                     <label className="text-xs font-semibold text-slate-600">
                         Periode
                         <select value={period} onChange={(event) => setPeriod(event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300 text-sm">

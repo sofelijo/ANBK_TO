@@ -1,4 +1,5 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
+import { Combobox, ComboboxInput, ComboboxOption, ComboboxOptions } from '@headlessui/react';
 import { Head, router } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
 
@@ -14,6 +15,12 @@ type AssessmentOption = {
         ends_at: string;
         session_number: number;
     };
+};
+
+type SchoolOption = {
+    id: number;
+    name: string;
+    npsn: string;
 };
 
 type CellStatus = 'correct' | 'incorrect' | 'unanswered';
@@ -139,11 +146,19 @@ const statusIcons: Record<CellStatus, string> = {
 };
 
 export default function Index({
+    canChooseSchool,
+    schools,
+    selectedSchoolId,
+    selectedSchool,
     assessments,
     selectedAssessmentId,
     monitor,
     aiAnalysis,
 }: {
+    canChooseSchool: boolean;
+    schools: SchoolOption[];
+    selectedSchoolId?: number;
+    selectedSchool?: SchoolOption | null;
     assessments: AssessmentOption[];
     selectedAssessmentId?: number;
     monitor?: Monitor | null;
@@ -151,6 +166,10 @@ export default function Index({
 }) {
     const [requestingAnalysis, setRequestingAnalysis] = useState(false);
     const [analysisRequestError, setAnalysisRequestError] = useState<string | null>(null);
+    const [schoolQuery, setSchoolQuery] = useState('');
+    const filteredSchools = schoolQuery.trim() === ''
+        ? schools
+        : schools.filter((school) => `${school.name} ${school.npsn}`.toLocaleLowerCase('id-ID').includes(schoolQuery.trim().toLocaleLowerCase('id-ID')));
 
     useEffect(() => {
         if (!selectedAssessmentId) return;
@@ -162,12 +181,24 @@ export default function Index({
         }, 5000);
 
         return () => window.clearInterval(refreshTimer);
-    }, [selectedAssessmentId]);
+    }, [selectedAssessmentId, selectedSchoolId]);
+
+    const selectSchool = (schoolId: string) => {
+        setSchoolQuery('');
+        router.get(
+            route('monitoring.index'),
+            schoolId ? { school_id: schoolId } : {},
+            { preserveState: true, replace: true },
+        );
+    };
 
     const selectAssessment = (assessmentId: string) => {
         router.get(
             route('monitoring.index'),
-            assessmentId ? { assessment_id: assessmentId } : {},
+            {
+                ...(canChooseSchool && selectedSchoolId ? { school_id: selectedSchoolId } : {}),
+                ...(assessmentId ? { assessment_id: assessmentId } : {}),
+            },
             { preserveState: true, replace: true },
         );
     };
@@ -177,7 +208,7 @@ export default function Index({
 
         router.post(
             route('monitoring.ai-analysis.store', monitor.assessment.id),
-            {},
+            canChooseSchool && selectedSchoolId ? { school_id: selectedSchoolId } : {},
             {
                 preserveScroll: true,
                 onStart: () => {
@@ -200,10 +231,10 @@ export default function Index({
                 <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
                     <div>
                         <p className="text-sm font-medium text-emerald-600">
-                            Pelaksanaan Sekolah
+                            {canChooseSchool ? 'Pemantauan Lintas Sekolah' : 'Pelaksanaan Sekolah'}
                         </p>
                         <h1 className="mt-1 text-2xl font-bold text-slate-900">
-                            Monitoring TO Serentak
+                            {canChooseSchool ? 'Monitoring TO Lintas Sekolah' : 'Monitoring TO Serentak'}
                         </h1>
                     </div>
                     {monitor && (
@@ -217,7 +248,22 @@ export default function Index({
             <Head title="Monitoring TO" />
 
             <div className="mx-auto max-w-[1600px] space-y-6 px-4 py-8 sm:px-6 lg:px-8">
-                <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <section className={`grid gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ${canChooseSchool ? 'md:grid-cols-2' : ''}`}>
+                    {canChooseSchool && <div className="block text-sm font-semibold text-slate-700">
+                        <span>Pilih Sekolah</span>
+                        <Combobox value={selectedSchool || null} onChange={(school: SchoolOption | null) => school && selectSchool(String(school.id))} by="id">
+                            <div className="relative mt-2">
+                                <ComboboxInput displayValue={(school: SchoolOption | null) => school ? `${school.name} · NPSN ${school.npsn}` : ''} onChange={(event) => setSchoolQuery(event.target.value)} onFocus={(event) => event.currentTarget.select()} placeholder="Cari nama sekolah atau NPSN..." className="block w-full rounded-xl border-slate-300 pe-10 text-sm focus:border-emerald-500 focus:ring-emerald-500" />
+                                <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-slate-400">⌄</span>
+                                <ComboboxOptions className="absolute z-30 mt-2 max-h-72 w-full overflow-auto rounded-xl border border-slate-200 bg-white p-1 shadow-xl empty:hidden">
+                                    {filteredSchools.length === 0 ? <div className="px-3 py-4 text-center text-sm font-normal text-slate-500">Sekolah atau NPSN tidak ditemukan.</div> : filteredSchools.map((school) => <ComboboxOption key={school.id} value={school} className="group cursor-pointer rounded-lg px-3 py-2.5 text-sm font-normal text-slate-700 data-[focus]:bg-emerald-50 data-[focus]:text-emerald-800 data-[selected]:font-semibold">
+                                        <span className="block truncate">{school.name}</span>
+                                        <span className="mt-0.5 block font-mono text-xs text-slate-500 group-data-[focus]:text-emerald-700">NPSN {school.npsn}</span>
+                                    </ComboboxOption>)}
+                                </ComboboxOptions>
+                            </div>
+                        </Combobox>
+                    </div>}
                     <label className="block text-sm font-semibold text-slate-700">
                         Pilih Try Out
                         <select
@@ -240,10 +286,10 @@ export default function Index({
                 {!monitor ? (
                     <section className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center">
                         <p className="font-semibold text-slate-800">
-                            Belum ada aktivitas Try Out
+                            Belum ada aktivitas Try Out{selectedSchool ? ` di ${selectedSchool.name}` : ''}
                         </p>
                         <p className="mt-2 text-sm text-slate-500">
-                            Ambil jadwal sekolah terlebih dahulu. Peserta akan muncul setelah mulai mengerjakan.
+                            {canChooseSchool ? 'Pilih sekolah lain atau tunggu sampai siswa sekolah ini mulai mengerjakan.' : 'Ambil jadwal sekolah terlebih dahulu. Peserta akan muncul setelah mulai mengerjakan.'}
                         </p>
                     </section>
                 ) : (
@@ -290,10 +336,10 @@ export default function Index({
                                     <table className="min-w-max border-separate border-spacing-0 text-sm">
                                         <thead>
                                             <tr className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                                                <th className="sticky left-0 z-20 min-w-64 border-b border-r border-slate-200 bg-slate-50 px-5 py-4 text-left">
+                                                <th className="md:sticky md:left-0 z-20 min-w-48 md:min-w-64 border-b border-r border-slate-200 bg-slate-50 px-5 py-4 text-left">
                                                     Nama Siswa
                                                 </th>
-                                                <th className="sticky left-64 z-20 min-w-36 border-b border-r border-slate-200 bg-slate-50 px-4 py-4 text-left">
+                                                <th className="md:sticky md:left-64 z-20 min-w-36 border-b border-r border-slate-200 bg-slate-50 px-4 py-4 text-left">
                                                     Progres
                                                 </th>
                                                 {Array.from({ length: monitor.question_count }, (_, index) => (
@@ -306,7 +352,7 @@ export default function Index({
                                         <tbody>
                                             {monitor.rows.map((row) => (
                                                 <tr key={row.attempt_id} className="group hover:bg-slate-50/70">
-                                                    <td className="sticky left-0 z-10 border-b border-r border-slate-200 bg-white px-5 py-4 group-hover:bg-slate-50">
+                                                    <td className="md:sticky md:left-0 z-10 border-b border-r border-slate-200 bg-white px-5 py-4 group-hover:bg-slate-50">
                                                         <p className="font-semibold text-slate-900">
                                                             {row.student.name}
                                                         </p>
@@ -314,7 +360,7 @@ export default function Index({
                                                             NISN {row.student.nisn || '-'}
                                                         </p>
                                                     </td>
-                                                    <td className="sticky left-64 z-10 border-b border-r border-slate-200 bg-white px-4 py-4 group-hover:bg-slate-50">
+                                                    <td className="md:sticky md:left-64 z-10 border-b border-r border-slate-200 bg-white px-4 py-4 group-hover:bg-slate-50">
                                                         <div className="flex items-center gap-2">
                                                             <span className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase ${row.status === 'submitted' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
                                                                 {row.status === 'submitted' ? 'Selesai' : 'Mengerjakan'}

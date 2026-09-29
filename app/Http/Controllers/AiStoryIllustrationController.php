@@ -23,16 +23,16 @@ class AiStoryIllustrationController extends Controller
     ): RedirectResponse {
         $format = data_get($generation->request_payload, 'format', 'story');
         $hasRecoverableVisualSpec = is_array(data_get($generation->result_payload, 'visual_spec'));
+        $isPrivateDraft = data_get($generation->request_payload, 'submission_mode') === 'draft';
         abort_unless(
-            $generation->school_id === $request->user()->school_id
-            && $generation->type === AiGenerationType::StoryQuestions
+            $generation->type === AiGenerationType::StoryQuestions
+            && (! $isPrivateDraft || $generation->requested_by === $request->user()->id)
             && ($format === 'story' || data_get($generation->request_payload, 'use_illustration') === true || $hasRecoverableVisualSpec)
             && $generation->status === AiGenerationStatus::Completed,
             404,
         );
 
         $existing = AiGeneration::query()
-            ->where('school_id', $request->user()->school_id)
             ->where('type', AiGenerationType::StoryIllustration)
             ->where('input_hash', hash('sha256', "story-illustration:{$generation->id}"))
             ->whereIn('status', [AiGenerationStatus::Pending, AiGenerationStatus::Processing, AiGenerationStatus::Completed])
@@ -47,7 +47,6 @@ class AiStoryIllustrationController extends Controller
 
         $questionIds = data_get($generation->result_payload, 'question_ids', []);
         $questionCount = Question::query()
-            ->where('school_id', $request->user()->school_id)
             ->whereIn('id', $questionIds)
             ->count();
         if ($questionCount === 0 || $questionCount !== count($questionIds)) {
@@ -76,7 +75,7 @@ class AiStoryIllustrationController extends Controller
             $format,
         );
         $imageGeneration = AiGeneration::create([
-            'school_id' => $generation->school_id,
+            'school_id' => $request->user()->school_id,
             'requested_by' => $request->user()->id,
             'source_question_id' => $questionIds[0],
             'type' => AiGenerationType::StoryIllustration,

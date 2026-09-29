@@ -131,9 +131,10 @@ export default function StimulusVisual({ visual, className = '' }: { visual?: St
         };
 
         return (
-            <figure className={`overflow-hidden rounded-xl border border-slate-300 bg-white p-3 ${className}`}>
+            <figure className={`toa-chart min-w-0 overflow-hidden rounded-xl border border-slate-300 bg-white p-3 ${className}`}>
                 {visual.title && <figcaption className="mb-1 text-center text-sm font-bold text-slate-900">{visual.title}</figcaption>}
-                <svg viewBox="0 0 800 400" role="img" aria-label={visual.title || 'Diagram lingkaran stimulus'} className="h-auto w-full">
+                <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Diagram lingkaran, geser untuk melihat seluruh diagram">
+                <svg viewBox={`0 0 800 ${Math.max(400, 110 + items.length * 29)}`} role="img" aria-label={visual.title || 'Diagram lingkaran stimulus'} className="h-auto w-full min-w-[640px]">
                     {items.map((item, index) => {
                         const percentage = Number(item.value) / total;
                         const startAngle = currentAngle;
@@ -163,13 +164,14 @@ export default function StimulusVisual({ visual, className = '' }: { visual?: St
                     {items.map((item, index) => (
                         <g key={`legend-${index}`} transform={`translate(455 ${60 + (index * 29)})`}>
                             <rect width="18" height="18" rx="4" fill={chartColors[index % chartColors.length]} />
-                            <text x="28" y="15" fontSize="15" fontWeight="600" fill="#334155">
+                            <text x="28" y="15" fontSize="15" fontWeight="600" fill="var(--toa-chart-text)">
                                 {item.label}{visual.show_percentages ? ` · ${formatNumber((Number(item.value) / total) * 100)}%` : ''}
                             </text>
                         </g>
                     ))}
-                    {visual.unit && <text x="600" y="370" textAnchor="middle" fontSize="14" fontWeight="600" fill="#64748b">Satuan data: {visual.unit}</text>}
+                    {visual.unit && <text x="600" y={Math.max(370, 80 + items.length * 29)} textAnchor="middle" fontSize="14" fontWeight="600" fill="var(--toa-chart-text)">Satuan data: {visual.unit}</text>}
                 </svg>
+                </div>
             </figure>
         );
     }
@@ -194,21 +196,22 @@ export default function StimulusVisual({ visual, className = '' }: { visual?: St
     const slot = plotWidth / categories.length;
 
     return (
-        <figure className={`overflow-hidden rounded-xl border border-slate-300 bg-white p-3 ${className}`}>
+        <figure className={`toa-chart min-w-0 overflow-hidden rounded-xl border border-slate-300 bg-white p-3 ${className}`}>
             {visual.title && <figcaption className="mb-1 text-center text-sm font-bold text-slate-900">{visual.title}</figcaption>}
-            <svg viewBox="0 0 800 440" role="img" aria-label={visual.title || 'Diagram batang stimulus'} className="h-auto w-full">
+            <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Diagram batang, geser untuk melihat seluruh diagram">
+            <svg viewBox="0 0 800 440" role="img" aria-label={visual.title || 'Diagram batang stimulus'} className="h-auto w-full min-w-[640px]">
                 {Array.from({ length: tickCount + 1 }).map((_, index) => {
                     const value = index * tickStep;
                     const y = plot.bottom - (plotHeight * value / axisMaximum);
                     return (
                         <g key={index}>
-                            <line x1={plot.left} y1={y} x2={plot.right} y2={y} stroke="#cbd5e1" strokeWidth="1.5" />
-                            <text x={plot.left - 12} y={y + 5} textAnchor="end" fontSize="15" fontWeight="600" fill="#475569">{formatNumber(value)}</text>
+                            <line x1={plot.left} y1={y} x2={plot.right} y2={y} stroke="var(--toa-chart-grid)" strokeWidth="1.5" />
+                            <text x={plot.left - 12} y={y + 5} textAnchor="end" fontSize="15" fontWeight="600" fill="var(--toa-chart-text)">{formatNumber(value)}</text>
                         </g>
                     );
                 })}
-                <line x1={plot.left} y1={plot.top} x2={plot.left} y2={plot.bottom} stroke="#334155" strokeWidth="3" />
-                <line x1={plot.left} y1={plot.bottom} x2={plot.right} y2={plot.bottom} stroke="#334155" strokeWidth="3" />
+                <line x1={plot.left} y1={plot.top} x2={plot.left} y2={plot.bottom} stroke="var(--toa-chart-axis)" strokeWidth="3" />
+                <line x1={plot.left} y1={plot.bottom} x2={plot.right} y2={plot.bottom} stroke="var(--toa-chart-axis)" strokeWidth="3" />
                 {categories.map((category, categoryIndex) => {
                     const groupWidth = slot * 0.78;
                     const barGap = isGrouped ? 3 : 0;
@@ -221,9 +224,9 @@ export default function StimulusVisual({ visual, className = '' }: { visual?: St
                                 const value = Math.max(0, Number(dataSeries.values[categoryIndex] || 0));
                                 const height = plotHeight * value / axisMaximum;
                                 const x = groupX + (seriesIndex * (width + barGap));
-                                return <rect key={seriesIndex} x={x} y={plot.bottom - height} width={width} height={height} rx="4" fill={chartColors[seriesIndex % chartColors.length]} stroke="#334155" strokeWidth="1.5" />;
+                                return <rect key={seriesIndex} x={x} y={plot.bottom - height} width={width} height={height} rx="4" fill={chartColors[seriesIndex % chartColors.length]} stroke="var(--toa-chart-axis)" strokeWidth="1.5" />;
                             })}
-                            <text x={plot.left + (categoryIndex * slot) + (slot / 2)} y={plot.bottom + 25} textAnchor="middle" fontSize="14" fontWeight="600" fill="#334155">
+                            <text x={plot.left + (categoryIndex * slot) + (slot / 2)} y={plot.bottom + 25} textAnchor="middle" fontSize="14" fontWeight="600" fill="var(--toa-chart-text)">
                                 <title>{category}</title>{label}
                             </text>
                         </g>
@@ -232,12 +235,13 @@ export default function StimulusVisual({ visual, className = '' }: { visual?: St
                 {isGrouped && series.map((dataSeries, index) => (
                     <g key={index} transform={`translate(${270 + (index * 145)} 390)`}>
                         <rect width="18" height="18" rx="3" fill={chartColors[index % chartColors.length]} />
-                        <text x="26" y="15" fontSize="14" fontWeight="600" fill="#334155">{dataSeries.label}</text>
+                        <text x="26" y="15" fontSize="14" fontWeight="600" fill="var(--toa-chart-text)">{dataSeries.label}</text>
                     </g>
                 ))}
-                {visual.x_axis_label && <text x={(plot.left + plot.right) / 2} y={isGrouped ? 435 : 420} textAnchor="middle" fontSize="15" fontWeight="700" fill="#334155">{visual.x_axis_label}</text>}
-                {visual.y_axis_label && <text x="20" y={(plot.top + plot.bottom) / 2} textAnchor="middle" transform={`rotate(-90 20 ${(plot.top + plot.bottom) / 2})`} fontSize="15" fontWeight="700" fill="#334155">{visual.y_axis_label}</text>}
+                {visual.x_axis_label && <text x={(plot.left + plot.right) / 2} y={isGrouped ? 435 : 420} textAnchor="middle" fontSize="15" fontWeight="700" fill="var(--toa-chart-text)">{visual.x_axis_label}</text>}
+                {visual.y_axis_label && <text x="20" y={(plot.top + plot.bottom) / 2} textAnchor="middle" transform={`rotate(-90 20 ${(plot.top + plot.bottom) / 2})`} fontSize="15" fontWeight="700" fill="var(--toa-chart-text)">{visual.y_axis_label}</text>}
             </svg>
+                </div>
         </figure>
     );
 }

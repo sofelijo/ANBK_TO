@@ -3,11 +3,14 @@ import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, Link, useForm } from '@inertiajs/react';
 import { FormEvent } from 'react';
 
-type Blueprint = { id: number; subject_id: number; code: string; name: string; description?: string; competency_ids: number[] };
+type Blueprint = { id: number; subject_id: number; code: string; name: string; description?: string; competency_ids: number[]; is_global?: boolean };
 type Competency = { id: number; subject_id: number; code: string; name: string; grade_level: number };
 
 export default function Form({ blueprint, subjects, competencies }: { blueprint?: Blueprint; subjects: { id: number; code: string; name: string }[]; competencies: Competency[] }) {
     const editing = Boolean(blueprint);
+    const isCustomizingGlobal = Boolean(blueprint?.is_global);
+    const pageTitle = isCustomizingGlobal ? 'Customize Tipe Soal' : editing ? 'Edit Tipe Soal' : 'Tambah Tipe Soal';
+
     const { data, setData, post, put, processing, errors } = useForm({
         subject_id: blueprint?.subject_id || subjects[0]?.id || 0,
         code: blueprint?.code || '',
@@ -19,8 +22,8 @@ export default function Form({ blueprint, subjects, competencies }: { blueprint?
     const toggleCompetency = (id: number) => setData('competency_ids', data.competency_ids.includes(id) ? data.competency_ids.filter((item) => item !== id) : [...data.competency_ids, id]);
     const submit = (event: FormEvent) => { event.preventDefault(); editing && blueprint ? put(route('question-types.update', blueprint.id)) : post(route('question-types.store')); };
 
-    return <AuthenticatedLayout header={<div><p className="text-sm font-medium text-emerald-600">Klasifikasi Bahasa Indonesia</p><h1 className="mt-1 text-2xl font-bold text-slate-900">{editing ? 'Edit Tipe Soal' : 'Tambah Tipe Soal'}</h1></div>}>
-        <Head title={editing ? 'Edit Tipe Soal' : 'Tambah Tipe Soal'} />
+    return <AuthenticatedLayout header={<div><p className="text-sm font-medium text-emerald-600">Klasifikasi Bahasa Indonesia</p><h1 className="mt-1 text-2xl font-bold text-slate-900">{pageTitle}</h1>{isCustomizingGlobal && <p className="mt-1 text-xs text-slate-500">Anda sedang menyesuaikan tipe soal standar untuk sekolah Anda. Perubahan akan disimpan khusus untuk sekolah ini.</p>}</div>}>
+        <Head title={pageTitle} />
         <form onSubmit={submit} className="mx-auto max-w-3xl space-y-5 px-4 py-8 sm:px-6">
             <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                 <label className="block text-sm font-semibold text-slate-700">Mata pelajaran<select value={data.subject_id} onChange={(event) => setData((current) => ({ ...current, subject_id: Number(event.target.value), competency_ids: [] }))} className="mt-1 block w-full rounded-xl border-slate-300"><option value={0}>Pilih mata pelajaran</option>{subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.code} · {subject.name}</option>)}</select><InputError message={errors.subject_id} className="mt-1" /></label>

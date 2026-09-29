@@ -38,12 +38,14 @@ const normalizeGradeLevel = (gradeLevel?: number): number => {
 export default function Form({
     competency,
     defaultParentId,
+    defaultSubjectId,
     parents,
     subjects,
     questionBlueprints,
 }: {
     competency?: Competency;
     defaultParentId?: number;
+    defaultSubjectId?: number;
     parents: ParentOption[];
     subjects: { id: number; code: string; name: string }[];
     questionBlueprints: QuestionBlueprint[];
@@ -52,7 +54,7 @@ export default function Form({
     const selectedParentId = competency?.parent_id || defaultParentId;
     const initialParent = parents.find((parent) => parent.id === selectedParentId);
     const { data, setData, post, put, processing, errors } = useForm({
-        subject_id: competency?.subject_id ? String(competency.subject_id) : initialParent ? String(initialParent.subject_id) : '',
+        subject_id: competency?.subject_id ? String(competency.subject_id) : initialParent ? String(initialParent.subject_id) : defaultSubjectId ? String(defaultSubjectId) : '',
         code: competency?.code || '',
         domain: competency?.domain || '',
         name: competency?.name || '',

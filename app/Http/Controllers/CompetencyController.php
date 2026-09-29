@@ -37,7 +37,7 @@ class CompetencyController extends Controller
             ->withCount([
                 'questions',
                 'children',
-                'subcompetencyQuestions' => fn ($query) => $query->where('questions.school_id', $schoolId),
+                'subcompetencyQuestions',
             ])
             ->orderBy('grade_level')
             ->orderByRaw('COALESCE(parent_id, id)')
@@ -73,16 +73,22 @@ class CompetencyController extends Controller
     public function create(Request $request): Response
     {
         $parents = $this->parentOptions($request);
+        $subjects = $this->subjects($request);
         $requestedParentId = $request->integer('parent_id') ?: null;
         $parentId = $requestedParentId && $parents->contains('id', $requestedParentId)
             ? $requestedParentId
+            : null;
+        $requestedSubjectId = $request->integer('subject_id') ?: null;
+        $defaultSubjectId = $requestedSubjectId && $subjects->contains('id', $requestedSubjectId)
+            ? $requestedSubjectId
             : null;
 
         return Inertia::render('Competencies/Form', [
             'competency' => null,
             'defaultParentId' => $parentId,
+            'defaultSubjectId' => $defaultSubjectId,
             'parents' => $parents,
-            'subjects' => $this->subjects($request),
+            'subjects' => $subjects,
             'questionBlueprints' => $this->questionBlueprints($request),
         ]);
     }

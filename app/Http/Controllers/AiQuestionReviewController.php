@@ -20,12 +20,10 @@ class AiQuestionReviewController extends Controller
         AiManager $manager,
         AuditLogger $auditLogger,
     ): RedirectResponse {
-        abort_unless($question->school_id === $request->user()->school_id, 404);
-
         $provider = $manager->provider();
         $payload = ['question_id' => $question->id, 'updated_at' => $question->updated_at?->toIso8601String()];
         $generation = AiGeneration::create([
-            'school_id' => $question->school_id,
+            'school_id' => $request->user()->school_id,
             'requested_by' => $request->user()->id,
             'source_question_id' => $question->id,
             'type' => AiGenerationType::QuestionValidation,

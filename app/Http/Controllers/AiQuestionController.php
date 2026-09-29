@@ -18,8 +18,6 @@ class AiQuestionController extends Controller
 {
     public function store(Request $request, Question $question, AiManager $manager, TeacherAiQuota $quota): RedirectResponse
     {
-        abort_unless($question->school_id === $request->user()->school_id, 404);
-
         if (in_array($question->type, [QuestionType::Matching, QuestionType::CategoryMatrix], true)) {
             throw ValidationException::withMessages([
                 'ai' => 'Variasi AI untuk tipe soal ini belum tersedia. Soal tetap dapat diedit dan divalidasi AI.',
@@ -31,7 +29,7 @@ class AiQuestionController extends Controller
         $provider = $manager->provider();
         $payload = ['question_id' => $question->id, 'variant_count' => 3];
         $generation = AiGeneration::create([
-            'school_id' => $question->school_id,
+            'school_id' => $request->user()->school_id,
             'requested_by' => $request->user()->id,
             'source_question_id' => $question->id,
             'type' => AiGenerationType::QuestionVariants,

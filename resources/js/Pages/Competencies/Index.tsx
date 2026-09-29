@@ -79,7 +79,7 @@ export default function Index({
             <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
                 <form
                     onSubmit={filter}
-                    className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-[1fr_200px_160px_auto]"
+                    className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_200px_160px_auto]"
                 >
                     <input
                         type="search"

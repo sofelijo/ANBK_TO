@@ -39,6 +39,19 @@ type BankQuestionItem = {
     competency_name: string;
     competency_code: string;
     parent_competency_name: string;
+    is_bundle: boolean;
+    story_generation_id: number | null;
+    bundle_title?: string | null;
+    bundle_question_count: number;
+    bundle_questions?: Array<{
+        id: number;
+        prompt: string;
+        explanation?: string;
+        type: string;
+        difficulty: number;
+        competency_name: string;
+        options?: OptionItem[];
+    }>;
     options?: OptionItem[];
 };
 
@@ -79,11 +92,15 @@ export default function Show({
     questions,
     subCompetencies,
     availableBankQuestions = [],
+    canManage,
+    canPreview,
 }: {
     assessment: AssessmentDetail;
     questions: QuestionItem[];
     subCompetencies: SubCompetencyDetail[];
     availableBankQuestions?: BankQuestionItem[];
+    canManage: boolean;
+    canPreview: boolean;
 }) {
     const selectedSlots = subCompetencies.filter((s) => s.is_selected_slot);
     const fulfilledSlots = selectedSlots.filter((s) => s.question_count > 0);
@@ -98,6 +115,12 @@ export default function Show({
 
     const [addFromBankModalOpen, setAddFromBankModalOpen] = useState(false);
     const [bankSearch, setBankSearch] = useState('');
+    const [previewBundle, setPreviewBundle] = useState<BankQuestionItem | null>(null);
+    const standaloneBankQuestions = availableBankQuestions.filter((question) => !question.is_bundle);
+    const addableBankItems = availableBankQuestions.filter((question, index, allQuestions) => (
+        !question.is_bundle
+        || allQuestions.findIndex((candidate) => candidate.story_generation_id === question.story_generation_id) === index
+    ));
 
     // Preview Question Modal state
     const [previewQuestion, setPreviewQuestion] = useState<{
@@ -113,7 +136,7 @@ export default function Show({
 
     const openSwapModal = (question: QuestionItem) => {
         const targetSubCompetencyId = question.competency?.id ?? 'all';
-        const initialCandidates = availableBankQuestions.filter(
+        const initialCandidates = standaloneBankQuestions.filter(
             (candidate) => targetSubCompetencyId === 'all' || candidate.competency_id === targetSubCompetencyId,
         );
 
@@ -124,7 +147,7 @@ export default function Show({
         setSwapModalOpen(true);
     };
 
-    const replacementQuestions = availableBankQuestions.filter((question) => {
+    const replacementQuestions = standaloneBankQuestions.filter((question) => {
         const matchesSubCompetency =
             swapSubCompetencyId === 'all' || question.competency_id === swapSubCompetencyId;
         const keyword = swapSearch.trim().toLowerCase();
@@ -137,7 +160,7 @@ export default function Show({
         return matchesSubCompetency && matchesSearch;
     });
 
-    const replacementCountBySubCompetency = availableBankQuestions.reduce<Record<number, number>>(
+    const replacementCountBySubCompetency = standaloneBankQuestions.reduce<Record<number, number>>(
         (counts, question) => {
             if (question.competency_id !== null) {
                 counts[question.competency_id] = (counts[question.competency_id] ?? 0) + 1;
@@ -150,7 +173,7 @@ export default function Show({
 
     const changeSwapSubCompetency = (value: string) => {
         const subCompetencyId = value === 'all' ? 'all' : Number(value);
-        const candidates = availableBankQuestions.filter(
+        const candidates = standaloneBankQuestions.filter(
             (question) => subCompetencyId === 'all' || question.competency_id === subCompetencyId,
         );
 
@@ -161,7 +184,7 @@ export default function Show({
 
     const changeSwapSearch = (value: string) => {
         const keyword = value.trim().toLowerCase();
-        const candidates = availableBankQuestions.filter((question) => {
+        const candidates = standaloneBankQuestions.filter((question) => {
             const matchesSubCompetency =
                 swapSubCompetencyId === 'all' || question.competency_id === swapSubCompetencyId;
             const matchesSearch =
@@ -206,10 +229,12 @@ export default function Show({
         }
     };
 
-    const handleAttachBankQuestion = (qId: number) => {
+    const handleAttachBankQuestion = (question: BankQuestionItem) => {
         router.post(
             route('assessments.questions.attach', assessment.id),
-            { question_id: qId },
+            question.is_bundle
+                ? { story_generation_id: question.story_generation_id }
+                : { question_id: question.id },
             {
                 onSuccess: () => {
                     setAddFromBankModalOpen(false);
@@ -218,10 +243,15 @@ export default function Show({
         );
     };
 
-    const filteredBankQuestions = availableBankQuestions.filter((q) =>
-        q.prompt.toLowerCase().includes(bankSearch.toLowerCase()) ||
-        q.competency_name.toLowerCase().includes(bankSearch.toLowerCase()),
-    );
+    const filteredBankQuestions = addableBankItems.filter((question) => {
+        const keyword = bankSearch.trim().toLowerCase();
+
+        return keyword === ''
+            || question.prompt.toLowerCase().includes(keyword)
+            || (question.stimulus ?? '').toLowerCase().includes(keyword)
+            || (question.bundle_title ?? '').toLowerCase().includes(keyword)
+            || question.competency_name.toLowerCase().includes(keyword);
+    });
 
     return (
         <AuthenticatedLayout
@@ -237,24 +267,31 @@ export default function Show({
                         <h1 className="mt-1 text-2xl font-bold text-slate-900">{assessment.title}</h1>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                        <button
-                            onClick={() => setAddFromBankModalOpen(true)}
-                            className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
-                        >
-                            + Pilih dari Bank Soal
-                        </button>
-                        <Link
-                            href={route('questions.create', { subject_id: assessment.subject?.id })}
-                            className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-500"
-                        >
-                            + Buat Soal Baru
-                        </Link>
-                        <Link
+                        {canPreview ? (
+                            <a
+                                href={route('assessments.preview', assessment.id)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="rounded-xl border border-indigo-300 bg-white px-4 py-2.5 text-sm font-semibold text-indigo-700 shadow-sm hover:bg-indigo-50"
+                            >
+                                Preview
+                            </a>
+                        ) : (
+                            <button
+                                type="button"
+                                disabled
+                                title="Preview belum tersedia karena paket belum memiliki soal."
+                                className="cursor-not-allowed rounded-xl border border-slate-200 bg-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-400"
+                            >
+                                Preview
+                            </button>
+                        )}
+                        {canManage && <Link
                             href={route('assessments.edit', assessment.id)}
                             className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                         >
                             Edit Komposisi
-                        </Link>
+                        </Link>}
                     </div>
                 </div>
             }
@@ -349,12 +386,12 @@ export default function Show({
                                         </div>
                                         <div className="mt-3 flex items-center justify-between pt-2 border-t border-rose-100">
                                             <span className="text-xs font-semibold text-rose-700">0 Soal</span>
-                                            <Link
+                                            {canManage && <Link
                                                 href={route('questions.create', { subject_id: assessment.subject?.id })}
                                                 className="text-xs font-bold text-indigo-700 hover:underline"
                                             >
                                                 + Buat Soal
-                                            </Link>
+                                            </Link>}
                                         </div>
                                     </div>
                                 ))}
@@ -405,7 +442,7 @@ export default function Show({
                                 Anda dapat melihat, mengganti, atau menghapus soal dari paket ini.
                             </p>
                         </div>
-                        <div className="flex gap-2">
+                        {canManage && <div className="flex gap-2">
                             <button
                                 onClick={() => setAddFromBankModalOpen(true)}
                                 className="rounded-xl bg-indigo-50 border border-indigo-200 px-3.5 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
@@ -418,12 +455,12 @@ export default function Show({
                             >
                                 + Buat Soal Baru
                             </Link>
-                        </div>
+                        </div>}
                     </div>
 
                     {questions.length === 0 ? (
                         <div className="p-8 text-center text-sm text-slate-500 border border-dashed border-slate-200 rounded-xl">
-                            Belum ada soal yang dimasukkan ke paket ini. Klik "+ Pilih dari Bank Soal" atau "+ Buat Soal Baru".
+                            {canManage ? 'Belum ada soal yang dimasukkan ke paket ini. Klik "+ Pilih dari Bank Soal" atau "+ Buat Soal Baru".' : 'Paket ini belum memiliki soal.'}
                         </div>
                     ) : (
                         <div className="divide-y divide-slate-100">
@@ -453,18 +490,18 @@ export default function Show({
                                         >
                                             👁️ Lihat
                                         </button>
-                                        <button
+                                        {canManage && <button
                                             onClick={() => openSwapModal(q)}
                                             className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100"
                                         >
                                             ⇄ Ganti Soal
-                                        </button>
-                                        <button
+                                        </button>}
+                                        {canManage && <button
                                             onClick={() => handleRemoveQuestion(q)}
                                             className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100"
                                         >
                                             ✕ Hapus dari Paket
-                                        </button>
+                                        </button>}
                                     </div>
                                 </div>
                             ))}
@@ -506,7 +543,7 @@ export default function Show({
                                     onChange={(event) => changeSwapSubCompetency(event.target.value)}
                                     className="mt-1 block w-full rounded-xl border-slate-300 text-xs focus:border-indigo-500 focus:ring-indigo-500"
                                 >
-                                    <option value="all">Semua subkompetensi ({availableBankQuestions.length} soal)</option>
+                                    <option value="all">Semua subkompetensi ({standaloneBankQuestions.length} soal)</option>
                                     {subCompetencies.map((subCompetency) => {
                                         const availableCount = replacementCountBySubCompetency[subCompetency.id] ?? 0;
 
@@ -535,7 +572,7 @@ export default function Show({
                             </label>
                         </div>
 
-                        {availableBankQuestions.length === 0 ? (
+                        {standaloneBankQuestions.length === 0 ? (
                             <p className="text-xs text-rose-600 font-medium p-4 border rounded-xl bg-rose-50/50">
                                 Tidak ada soal terbit pengganti yang tersedia di bank soal untuk jenjang dan mapel ini. Silakan buat soal baru terlebih dahulu.
                             </p>
@@ -613,7 +650,7 @@ export default function Show({
             <Modal show={addFromBankModalOpen} onClose={() => setAddFromBankModalOpen(false)} maxWidth="2xl">
                 <div className="p-6 space-y-5">
                     <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                        <h3 className="text-lg font-bold text-slate-900">Pilih Soal dari Bank Soal</h3>
+                        <h3 className="text-lg font-bold text-slate-900">Pilih Soal atau Bundel dari Bank Soal</h3>
                         <button
                             onClick={() => setAddFromBankModalOpen(false)}
                             className="text-slate-400 hover:text-slate-600 font-bold text-lg"
@@ -637,27 +674,44 @@ export default function Show({
                     ) : (
                         <div className="max-h-72 overflow-y-auto divide-y divide-slate-100 border rounded-xl">
                             {filteredBankQuestions.map((bankQ) => (
-                                <div key={bankQ.id} className="p-3 flex items-center justify-between gap-3 hover:bg-slate-50">
+                                <div key={bankQ.is_bundle ? `bundle-${bankQ.story_generation_id}` : bankQ.id} className={`p-3 flex items-center justify-between gap-3 hover:bg-slate-50 ${bankQ.is_bundle ? 'bg-indigo-50/40' : ''}`}>
                                     <div className="text-xs space-y-0.5 flex-1">
                                         <span className="font-semibold text-indigo-700 block">
-                                            {bankQ.competency_name} · {typeLabels[bankQ.type] || bankQ.type}
+                                            {bankQ.is_bundle
+                                                ? `Bundel · ${bankQ.bundle_question_count} soal`
+                                                : `${bankQ.competency_name} · ${typeLabels[bankQ.type] || bankQ.type}`}
                                         </span>
-                                        <p className="text-slate-800 font-medium">{bankQ.prompt}</p>
+                                        {bankQ.is_bundle && bankQ.bundle_title && (
+                                            <p className="font-bold text-slate-900">{bankQ.bundle_title}</p>
+                                        )}
+                                        <p className={`text-slate-800 font-medium ${bankQ.is_bundle ? 'line-clamp-3 whitespace-pre-line' : ''}`}>
+                                            {bankQ.is_bundle ? bankQ.stimulus : bankQ.prompt}
+                                        </p>
                                     </div>
                                     <div className="shrink-0 flex items-center gap-2">
+                                        {bankQ.is_bundle ? (
+                                            <button
+                                                type="button"
+                                                onClick={() => setPreviewBundle(bankQ)}
+                                                className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                                            >
+                                                👁️ Lihat Bundel
+                                            </button>
+                                        ) : (
+                                            <button
+                                                type="button"
+                                                onClick={() => setPreviewQuestion(bankQ)}
+                                                className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 flex items-center gap-1"
+                                                title="Cek Detail Soal"
+                                            >
+                                                👁️ Cek
+                                            </button>
+                                        )}
                                         <button
-                                            type="button"
-                                            onClick={() => setPreviewQuestion(bankQ)}
-                                            className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 flex items-center gap-1"
-                                            title="Cek Detail Soal"
-                                        >
-                                            👁️ Cek
-                                        </button>
-                                        <button
-                                            onClick={() => handleAttachBankQuestion(bankQ.id)}
+                                            onClick={() => handleAttachBankQuestion(bankQ)}
                                             className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-500"
                                         >
-                                            + Tambahkan
+                                            {bankQ.is_bundle ? '+ Tambahkan Bundel' : '+ Tambahkan'}
                                         </button>
                                     </div>
                                 </div>
@@ -667,7 +721,108 @@ export default function Show({
                 </div>
             </Modal>
 
-            {/* ── MODAL 3: PRATINJAU / CEK DETAIL SOAL (MODAL MATA 👁️) ── */}
+            {/* ── MODAL 3: PRATINJAU BUNDEL ── */}
+            <Modal show={!!previewBundle} onClose={() => setPreviewBundle(null)} maxWidth="4xl">
+                {previewBundle && (
+                    <div className="max-h-[90vh] overflow-y-auto p-6 space-y-5">
+                        <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-3">
+                            <div>
+                                <h3 className="text-lg font-bold text-slate-900">👁️ Pratinjau Bundel Lengkap</h3>
+                                <p className="mt-1 text-sm font-semibold text-indigo-700">
+                                    {previewBundle.bundle_title || `Bundel ${previewBundle.bundle_question_count} soal`}
+                                </p>
+                                <p className="mt-1 text-xs text-slate-500">
+                                    Satu stimulus dengan {previewBundle.bundle_question_count} soal, kunci jawaban, dan pembahasan.
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setPreviewBundle(null)}
+                                className="text-lg font-bold text-slate-400 hover:text-slate-600"
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        {previewBundle.stimulus && (
+                            <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4 text-sm leading-7 text-slate-800">
+                                <span className="mb-2 block text-xs font-bold uppercase tracking-wide text-amber-900">
+                                    📄 Stimulus / Teks Bacaan
+                                </span>
+                                <div className="whitespace-pre-wrap">{previewBundle.stimulus}</div>
+                            </div>
+                        )}
+
+                        <div className="space-y-4">
+                            {(previewBundle.bundle_questions || []).map((question, questionIndex) => (
+                                <section key={question.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <span className="rounded-full bg-indigo-600 px-2.5 py-1 text-xs font-bold text-white">
+                                            Soal {questionIndex + 1}
+                                        </span>
+                                        <span className="rounded-md bg-indigo-50 px-2.5 py-1 text-xs font-bold text-indigo-700">
+                                            {typeLabels[question.type] || question.type}
+                                        </span>
+                                        <span className="rounded-md bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                                            Level {question.difficulty}
+                                        </span>
+                                        <span className="text-xs font-semibold text-emerald-700">{question.competency_name}</span>
+                                    </div>
+
+                                    <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm font-bold leading-relaxed text-slate-900">
+                                        {question.prompt}
+                                    </p>
+
+                                    {question.options && question.options.length > 0 && (
+                                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                                            {question.options.map((option, optionIndex) => (
+                                                <div
+                                                    key={option.id || optionIndex}
+                                                    className={`flex items-start gap-2 rounded-lg border p-2.5 text-xs ${option.is_correct ? 'border-emerald-400 bg-emerald-50 font-bold text-emerald-950' : 'border-slate-200 text-slate-700'}`}
+                                                >
+                                                    <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${option.is_correct ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                                                        {option.label || String.fromCharCode(65 + optionIndex)}
+                                                    </span>
+                                                    <span>{option.content || option.option_text}</span>
+                                                    {option.is_correct && <span className="ml-auto text-emerald-700">✓ Kunci</span>}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    {question.explanation && (
+                                        <div className="mt-3 rounded-lg border border-indigo-200 bg-indigo-50/70 p-3 text-xs leading-relaxed text-indigo-950">
+                                            <span className="font-bold">💡 Pembahasan: </span>
+                                            <span className="whitespace-pre-wrap">{question.explanation}</span>
+                                        </div>
+                                    )}
+                                </section>
+                            ))}
+                        </div>
+
+                        <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-4">
+                            {previewBundle.story_generation_id ? (
+                                <Link
+                                    href={route('story-questions.show', previewBundle.story_generation_id)}
+                                    target="_blank"
+                                    className="flex items-center gap-1.5 rounded-xl border border-indigo-300 bg-indigo-50 px-4 py-2 text-xs font-bold text-indigo-700 transition-colors hover:bg-indigo-100"
+                                >
+                                    ✏️ Edit Bundel
+                                </Link>
+                            ) : <div />}
+                            <button
+                                type="button"
+                                onClick={() => setPreviewBundle(null)}
+                                className="rounded-xl bg-slate-900 px-5 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+                            >
+                                Tutup Pratinjau
+                            </button>
+                        </div>
+                    </div>
+                )}
+            </Modal>
+
+            {/* ── MODAL 4: PRATINJAU / CEK DETAIL SOAL (MODAL MATA 👁️) ── */}
             <Modal show={!!previewQuestion} onClose={() => setPreviewQuestion(null)} maxWidth="2xl">
                 {previewQuestion && (
                     <div className="p-6 space-y-5">

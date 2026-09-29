@@ -154,9 +154,8 @@ class DatabaseSeeder extends Seeder
                 'difficulty' => 2,
                 'options' => [['30 kg', false], ['31 kg', false], ['33 kg', true], ['36 kg', false]],
             ],
-        ])->map(function (array $data) use ($school, $teacher, $competencies): Question {
+        ])->map(function (array $data) use ($teacher, $competencies): Question {
             $question = Question::create([
-                'school_id' => $school->id,
                 'author_id' => $teacher->id,
                 'competency_id' => $competencies[$data['competency']]->id,
                 'type' => QuestionType::SingleChoice,
@@ -184,7 +183,6 @@ class DatabaseSeeder extends Seeder
         });
 
         $assessment = Assessment::create([
-            'school_id' => $school->id,
             'created_by' => $teacher->id,
             'title' => 'Try Out Adaptif Kelas 6 - Demo',
             'description' => 'Paket singkat untuk mencoba alur pengerjaan dan analisis kompetensi.',
@@ -200,5 +198,6 @@ class DatabaseSeeder extends Seeder
         );
 
         $this->call(BahasaIndonesiaQuestionTypeSeeder::class);
+        $this->call(BahasaIndonesiaFullAssessmentSeeder::class);
     }
 }

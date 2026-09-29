@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\QuestionStatus;
 use App\Enums\UserRole;
+use App\Models\ApplicationSetting;
 use App\Models\Question;
 use App\Models\QuestionVerification;
 use App\Models\User;
@@ -12,10 +13,29 @@ use Illuminate\Validation\ValidationException;
 
 class QuestionVerificationService
 {
-    /** @return array{created: bool, published: bool, already_published: bool, count: int, remaining: int} */
-    public function verify(Question $question, User $verifier): array
+    public const SETTINGS_KEY = 'required_verifications';
+
+    /** Baca jumlah verifikasi minimum global untuk seluruh bank soal. */
+    public static function requiredFor(Question $question): int
     {
-        if (! $verifier->hasRole(UserRole::Teacher)) {
+        return self::requiredGlobally();
+    }
+
+    public static function requiredGlobally(): int
+    {
+        $fromSettings = ApplicationSetting::query()
+            ->where('key', self::SETTINGS_KEY)
+            ->value('value');
+
+        return is_numeric($fromSettings) && (int) $fromSettings >= 1
+            ? (int) $fromSettings
+            : Question::REQUIRED_VERIFICATIONS;
+    }
+
+    /** @return array{created: bool, published: bool, already_published: bool, count: int, remaining: int} */
+    public function verify(Question $question, User $verifier, bool $allowAuthor = false): array
+    {
+        if (! $verifier->hasRole(UserRole::Teacher) && ! ($allowAuthor && $question->author_id === $verifier->id)) {
             throw ValidationException::withMessages([
                 'verification' => 'Hanya akun guru yang dapat memverifikasi soal.',
             ]);
@@ -23,6 +43,13 @@ class QuestionVerificationService
 
         return DB::transaction(function () use ($question, $verifier): array {
             $lockedQuestion = Question::query()->lockForUpdate()->findOrFail($question->id);
+            $required = self::requiredFor($lockedQuestion);
+
+            if ((bool) data_get($lockedQuestion->metadata, 'verification_locked', false)) {
+                throw ValidationException::withMessages([
+                    'verification' => 'Soal masih berupa draft pribadi dan belum diajukan untuk verifikasi.',
+                ]);
+            }
 
             if ($lockedQuestion->status === QuestionStatus::Published) {
                 $verification = QuestionVerification::query()->firstOrCreate(
@@ -39,7 +66,7 @@ class QuestionVerificationService
                     'published' => false,
                     'already_published' => true,
                     'count' => $count,
-                    'remaining' => max(0, Question::REQUIRED_VERIFICATIONS - $count),
+                    'remaining' => max(0, $required - $count),
                 ];
             }
 
@@ -57,7 +84,7 @@ class QuestionVerificationService
                 ['verified_at' => now()],
             );
             $count = $lockedQuestion->verifications()->count();
-            $published = $count >= Question::REQUIRED_VERIFICATIONS;
+            $published = $count >= $required;
 
             if ($published) {
                 if ($lockedQuestion->revision_of_id) {
@@ -91,7 +118,7 @@ class QuestionVerificationService
                 'published' => $published,
                 'already_published' => false,
                 'count' => $count,
-                'remaining' => max(0, Question::REQUIRED_VERIFICATIONS - $count),
+                'remaining' => max(0, $required - $count),
             ];
         });
     }

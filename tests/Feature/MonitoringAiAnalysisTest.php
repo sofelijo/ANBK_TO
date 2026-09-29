@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\AiGenerationStatus;
 use App\Enums\AiGenerationType;
+use App\Enums\UserRole;
 use App\Jobs\GenerateSchoolAssessmentAnalysis;
 use App\Models\AiGeneration;
 use App\Models\Assessment;
@@ -81,6 +82,32 @@ class MonitoringAiAnalysisTest extends TestCase
             ->assertForbidden();
 
         $this->assertDatabaseCount('ai_generations', 0);
+    }
+
+    public function test_admin_can_generate_analysis_for_a_selected_school(): void
+    {
+        [$operator, $assessment] = $this->matrixScenario();
+        $admin = User::create([
+            'school_id' => null,
+            'name' => 'Admin Analisis Lintas Sekolah',
+            'email' => 'admin-cross-school-analysis@example.com',
+            'password' => 'password',
+            'role' => UserRole::Admin,
+            'is_active' => true,
+            'approved_at' => now(),
+            'email_verified_at' => now(),
+        ]);
+
+        $this->actingAs($admin)
+            ->post(route('monitoring.ai-analysis.store', $assessment), [
+                'school_id' => $operator->school_id,
+            ])
+            ->assertRedirect()
+            ->assertSessionHas('success');
+
+        $generation = AiGeneration::query()->sole();
+        $this->assertSame($operator->school_id, $generation->school_id);
+        $this->assertSame($admin->id, $generation->requested_by);
     }
 
     public function test_duplicate_ai_recommendations_are_normalized_and_missing_competencies_are_completed(): void

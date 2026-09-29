@@ -13,7 +13,7 @@ class RankingController extends Controller
     public function __invoke(Request $request, TogetherRankingService $ranking): Response
     {
         $togetherAssessments = $ranking->assessments();
-        $assessments = $ranking->selectableAssessments($request->user());
+        $assessments = $ranking->selectableAssessments();
         $selectedAssessment = $request->integer('assessment_id')
             ? $assessments->firstWhere('id', $request->integer('assessment_id'))
             : null;

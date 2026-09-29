@@ -8,6 +8,7 @@ use App\Enums\QuestionStatus;
 use App\Enums\QuestionType;
 use App\Enums\UserRole;
 use App\Models\AiGeneration;
+use App\Models\Assessment;
 use App\Models\AuditLog;
 use App\Models\Competency;
 use App\Models\Question;
@@ -27,6 +28,32 @@ use Tests\TestCase;
 class QuestionWorkflowTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_questions_are_global_across_schools(): void
+    {
+        [$author, $competency] = $this->teacherAndCompetency();
+        $question = $this->question($author, $competency);
+        $this->assertNull($question->school_id);
+        $otherSchool = School::create(['name' => 'Sekolah Pengakses Global', 'npsn' => '10000999']);
+        $otherTeacher = User::create([
+            'school_id' => $otherSchool->id,
+            'name' => 'Guru Pengakses Global',
+            'email' => 'guru-pengakses-global@example.com',
+            'password' => 'password',
+            'role' => UserRole::Teacher,
+            'is_active' => true,
+            'approved_at' => now(),
+            'email_verified_at' => now(),
+        ]);
+
+        $this->actingAs($otherTeacher)
+            ->get(route('questions.index'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('questions.data', fn ($questions): bool => $questions->contains('id', $question->id)));
+
+        $this->actingAs($otherTeacher)->get(route('questions.show', $question))->assertOk();
+        $this->actingAs($otherTeacher)->get(route('questions.edit', $question))->assertOk();
+    }
 
     public function test_teacher_can_open_manual_and_ai_question_creation_flows(): void
     {
@@ -50,7 +77,85 @@ class QuestionWorkflowTest extends TestCase
             ->get(route('story-questions.create', ['subject_id' => $competency->subject_id]))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('Questions/StoryCreate')
-                ->where('selectedSubjectId', $competency->subject_id));
+                ->where('selectedSubjectId', $competency->subject_id)
+                ->where('creationMode', 'ai'));
+
+        $this->actingAs($teacher)
+            ->get(route('json-questions.create', ['subject_id' => $competency->subject_id]))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Questions/StoryCreate')
+                ->where('selectedSubjectId', $competency->subject_id)
+                ->where('creationMode', 'json'));
+    }
+
+    public function test_teacher_can_import_chatgpt_json_as_draft_questions(): void
+    {
+        [$teacher] = $this->teacherAndCompetency();
+        $subject = Subject::create([
+            'school_id' => $teacher->school_id,
+            'code' => 'MAT',
+            'name' => 'Matematika',
+            'ai_question_format' => 'direct',
+        ]);
+        $competency = Competency::create([
+            'school_id' => $teacher->school_id,
+            'subject_id' => $subject->id,
+            'code' => 'MAT6-BIL',
+            'domain' => 'Bilangan',
+            'name' => 'Operasi bilangan bulat',
+            'grade_level' => 6,
+        ]);
+        $json = json_encode([
+            'title' => 'Latihan Bilangan',
+            'visual_description' => '',
+            'visual_spec' => null,
+            'story_paragraphs' => [],
+            'questions' => [[
+                'competency_code' => $competency->code,
+                'type' => 'single_choice',
+                'title' => 'Penjumlahan Bilangan',
+                'stimulus' => '',
+                'prompt' => 'Berapakah hasil 125 + 75?',
+                'explanation' => '125 ditambah 75 sama dengan 200.',
+                'difficulty' => 1,
+                'cognitive_level' => 'penerapan',
+                'options' => [
+                    ['content' => '175', 'is_correct' => false],
+                    ['content' => '200', 'is_correct' => true],
+                    ['content' => '225', 'is_correct' => false],
+                    ['content' => '250', 'is_correct' => false],
+                ],
+                'accepted_answers' => [],
+                'matching_pairs' => [],
+                'matching_distractors' => [],
+                'matrix_columns' => [],
+                'matrix_rows' => [],
+            ]],
+        ], JSON_UNESCAPED_UNICODE);
+
+        $response = $this->actingAs($teacher)->post(route('json-questions.store'), [
+            'subject_id' => $subject->id,
+            'root_competency_id' => $competency->id,
+            'competency_id' => $competency->id,
+            'bundle_slots' => null,
+            'theme' => '',
+            'answer_format' => 'single_choice',
+            'difficulty' => 1,
+            'paragraph_count' => 3,
+            'max_words' => 200,
+            'question_count' => 1,
+            'json_payload' => $json,
+        ]);
+
+        $response->assertSessionHasNoErrors();
+        $generation = AiGeneration::latest('id')->firstOrFail();
+        $question = Question::latest('id')->firstOrFail();
+        $response->assertRedirect(route('ai-questions.show', $generation));
+        $this->assertSame('external-json', $generation->provider);
+        $this->assertSame(QuestionStatus::Draft, $question->status);
+        $this->assertNull($question->school_id);
+        $this->assertTrue((bool) data_get($question->metadata, 'imported_from_external_json'));
+        $this->assertCount(4, $question->options);
     }
 
     public function test_question_is_published_only_after_three_distinct_teacher_verifications(): void
@@ -77,6 +182,7 @@ class QuestionWorkflowTest extends TestCase
 
         $question = Question::firstOrFail();
         $response->assertRedirect(route('questions.show', $question));
+        $this->assertNull($question->school_id);
         $this->assertCount(2, $question->options);
 
         $this->actingAs($teacher)
@@ -1006,6 +1112,22 @@ class QuestionWorkflowTest extends TestCase
             ->assertSessionHasErrors('duplicate');
 
         $this->assertSame(QuestionStatus::Draft, $duplicate->fresh()->status);
+
+        // Draft pribadi yang belum diajukan tidak boleh memblokir soal aktif lain.
+        $source->update([
+            'status' => QuestionStatus::Draft,
+            'metadata' => ['verification_locked' => true],
+        ]);
+        $duplicate->update([
+            'status' => QuestionStatus::Review,
+            'metadata' => ['verification_locked' => false],
+        ]);
+
+        $this->actingAs($teacher)
+            ->post(route('questions.approve', $duplicate))
+            ->assertSessionHasNoErrors();
+
+        $this->assertSame(1, $duplicate->verifications()->count());
     }
 
     public function test_story_question_request_allows_ai_to_choose_theme_when_left_empty(): void
@@ -1094,7 +1216,7 @@ class QuestionWorkflowTest extends TestCase
         config()->set('ai.driver', 'fake');
         config()->set('queue.default', 'sync');
         [$teacher, $competency] = $this->teacherAndCompetency();
-        $this->question($teacher, $competency);
+        $standaloneQuestion = $this->question($teacher, $competency);
 
         $this->actingAs($teacher)->post(route('story-questions.store'), [
             'subject_id' => $competency->subject_id,
@@ -1118,6 +1240,9 @@ class QuestionWorkflowTest extends TestCase
                 ->has('questions.data', 2)
                 ->where('questions.data', fn ($questions): bool => collect($questions)
                     ->where('story_generation_id', $generation->id)
+                    ->pipe(fn ($matching) => collect($matching->first()['bundle_questions'])->pluck('id')->all()) === $storyQuestions->pluck('id')->all())
+                ->where('questions.data', fn ($questions): bool => collect($questions)
+                    ->where('story_generation_id', $generation->id)
                     ->count() === 1));
 
         $storyQuestions->last()->update([
@@ -1130,6 +1255,42 @@ class QuestionWorkflowTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page
                 ->has('questions.data', 1)
                 ->where('questions.data.0.story_generation_id', $generation->id));
+
+        $this->actingAs($teacher)
+            ->get(route('questions.index', ['search' => (string) $storyQuestions->last()->id]))
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('questions.data', 1)
+                ->where('questions.data.0.story_generation_id', $generation->id));
+
+        $this->actingAs($teacher)
+            ->get(route('questions.index', ['search' => (string) $standaloneQuestion->id]))
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('questions.data', 1)
+                ->where('questions.data.0.id', $standaloneQuestion->id));
+
+        $this->actingAs($teacher)->post(route('story-questions.store'), [
+            'subject_id' => $competency->subject_id,
+            'theme' => 'kegiatan berbeda untuk menguji hitungan verifikasi',
+            'paragraph_count' => 2,
+            'question_count' => 3,
+        ]);
+        $otherGeneration = AiGeneration::query()->where('id', '!=', $generation->id)->latest('id')->firstOrFail();
+        Question::query()
+            ->where('story_generation_id', $otherGeneration->id)
+            ->each(fn (Question $question) => $question->verifications()->create([
+                'verifier_id' => $teacher->id,
+                'verified_at' => now(),
+            ]));
+
+        $expectedBundleVerifications = $storyQuestions->sum(
+            fn (Question $question): int => $question->verifications()->count(),
+        );
+
+        $this->actingAs($teacher)
+            ->get(route('questions.index', ['search' => 'delima jingga']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('questions.data', 1)
+                ->where('questions.data.0.bundle_verifications_count', $expectedBundleVerifications));
 
         $this->actingAs($teacher)
             ->get(route('questions.index', ['status' => QuestionStatus::Published->value]))
@@ -1681,10 +1842,43 @@ class QuestionWorkflowTest extends TestCase
             ->assertSessionHas('success');
 
         $this->assertDatabaseHas('questions', [
-            'school_id' => $teacher->school_id,
             'title' => 'Soal impor',
             'status' => QuestionStatus::Draft->value,
         ]);
+    }
+
+    public function test_question_detail_shows_current_and_available_assessment_packages(): void
+    {
+        [$teacher, $competency] = $this->teacherAndCompetency();
+        $question = $this->question($teacher, $competency);
+        $currentPackage = Assessment::create([
+            'school_id' => $teacher->school_id,
+            'subject_id' => $competency->subject_id,
+            'created_by' => $teacher->id,
+            'title' => 'Paket Saat Ini',
+            'grade_level' => 6,
+            'duration_minutes' => 60,
+            'status' => 'draft',
+        ]);
+        $availablePackage = Assessment::create([
+            'school_id' => $teacher->school_id,
+            'subject_id' => $competency->subject_id,
+            'created_by' => $teacher->id,
+            'title' => 'Paket Tujuan',
+            'grade_level' => 6,
+            'duration_minutes' => 60,
+            'status' => 'draft',
+        ]);
+        $currentPackage->questions()->attach($question->id, ['position' => 2, 'points' => 1]);
+
+        $this->actingAs($teacher)
+            ->get(route('questions.show', $question))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('packageUsage.0.id', $currentPackage->id)
+                ->where('packageUsage.0.title', 'Paket Saat Ini')
+                ->where('packageUsage.0.position', 2)
+                ->where('availablePackages.0.id', $availablePackage->id)
+                ->where('availablePackages.0.title', 'Paket Tujuan'));
     }
 
     public function test_student_cannot_manage_question_bank(): void

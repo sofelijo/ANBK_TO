@@ -240,8 +240,9 @@ type ExistingQuestion = {
     };
 };
 
-export default function Create({ subjects, competencies, questionBlueprints, assessments, questionTypes = defaultQuestionTypes, question, selectedSubjectId, returnGeneration, stimulusSvgTemplates = [] }: { subjects: { id: number; code: string; name: string }[]; competencies: Competency[]; questionBlueprints: QuestionBlueprint[]; assessments: Assessment[]; questionTypes?: QuestionTypeOption[]; question?: ExistingQuestion; selectedSubjectId?: number | null; returnGeneration?: { id: number; format: 'direct' | 'story' } | null; stimulusSvgTemplates?: StimulusSvgTemplateOption[] }) {
+export default function Create({ subjects, competencies, questionBlueprints, assessments, questionTypes = defaultQuestionTypes, question, selectedSubjectId, returnGeneration, stimulusSvgTemplates = [], requiredVerifications = 3 }: { subjects: { id: number; code: string; name: string }[]; competencies: Competency[]; questionBlueprints: QuestionBlueprint[]; assessments: Assessment[]; questionTypes?: QuestionTypeOption[]; question?: ExistingQuestion; selectedSubjectId?: number | null; returnGeneration?: { id: number; format: 'direct' | 'story' } | null; stimulusSvgTemplates?: StimulusSvgTemplateOption[]; requiredVerifications?: number }) {
     const [previewOpen, setPreviewOpen] = useState(false);
+    const [submitIntent, setSubmitIntent] = useState<'draft' | 'review'>('draft');
     const [activeStimulusTab, setActiveStimulusTab] = useState<'text' | 'visual' | 'image' | null>(null);
     const defaultOptions = [
             { content: '', is_correct: true },
@@ -483,9 +484,10 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
     const submit = (event: FormEvent) => {
         event.preventDefault();
         if (question) {
-            transform((formData) => ({ ...formData, _method: 'put' }));
+            transform((formData) => ({ ...formData, _method: 'put', intent: submitIntent }));
             post(route('questions.update', question.id), { forceFormData: true });
         } else {
+            transform((formData) => ({ ...formData, intent: submitIntent }));
             post(route('questions.store'), { forceFormData: true });
         }
     };
@@ -632,11 +634,42 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
                         )}
 
                         {usesQuestionBlueprints && <label className="text-sm font-medium text-slate-700">
-                            Tipe soal <span className="font-normal text-slate-500">(dapat disesuaikan)</span>
-                            <select value={data.question_blueprint_id} onChange={(event) => setData('question_blueprint_id', event.target.value)} disabled={!data.competency_id} className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500 disabled:bg-slate-100">
-                                <option value="">Tanpa tipe khusus</option>
-                                {availableQuestionBlueprints.map((blueprint) => <option key={blueprint.id} value={blueprint.id}>{defaultQuestionBlueprints.some((item) => item.id === blueprint.id) ? 'Default · ' : ''}{blueprint.name}</option>)}
-                            </select>
+                            <div className="flex items-center justify-between">
+                                <span>Tipe soal <span className="font-normal text-slate-500">(dapat disesuaikan)</span></span>
+                                {data.question_blueprint_id && (
+                                    <a
+                                        href={route('question-types.edit', data.question_blueprint_id)}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:text-emerald-900"
+                                        title="Buka customize tipe soal di tab baru"
+                                    >
+                                        <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                                            <path d="m13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                                        </svg>
+                                        <span>Customize</span>
+                                    </a>
+                                )}
+                            </div>
+                            <div className="mt-1 flex items-center gap-2">
+                                <select value={data.question_blueprint_id} onChange={(event) => setData('question_blueprint_id', event.target.value)} disabled={!data.competency_id} className="block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500 disabled:bg-slate-100">
+                                    <option value="">Tanpa tipe khusus</option>
+                                    {availableQuestionBlueprints.map((blueprint) => <option key={blueprint.id} value={blueprint.id}>{defaultQuestionBlueprints.some((item) => item.id === blueprint.id) ? 'Default · ' : ''}{blueprint.name}</option>)}
+                                </select>
+                                {data.question_blueprint_id && (
+                                    <a
+                                        href={route('question-types.edit', data.question_blueprint_id)}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="inline-flex shrink-0 items-center justify-center rounded-lg border border-slate-300 bg-white p-2.5 text-slate-700 shadow-sm hover:bg-slate-50 hover:text-emerald-700"
+                                        title="Customize tipe soal ini di tab baru"
+                                    >
+                                        <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                            <path d="m13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                                        </svg>
+                                    </a>
+                                )}
+                            </div>
                             <InputError message={errors.question_blueprint_id} className="mt-1" />
                         </label>}
 
@@ -1156,11 +1189,11 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
                                 Isi pasangan yang benar pada setiap baris. Murid akan melihat lajur kanan terpisah dan menjodohkannya dengan lajur kiri.
                             </div>
                             <div className="space-y-3">
-                                <div className="hidden grid-cols-[1fr_32px_1fr_40px] gap-3 px-1 text-xs font-semibold uppercase tracking-wide text-slate-500 sm:grid">
+                                <div className="hidden grid-cols-[minmax(0,1fr)_32px_minmax(0,1fr)_40px] gap-3 px-1 text-xs font-semibold uppercase tracking-wide text-slate-500 sm:grid">
                                     <span>Lajur kiri</span><span /><span>Pasangan benar di lajur kanan</span><span />
                                 </div>
                                 {data.matching_pairs.map((pair, index) => (
-                                    <div key={pair.left_id || index} className="grid gap-3 rounded-xl border border-slate-200 p-3 sm:grid-cols-[1fr_32px_1fr_40px] sm:items-center">
+                                    <div key={pair.left_id || index} className="grid gap-3 rounded-xl border border-slate-200 p-3 sm:grid-cols-[minmax(0,1fr)_32px_minmax(0,1fr)_40px] sm:items-center">
                                         <textarea
                                             value={pair.left}
                                             onChange={(event) => {
@@ -1284,7 +1317,7 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
                                 <h3 className="text-sm font-semibold text-slate-800">Pernyataan dan kunci</h3>
                                 <div className="mt-3 space-y-3">
                                     {data.matrix_rows.map((row, index) => (
-                                        <div key={row.id || index} className="grid gap-3 rounded-xl border border-slate-200 p-3 sm:grid-cols-[1fr_190px_40px] sm:items-center">
+                                        <div key={row.id || index} className="grid gap-3 rounded-xl border border-slate-200 p-3 sm:grid-cols-[minmax(0,1fr)_190px_40px] sm:items-center">
                                             <textarea
                                                 value={row.statement}
                                                 onChange={(event) => {
@@ -1391,7 +1424,23 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
                     <button type="button" onClick={() => setPreviewOpen(true)} className="inline-flex items-center gap-2 rounded-lg border border-indigo-300 bg-white px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50">
                         <span aria-hidden="true">◉</span> Preview siswa
                     </button>
-                    <button disabled={processing} className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white disabled:opacity-50">{question ? 'Simpan perubahan' : 'Simpan draft'}</button>
+                    <button
+                        type="submit"
+                        disabled={processing}
+                        onClick={() => setSubmitIntent('draft')}
+                        className="rounded-lg border border-slate-300 bg-white px-5 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                    >
+                        {processing && submitIntent === 'draft' ? 'Menyimpan...' : question ? 'Simpan sebagai draft' : 'Simpan draft'}
+                    </button>
+                    <button
+                        type="submit"
+                        disabled={processing}
+                        onClick={() => setSubmitIntent('review')}
+                        className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+                        title={`Simpan dan ajukan untuk diverifikasi oleh ${requiredVerifications} guru`}
+                    >
+                        {processing && submitIntent === 'review' ? 'Mengajukan...' : `Ajukan Verifikasi (min. ${requiredVerifications} guru)`}
+                    </button>
                 </div>
             </form>
 

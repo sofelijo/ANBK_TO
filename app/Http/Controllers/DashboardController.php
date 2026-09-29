@@ -26,7 +26,6 @@ class DashboardController extends Controller
             return Inertia::render('Dashboard', [
                 'stats' => [
                     'availableAssessments' => Assessment::query()
-                        ->where('school_id', $user->school_id)
                         ->where('grade_level', $user->grade_level)
                         ->where('status', AssessmentStatus::Published)
                         ->count(),
@@ -75,14 +74,13 @@ class DashboardController extends Controller
 
         return Inertia::render('Dashboard', [
             'stats' => [
-                'questions' => Question::query()->where('school_id', $user->school_id)->count(),
+                'questions' => Question::query()->count(),
                 'publishedQuestions' => Question::query()
-                    ->where('school_id', $user->school_id)
                     ->where('status', 'published')
                     ->count(),
-                'assessments' => Assessment::query()->where('school_id', $user->school_id)->count(),
+                'assessments' => Assessment::query()->count(),
                 'completedAttempts' => Attempt::query()
-                    ->whereHas('assessment', fn ($query) => $query->where('school_id', $user->school_id))
+                    ->whereHas('student', fn ($query) => $query->where('school_id', $user->school_id))
                     ->whereNotNull('submitted_at')
                     ->count(),
             ],

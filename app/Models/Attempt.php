@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable([
-    'public_id', 'assessment_id', 'user_id', 'status', 'started_at',
+    'public_id', 'assessment_id', 'assessment_schedule_id', 'user_id', 'status', 'started_at',
     'submitted_at', 'duration_seconds', 'score', 'max_score', 'summary',
 ])]
 class Attempt extends Model
@@ -32,6 +32,11 @@ class Attempt extends Model
     public function assessment(): BelongsTo
     {
         return $this->belongsTo(Assessment::class);
+    }
+
+    public function schedule(): BelongsTo
+    {
+        return $this->belongsTo(AssessmentSchedule::class, 'assessment_schedule_id');
     }
 
     public function student(): BelongsTo

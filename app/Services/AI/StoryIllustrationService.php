@@ -406,7 +406,6 @@ SVG;
 
         $sourceGeneration = AiGeneration::query()
             ->whereKey($storyGenerationId)
-            ->where('school_id', $generation->school_id)
             ->first();
 
         return trim((string) data_get($sourceGeneration?->result_payload, 'visual_description'));
@@ -635,7 +634,6 @@ SVG;
 
         DB::transaction(function () use ($generation, $questionIds, $disk, $path, $mimeType, $alt, $usage, $costMicrousd): void {
             Question::query()
-                ->where('school_id', $generation->school_id)
                 ->whereIn('id', $questionIds)
                 ->get()
                 ->each(function (Question $question) use ($generation, $disk, $path, $mimeType, $alt): void {

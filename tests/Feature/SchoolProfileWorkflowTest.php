@@ -74,6 +74,7 @@ class SchoolProfileWorkflowTest extends TestCase
 
         $this->actingAs($operator)->get(route('schedules.index'))->assertOk();
         $this->actingAs($operator)->get(route('admin.users.index'))->assertForbidden();
+        $this->actingAs($operator)->patch(route('admin.users.approve', $teacher))->assertForbidden();
         $this->actingAs($operator)->get(route('questions.index'))->assertForbidden();
         $this->actingAs($operator)->get(route('reports.index'))->assertForbidden();
         $this->actingAs($operator)->get(route('assessments.index'))->assertRedirect(route('schedules.index'));

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\LoginRequest;
+use App\Models\School;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -18,9 +19,19 @@ class AuthenticatedSessionController extends Controller
      */
     public function create(): Response
     {
+        $adminWhatsapp = null;
+
+        $pendingSchoolId = session('pending_school_id');
+        if ($pendingSchoolId) {
+            $school = School::find($pendingSchoolId);
+            $adminWhatsapp = data_get($school?->settings, 'admin_whatsapp');
+        }
+
         return Inertia::render('Auth/Login', [
             'canResetPassword' => Route::has('password.request'),
             'status' => session('status'),
+            'adminWhatsapp' => $adminWhatsapp ?: null,
+            'verifyUrl' => route('admin.users.index', ['status' => 'pending']),
         ]);
     }
 

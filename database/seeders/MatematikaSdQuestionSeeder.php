@@ -61,12 +61,10 @@ class MatematikaSdQuestionSeeder extends Seeder
 
             $seedKey = "matematika-sd-v1:{$data['competency_code']}";
             $question = Question::query()
-                ->where('school_id', $subject->school_id)
                 ->where('metadata->seed_key', $seedKey)
                 ->first() ?? new Question;
 
             $question->fill([
-                'school_id' => $subject->school_id,
                 'author_id' => $author->id,
                 'competency_id' => $competency->id,
                 'type' => QuestionType::SingleChoice,

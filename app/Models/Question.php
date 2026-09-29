@@ -14,7 +14,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable([
-    'school_id', 'author_id', 'parent_id', 'revision_of_id', 'version', 'superseded_by_id',
+    'author_id', 'parent_id', 'revision_of_id', 'version', 'superseded_by_id',
     'story_generation_id', 'competency_id', 'question_blueprint_id', 'type', 'status',
     'title', 'stimulus', 'prompt', 'explanation', 'difficulty', 'grade_level',
     'cognitive_level', 'metadata', 'approved_by', 'approved_at',
@@ -63,11 +63,6 @@ class Question extends Model
 
             return StorageUrl::for($disk, $path);
         });
-    }
-
-    public function school(): BelongsTo
-    {
-        return $this->belongsTo(School::class);
     }
 
     public function author(): BelongsTo

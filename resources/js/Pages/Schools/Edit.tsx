@@ -7,18 +7,29 @@ type School = {
     name: string;
     npsn: string;
     subdistrict: string | null;
-    timezone: string;
-    address: string;
-    province: string;
-    city: string;
-    principal_name: string;
-    phone: string;
+    timezone: string | null;
+    address: string | null;
+    province: string | null;
+    city: string | null;
+    principal_name: string | null;
+    phone: string | null;
+    admin_whatsapp: string | null;
 };
 
 type Timezone = { value: string; label: string };
 
 export default function Edit({ school, timezones, subdistricts }: { school: School; timezones: Timezone[]; subdistricts: string[] }) {
-    const { data, setData, patch, processing, errors, recentlySuccessful } = useForm(school);
+    const { data, setData, patch, processing, errors, recentlySuccessful } = useForm({
+        ...school,
+        subdistrict: school.subdistrict ?? '',
+        timezone: school.timezone ?? '',
+        address: school.address ?? '',
+        province: school.province ?? '',
+        city: school.city ?? '',
+        principal_name: school.principal_name ?? '',
+        phone: school.phone ?? '',
+        admin_whatsapp: school.admin_whatsapp ?? '',
+    });
 
     const submit = (event: FormEvent) => {
         event.preventDefault();
@@ -50,6 +61,21 @@ export default function Edit({ school, timezones, subdistricts }: { school: Scho
                         <Field label="Provinsi" error={errors.province}><input value={data.province} onChange={(event) => setData('province', event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300" /></Field>
                         <Field label="Kabupaten / kota" error={errors.city}><input value={data.city} onChange={(event) => setData('city', event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300" /></Field>
                         <Field label="Zona waktu" error={errors.timezone}><select value={data.timezone} onChange={(event) => setData('timezone', event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300">{timezones.map((timezone) => <option key={timezone.value} value={timezone.value}>{timezone.label}</option>)}</select></Field>
+                        <div className="sm:col-span-2">
+                            <Field label="Nomor WhatsApp Admin" error={errors.admin_whatsapp}>
+                                <input
+                                    inputMode="numeric"
+                                    maxLength={20}
+                                    value={data.admin_whatsapp}
+                                    onChange={(event) => setData('admin_whatsapp', event.target.value.replace(/\D/g, '').slice(0, 20))}
+                                    placeholder="Contoh: 628123456789"
+                                    className="mt-1 block w-full rounded-lg border-slate-300"
+                                />
+                                <p className="mt-1 text-xs text-slate-500">
+                                    Nomor internasional tanpa tanda + atau strip. Digunakan untuk tombol konfirmasi verifikasi guru via WhatsApp.
+                                </p>
+                            </Field>
+                        </div>
                         <div className="sm:col-span-2"><Field label="Alamat sekolah" error={errors.address}><textarea rows={4} value={data.address} onChange={(event) => setData('address', event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300" /></Field></div>
                     </div>
                     <div className="mt-6 flex items-center gap-4">

@@ -5,10 +5,12 @@ namespace App\Http\Controllers;
 use App\Enums\AiGenerationStatus;
 use App\Enums\AiGenerationType;
 use App\Enums\AttemptStatus;
+use App\Enums\UserRole;
 use App\Models\AiGeneration;
 use App\Models\Assessment;
 use App\Models\Attempt;
 use App\Models\Question;
+use App\Models\School;
 use App\Services\AssessmentAiAnalysisData;
 use App\Services\QuestionScorer;
 use App\Services\QuestionSnapshotService;
@@ -25,10 +27,24 @@ class AssessmentMonitoringController extends Controller
         QuestionSnapshotService $snapshotService,
         AssessmentAiAnalysisData $analysisData,
     ): Response {
-        $schoolId = $request->user()->school_id;
-        $schoolNpsn = (string) $request->user()->school()->value('npsn');
+        $isAdmin = $request->user()->hasRole(UserRole::Admin);
+        $schools = $isAdmin
+            ? School::query()->whereNotNull('npsn')->orderBy('name')->get(['id', 'name', 'npsn'])
+            : collect();
+        $selectedSchool = $isAdmin
+            ? ($request->filled('school_id')
+                ? $schools->firstWhere('id', $request->integer('school_id'))
+                : $schools->first())
+            : $request->user()->school;
 
-        $assessments = Assessment::query()
+        if ($isAdmin && $request->filled('school_id')) {
+            abort_unless($selectedSchool, 404);
+        }
+
+        $schoolId = $selectedSchool?->id;
+        $schoolNpsn = (string) ($selectedSchool?->npsn ?? '');
+
+        $assessments = $schoolId ? Assessment::query()
             ->where(function ($query) use ($schoolId, $schoolNpsn): void {
                 $query->whereHas('schedules', fn ($schedules) => $schedules->where('school_npsn', $schoolNpsn))
                     ->orWhereHas('attempts.student', fn ($students) => $students->where('school_id', $schoolId));
@@ -44,7 +60,8 @@ class AssessmentMonitoringController extends Controller
                 ->where('school_npsn', $schoolNpsn)
                 ->latest('starts_at')])
             ->latest('updated_at')
-            ->get(['id', 'title', 'grade_level', 'duration_minutes', 'settings']);
+            ->get(['id', 'title', 'grade_level', 'duration_minutes', 'settings'])
+            : collect();
 
         $selectedAssessmentId = $request->integer('assessment_id');
         if (! $assessments->contains('id', $selectedAssessmentId)) {
@@ -57,6 +74,10 @@ class AssessmentMonitoringController extends Controller
         }
 
         return Inertia::render('Monitoring/Index', [
+            'canChooseSchool' => $isAdmin,
+            'schools' => $schools,
+            'selectedSchoolId' => $schoolId,
+            'selectedSchool' => $selectedSchool?->only(['id', 'name', 'npsn']),
             'assessments' => $assessments->map(fn (Assessment $assessment): array => [
                 'id' => $assessment->id,
                 'title' => $assessment->title,

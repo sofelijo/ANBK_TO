@@ -301,8 +301,11 @@ class GenerateStoryQuestions implements ShouldQueue
                         ])->all();
                     }
 
+                    $submissionMode = data_get($generation->request_payload, 'submission_mode', 'draft');
+                    $initialStatus = $submissionMode === 'review' ? QuestionStatus::Review : QuestionStatus::Draft;
+                    $metadata['verification_locked'] = $submissionMode === 'draft';
+
                     $question = Question::create([
-                        'school_id' => $generation->school_id,
                         'author_id' => $generation->requested_by,
                         'story_generation_id' => $generation->id,
                         'competency_id' => $competency->id,
@@ -310,7 +313,7 @@ class GenerateStoryQuestions implements ShouldQueue
                             ? $questionBlueprints[$index % $questionBlueprints->count()]['id']
                             : null,
                         'type' => $type,
-                        'status' => QuestionStatus::Draft,
+                        'status' => $initialStatus,
                         'title' => ($questionData['title'] ?? null) ?: $data['title'].' - Soal '.($index + 1),
                         'stimulus' => $format === 'story' ? $story : ($questionData['stimulus'] ?? null),
                         'prompt' => $questionData['prompt'],
@@ -380,12 +383,8 @@ class GenerateStoryQuestions implements ShouldQueue
         $competencies = Competency::query()
             ->when($subjectId > 0, fn ($query) => $query->where('subject_id', $subjectId))
             ->when($competencyId > 0, fn ($query) => $query->whereKey($competencyId))
-            ->where(fn ($query) => $query
-                ->whereNull('school_id')
-                ->orWhere('school_id', $generation->school_id))
             ->when($competencyId === 0, fn ($query) => $query->whereDoesntHave('children'))
             ->get()
-            ->sortByDesc(fn (Competency $competency): bool => $competency->school_id === $generation->school_id)
             ->unique('code')
             ->keyBy('code');
 
@@ -672,7 +671,6 @@ DIRECTION;
     private function recentQuestionExamples(AiGeneration $generation, Collection $competencies): array
     {
         return Question::query()
-            ->where('school_id', $generation->school_id)
             ->whereIn('competency_id', $competencies->pluck('id'))
             ->where('status', '!=', QuestionStatus::Archived)
             ->latest('id')

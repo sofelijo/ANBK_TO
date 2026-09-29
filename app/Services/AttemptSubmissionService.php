@@ -99,7 +99,6 @@ class AttemptSubmissionService
 
         foreach ($results as $result) {
             $question = Question::query()
-                ->where('school_id', $attempt->assessment->school_id)
                 ->where('competency_id', $result->competency_id)
                 ->where('grade_level', $attempt->assessment->grade_level)
                 ->where('status', QuestionStatus::Published)

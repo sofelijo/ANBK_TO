@@ -106,17 +106,17 @@ const storedHighContrast = (): boolean => {
     }
 };
 
-const compactMatrixLabel = (label: string): string =>
-    label.trim().toLocaleLowerCase('id-ID') === 'tidak sesuai' ? 'Tidak' : label;
-
-export default function Show({ attempt }: { attempt: Attempt }) {
+export default function Show({ attempt, preview = false }: { attempt: Attempt; preview?: boolean }) {
     const storageKey = `toa-attempt-${attempt.public_id}`;
     const legacyStorageKey = `tka-attempt-${attempt.public_id}`;
     const initialResponses = Object.fromEntries(attempt.questions.map((question) => [question.id, question.response || {}]));
-    const [responses, setResponses] = useState<Record<number, ResponseValue>>(() => restoreLocalResponses(storageKey, legacyStorageKey, initialResponses));
+    const [responses, setResponses] = useState<Record<number, ResponseValue>>(() => (
+        preview ? initialResponses : restoreLocalResponses(storageKey, legacyStorageKey, initialResponses)
+    ));
     const [currentIndex, setCurrentIndex] = useState(0);
     const [remaining, setRemaining] = useState(() => Math.max(0, Math.ceil(attempt.remaining_seconds)));
-    const [saveStatus, setSaveStatus] = useState('Tersimpan');
+    const [saveStatus, setSaveStatus] = useState(preview ? 'Mode pratinjau · jawaban tidak disimpan' : 'Tersimpan');
+    const [pendingSaveCounts, setPendingSaveCounts] = useState<Record<number, number>>({});
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [textScale, setTextScale] = useState<TextScale>(storedTextScale);
     const [highContrast, setHighContrast] = useState(storedHighContrast);
@@ -129,9 +129,11 @@ export default function Show({ attempt }: { attempt: Attempt }) {
     const answeredCount = useMemo(() => attempt.questions.filter((question) => hasCompleteAnswer(question, responses[question.id])).length, [attempt.questions, responses]);
 
     useEffect(() => {
+        if (preview) return;
+
         const timer = window.setInterval(() => setRemaining((value) => Math.max(0, value - 1)), 1000);
         return () => window.clearInterval(timer);
-    }, []);
+    }, [preview]);
 
     useEffect(() => {
         try {
@@ -154,19 +156,23 @@ export default function Show({ attempt }: { attempt: Attempt }) {
     }, [highContrast]);
 
     useEffect(() => {
-        if (remaining === 0 && !submitted.current) void submitAttempt(true);
-    }, [remaining]);
+        if (!preview && remaining === 0 && !submitted.current) void submitAttempt(true);
+    }, [preview, remaining]);
 
     useEffect(() => {
+        if (preview) return;
+
         try {
             window.localStorage.setItem(storageKey, JSON.stringify(responses));
             window.localStorage.removeItem(legacyStorageKey);
         } catch {
             setSaveStatus('Cadangan browser tidak tersedia');
         }
-    }, [responses]);
+    }, [preview, responses]);
 
     useEffect(() => {
+        if (preview) return;
+
         const sync = async () => {
             void recordEvent('connection_restored');
             if (remaining === 0) {
@@ -183,9 +189,11 @@ export default function Show({ attempt }: { attempt: Attempt }) {
             window.removeEventListener('online', sync);
             window.removeEventListener('offline', offline);
         };
-    }, [responses, remaining]);
+    }, [preview, responses, remaining]);
 
     useEffect(() => {
+        if (preview) return;
+
         const visibility = () => document.hidden && void recordEvent('tab_hidden');
         const fullscreen = () => usedFullscreen.current && !document.fullscreenElement && void recordEvent('fullscreen_exit');
         document.addEventListener('visibilitychange', visibility);
@@ -194,9 +202,11 @@ export default function Show({ attempt }: { attempt: Attempt }) {
             document.removeEventListener('visibilitychange', visibility);
             document.removeEventListener('fullscreenchange', fullscreen);
         };
-    }, []);
+    }, [preview]);
 
     const recordEvent = async (eventType: string, payload?: Record<string, unknown>) => {
+        if (preview) return;
+
         try {
             await window.axios.post(route('attempts.events.store', attempt.public_id), {
                 event_type: eventType,
@@ -208,6 +218,12 @@ export default function Show({ attempt }: { attempt: Attempt }) {
     };
 
     const save = (questionId: number, response: ResponseValue): Promise<boolean> => {
+        if (preview) return Promise.resolve(true);
+
+        setPendingSaveCounts((counts) => ({
+            ...counts,
+            [questionId]: (counts[questionId] || 0) + 1,
+        }));
         const request = (async (): Promise<boolean> => {
             setSaveStatus('Menyimpan…');
             try {
@@ -222,7 +238,18 @@ export default function Show({ attempt }: { attempt: Attempt }) {
         })();
 
         pendingSaves.current.add(request);
-        void request.finally(() => pendingSaves.current.delete(request));
+        void request.finally(() => {
+            pendingSaves.current.delete(request);
+            setPendingSaveCounts((counts) => {
+                const remainingRequests = (counts[questionId] || 1) - 1;
+                const nextCounts = { ...counts };
+
+                if (remainingRequests > 0) nextCounts[questionId] = remainingRequests;
+                else delete nextCounts[questionId];
+
+                return nextCounts;
+            });
+        });
 
         return request;
     };
@@ -324,6 +351,11 @@ export default function Show({ attempt }: { attempt: Attempt }) {
     }, [attempt.questions.length]);
 
     const submitAttempt = async (timeExpired = false) => {
+        if (preview) {
+            window.close();
+            return;
+        }
+
         if (submitted.current) return;
         if (attempt.assessment.require_all_answers && !timeExpired && answeredCount < attempt.questions.length) {
             window.alert(`Masih ada ${attempt.questions.length - answeredCount} soal yang belum dijawab.`);
@@ -393,19 +425,19 @@ export default function Show({ attempt }: { attempt: Attempt }) {
     const hasStimulus = Boolean(current.stimulus?.trim() || current.illustration_url || current.stimulus_visual);
 
     return (
-        <div className="flex h-[100dvh] min-h-0 flex-col overflow-hidden bg-slate-100">
-            <Head title={`Mengerjakan ${attempt.assessment.title}`} />
+        <div className="flex min-h-[100dvh] flex-col bg-slate-100 lg:h-[100dvh] lg:min-h-0 lg:overflow-hidden">
+            <Head title={`${preview ? 'Pratinjau' : 'Mengerjakan'} ${attempt.assessment.title}`} />
             <header className="z-10 shrink-0 border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur">
                 <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-3 px-3 py-2 sm:px-5">
                     <div className="min-w-0 flex-1">
                         <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-600 sm:text-xs">
-                            {attempt.assessment.type_label}
+                            {preview ? 'Pratinjau POV Siswa' : attempt.assessment.type_label}
                         </p>
                         <h1 className="truncate text-sm font-semibold text-slate-900 sm:text-base">
                             {attempt.assessment.title}
                         </h1>
                         <p role="status" aria-live="polite" className="mt-0.5 flex items-center gap-1.5 text-[10px] font-medium text-slate-500">
-                            <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${saveStatus === 'Tersimpan' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                            <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${preview || saveStatus === 'Tersimpan' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
                             {saveStatus}
                         </p>
                     </div>
@@ -452,7 +484,7 @@ export default function Show({ attempt }: { attempt: Attempt }) {
                             className={`rounded-xl border px-2.5 py-1.5 shadow-sm transition-colors sm:px-3 ${timerStyles.card}`}
                         >
                             <p className={`text-[8px] font-bold uppercase tracking-[0.12em] ${timerStyles.label}`}>
-                                {timerState === 'critical' ? 'Segera selesai' : timerState === 'warning' ? 'Waktu menipis' : 'Sisa waktu'}
+                                {preview ? 'Durasi paket' : timerState === 'critical' ? 'Segera selesai' : timerState === 'warning' ? 'Waktu menipis' : 'Sisa waktu'}
                             </p>
                             <div className={`mt-0.5 flex items-baseline font-mono text-base font-black tabular-nums leading-none sm:text-lg ${timerStyles.value}`}>
                                 <span>{hours}</span><span className="mx-0.5 opacity-40">:</span><span>{minutes}</span><span className="mx-0.5 opacity-40">:</span><span>{seconds}</span>
@@ -462,31 +494,32 @@ export default function Show({ attempt }: { attempt: Attempt }) {
                 </div>
                 <div className="h-1 w-full bg-slate-100" aria-hidden="true">
                     <div
-                        className={`ml-auto h-full transition-[width,background-color] duration-1000 ease-linear ${timerStyles.progress}`}
+                        className={`h-full transition-[width,background-color] duration-1000 ease-linear ${timerStyles.progress}`}
                         style={{ width: `${remainingPercentage}%` }}
                     />
                 </div>
             </header>
 
-            <div className={`mx-auto grid h-full min-h-0 w-full max-w-7xl flex-1 gap-3 px-3 py-3 sm:px-5 ${attempt.assessment.show_navigation ? 'grid-rows-[auto_minmax(0,1fr)] lg:grid-cols-[200px_minmax(0,1fr)] lg:grid-rows-1' : 'grid-rows-1'}`}>
+            <div className={`mx-auto grid min-h-0 w-full lg:h-full max-w-7xl flex-1 gap-3 px-3 py-3 sm:px-5 ${attempt.assessment.show_navigation ? 'grid-rows-[auto_auto] lg:grid-cols-[200px_minmax(0,1fr)] lg:grid-rows-1' : 'grid-rows-1'}`}>
                 {attempt.assessment.show_navigation && <aside aria-label="Navigasi nomor soal" className="min-h-0 rounded-xl border border-slate-200 bg-white p-2 lg:h-full lg:overflow-y-auto lg:p-3">
                     <div className="flex items-center justify-between text-sm"><span className="font-semibold text-slate-900">Navigasi</span><span className="text-slate-500">{answeredCount}/{attempt.questions.length}</span></div>
                     <div className="mt-2 flex gap-2 overflow-x-auto pb-1 lg:grid lg:grid-cols-4 lg:overflow-visible lg:pb-0">
                         {attempt.questions.map((question, index) => {
                             const answered = hasCompleteAnswer(question, responses[question.id]);
-                            return <button key={question.id} type="button" aria-label={`Buka soal ${index + 1}${answered ? ', sudah dijawab' : ', belum dijawab'}`} aria-current={index === currentIndex ? 'step' : undefined} onClick={() => setCurrentIndex(index)} className={`aspect-square min-h-11 min-w-11 rounded-lg text-sm font-semibold ${index === currentIndex ? 'bg-slate-900 text-white' : answered ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>{index + 1}</button>;
+                            const isSaving = Boolean(pendingSaveCounts[question.id]);
+                            return <button key={question.id} type="button" aria-label={`Buka soal ${index + 1}${answered ? ', sudah dijawab' : ', belum dijawab'}${isSaving ? ', sedang disimpan' : ''}`} aria-current={index === currentIndex ? 'step' : undefined} aria-busy={isSaving} onClick={() => setCurrentIndex(index)} className={`relative aspect-square min-h-11 min-w-11 rounded-lg text-sm font-semibold ${index === currentIndex ? 'bg-indigo-600 text-white ring-2 ring-indigo-300 ring-inset' : answered ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}><span>{index + 1}</span>{isSaving && <span aria-hidden="true" className={`absolute right-1 top-1 h-2.5 w-2.5 animate-spin rounded-full border-2 border-current border-r-transparent ${index === currentIndex ? 'text-white' : 'text-amber-600'}`} />}</button>;
                         })}
                     </div>
                 </aside>}
 
                 <main
-                    className="h-full min-h-0 select-none overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+                    className="min-h-0 select-none overflow-hidden lg:h-full rounded-xl border border-slate-200 bg-white shadow-sm"
                     onCopy={preventQuestionContentAction}
                     onCut={preventQuestionContentAction}
                     onContextMenu={preventQuestionContentAction}
                     onDragStart={preventQuestionContentAction}
                 >
-                    <div className={`grid h-full min-h-0 ${hasStimulus ? 'grid-rows-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:grid-rows-1' : ''}`}>
+                    <div className={`grid min-h-0 lg:h-full ${hasStimulus ? 'grid-rows-[auto_auto] lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:grid-rows-1' : ''}`}>
                         {hasStimulus && (
                             <aside className="min-h-0 overflow-y-auto border-b border-slate-200 bg-slate-50/60 p-4 lg:border-b-0 lg:border-r lg:p-5">
                                 <div>
@@ -498,42 +531,22 @@ export default function Show({ attempt }: { attempt: Attempt }) {
                             </aside>
                         )}
 
-                        <section aria-labelledby={`question-heading-${current.id}`} className={`flex h-full min-h-0 min-w-0 flex-col p-4 lg:p-5 ${hasStimulus ? '' : 'mx-auto w-full max-w-4xl'}`}>
-                            <div className="min-h-0 flex-1 overflow-y-auto pr-1" style={{ zoom: textScale / 100 }}>
+                        <section aria-labelledby={`question-heading-${current.id}`} className={`flex min-h-0 min-w-0 flex-col p-4 lg:h-full lg:p-5 ${hasStimulus ? '' : 'mx-auto w-full max-w-4xl'}`}>
+                            <div className="min-h-0 flex-1 pr-1 lg:overflow-y-auto" style={{ zoom: textScale / 100 }}>
                             <p className="text-xs font-semibold text-emerald-600">Soal {currentIndex + 1} dari {attempt.questions.length}</p>
                             <h2 ref={questionHeading} id={`question-heading-${current.id}`} tabIndex={-1} className="mt-2 text-base font-semibold leading-6 text-slate-900 lg:text-lg">{current.prompt}</h2>
 
                             {current.type === 'category_matrix' && current.matrix ? (
                                 <div className="mt-3">
                                     <p className="mb-2 text-xs text-slate-600">Pilih satu jawaban untuk setiap pernyataan.</p>
-                                    <div className="space-y-2">
-                                        {current.matrix.rows.map((row, rowIndex) => (
-                                            <div key={row.id} className="grid gap-2 rounded-lg border border-slate-200 bg-white p-2.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-                                                <p className="text-sm leading-5 text-slate-800">
-                                                    <span className="mr-1.5 font-semibold text-slate-500">{rowIndex + 1}.</span>
-                                                    {row.statement}
-                                                </p>
-                                                <div role="radiogroup" aria-label={`Pilihan untuk pernyataan ${rowIndex + 1}`} className="flex flex-wrap gap-1.5 sm:justify-end">
-                                                    {current.matrix?.columns.map((column) => {
-                                                        const selected = responses[current.id]?.matrix_answers?.[row.id] === column.id;
-                                                        return (
-                                                            <button
-                                                                key={column.id}
-                                                                type="button"
-                                                                role="radio"
-                                                                aria-checked={selected}
-                                                                aria-label={`${row.statement}: ${column.label}`}
-                                                                onClick={() => chooseMatrixAnswer(current, row.id, column.id)}
-                                                                className={`inline-flex min-h-10 min-w-[7rem] flex-1 items-center justify-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition sm:flex-none ${selected ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white text-slate-700 hover:border-blue-400 hover:bg-blue-50'}`}
-                                                            >
-                                                                <span aria-hidden="true" className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border text-[10px] ${selected ? 'border-white bg-white text-blue-600' : 'border-slate-400 text-transparent'}`}>✓</span>
-                                                                {compactMatrixLabel(column.label)}
-                                                            </button>
-                                                        );
-                                                    })}
-                                                </div>
-                                            </div>
-                                        ))}
+                                    <div className="overflow-x-auto rounded-lg border border-slate-300">
+                                        <table className="w-full min-w-[430px] table-fixed text-sm">
+                                            <thead className="border-b-2 border-slate-700 bg-slate-50"><tr><th className="w-12 p-2.5 text-center">#</th><th className="p-2.5 text-left">Pernyataan</th>{current.matrix.columns.map((column) => <th key={column.id} className="w-20 break-words p-2 text-center font-semibold">{column.label}</th>)}</tr></thead>
+                                            <tbody>{current.matrix.rows.map((row, rowIndex) => <tr key={row.id} className="border-t border-slate-200"><td className="p-3 text-center font-semibold text-slate-600">{String.fromCharCode(65 + rowIndex)}.</td><td className="p-3 leading-6 text-slate-800">{row.statement}</td>{current.matrix?.columns.map((column) => {
+                                                const selected = responses[current.id]?.matrix_answers?.[row.id] === column.id;
+                                                return <td key={column.id} className="p-3 text-center"><button type="button" role="radio" aria-checked={selected} aria-label={`${row.statement}: ${column.label}`} onClick={() => chooseMatrixAnswer(current, row.id, column.id)} className={`inline-flex h-11 w-11 items-center justify-center rounded-full border-2 text-xs font-bold transition ${selected ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-400 bg-white text-transparent hover:border-blue-500'}`}>✓</button></td>;
+                                            })}</tr>)}</tbody>
+                                        </table>
                                     </div>
                                 </div>
                             ) : current.type === 'matching' && current.matching ? (
@@ -591,9 +604,9 @@ export default function Show({ attempt }: { attempt: Attempt }) {
 
                             </div>
 
-                            <div className="mt-3 flex shrink-0 items-center justify-between border-t border-slate-100 pt-3">
+                            <div className="mt-3 flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
                                 <button type="button" aria-keyshortcuts="Alt+ArrowLeft" disabled={currentIndex === 0} onClick={() => setCurrentIndex((value) => value - 1)} className="min-h-11 rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-30">Sebelumnya</button>
-                                {currentIndex < attempt.questions.length - 1 ? <button type="button" aria-keyshortcuts="Alt+ArrowRight" onClick={() => setCurrentIndex((value) => value + 1)} className="min-h-11 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white">Berikutnya</button> : <button type="button" disabled={isSubmitting} onClick={() => window.confirm('Yakin ingin mengakhiri try out?') && void submitAttempt()} className="min-h-11 rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-60">{isSubmitting ? 'Menyimpan jawaban…' : 'Selesai dan kirim'}</button>}
+                                {currentIndex < attempt.questions.length - 1 ? <button type="button" aria-keyshortcuts="Alt+ArrowRight" onClick={() => setCurrentIndex((value) => value + 1)} className="min-h-11 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white">Berikutnya</button> : preview ? <button type="button" onClick={() => window.close()} className="min-h-11 rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white">Tutup Pratinjau</button> : <button type="button" disabled={isSubmitting} onClick={() => window.confirm('Yakin ingin mengakhiri try out?') && void submitAttempt()} className="min-h-11 rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-60">{isSubmitting ? 'Menyimpan jawaban…' : 'Selesai dan kirim'}</button>}
                             </div>
                         </section>
                     </div>

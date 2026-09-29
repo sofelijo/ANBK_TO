@@ -36,6 +36,7 @@ class SchoolProfileController extends Controller
                 'city' => data_get($school->settings, 'city', ''),
                 'principal_name' => data_get($school->settings, 'principal_name', ''),
                 'phone' => data_get($school->settings, 'phone', ''),
+                'admin_whatsapp' => data_get($school->settings, 'admin_whatsapp', ''),
             ],
             'timezones' => collect(self::TIMEZONES)
                 ->map(fn (string $label, string $value): array => compact('value', 'label'))
@@ -57,13 +58,14 @@ class SchoolProfileController extends Controller
             'city' => ['nullable', 'string', 'max:100'],
             'principal_name' => ['nullable', 'string', 'max:255'],
             'phone' => ['nullable', 'string', 'max:30'],
+            'admin_whatsapp' => ['nullable', 'string', 'max:20', 'regex:/^[0-9]+$/'],
         ]);
 
         $oldNpsn = $school->npsn;
         $oldSubdistrict = $school->subdistrict;
         $settings = array_replace(
             $school->settings ?? [],
-            Arr::only($data, ['address', 'province', 'city', 'principal_name', 'phone']),
+            Arr::only($data, ['address', 'province', 'city', 'principal_name', 'phone', 'admin_whatsapp']),
         );
 
         DB::transaction(function () use ($school, $data, $settings, $oldNpsn): void {

@@ -19,7 +19,6 @@ class ReportController extends Controller
     public function index(Request $request, ItemAnalysisService $itemAnalysisService): Response
     {
         $assessments = Assessment::query()
-            ->where('school_id', $request->user()->school_id)
             ->latest()
             ->get(['id', 'title', 'grade_level']);
         $assessment = $this->selectedAssessment($request, $assessments);
@@ -38,6 +37,7 @@ class ReportController extends Controller
 
         $attempts = Attempt::query()
             ->where('assessment_id', $assessment->id)
+            ->whereHas('student', fn ($students) => $students->where('school_id', $request->user()->school_id))
             ->where('status', AttemptStatus::Submitted)
             ->with(['student:id,name,email,student_identifier,grade_level'])
             ->withCount('events')
@@ -77,10 +77,10 @@ class ReportController extends Controller
     public function export(Request $request, AuditLogger $auditLogger): StreamedResponse
     {
         $assessment = Assessment::query()
-            ->where('school_id', $request->user()->school_id)
             ->findOrFail($request->integer('assessment_id'));
         $attempts = Attempt::query()
             ->where('assessment_id', $assessment->id)
+            ->whereHas('student', fn ($students) => $students->where('school_id', $request->user()->school_id))
             ->where('status', AttemptStatus::Submitted)
             ->with('student')
             ->orderBy('user_id')
@@ -114,7 +114,6 @@ class ReportController extends Controller
         }
 
         return Assessment::query()
-            ->where('school_id', $request->user()->school_id)
             ->findOrFail($id);
     }
 

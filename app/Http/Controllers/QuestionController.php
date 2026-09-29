@@ -13,6 +13,7 @@ use App\Models\Assessment;
 use App\Models\Competency;
 use App\Models\Question;
 use App\Models\QuestionBlueprint;
+use App\Models\QuestionVerification;
 use App\Models\Subject;
 use App\Models\User;
 use App\Services\AuditLogger;
@@ -44,7 +45,23 @@ class QuestionController extends Controller
     public function index(Request $request): Response
     {
         $questions = Question::query()
-            ->where('school_id', $request->user()->school_id)
+            ->where(function ($visibility) use ($request) {
+                $visibility
+                    // Draft hanya terlihat oleh pembuatnya
+                    ->where(function ($draft) use ($request) {
+                        $draft->where('status', QuestionStatus::Draft)
+                            ->where('author_id', $request->user()->id);
+                    })
+                    // Non-draft: tampil kecuali sedang dikunci verifikasi
+                    ->orWhere(function ($nonDraft) use ($request) {
+                        $nonDraft->where('status', '!=', QuestionStatus::Draft)
+                            ->where(function ($lockFilter) use ($request) {
+                                $lockFilter->where('author_id', $request->user()->id)
+                                    ->orWhereNull('metadata->verification_locked')
+                                    ->orWhere('metadata->verification_locked', false);
+                            });
+                    });
+            })
             ->whereNull('superseded_by_id')
             ->where(function ($query) {
                 $query->whereNull('questions.story_generation_id')
@@ -63,6 +80,9 @@ class QuestionController extends Controller
                 'competency.subject:id,code,name',
                 'author:id,name',
                 'storyGeneration:id,request_payload,result_payload',
+                'bundleQuestions' => fn ($query) => $query
+                    ->select(['id', 'story_generation_id'])
+                    ->orderBy('id'),
             ])
             ->withCount([
                 'variants',
@@ -73,7 +93,33 @@ class QuestionController extends Controller
                 'bundleQuestions as bundle_published_count' => fn ($query) => $query->where('status', QuestionStatus::Published),
                 'bundleQuestions as bundle_archived_count' => fn ($query) => $query->where('status', QuestionStatus::Archived),
             ])
-            ->when($request->string('search')->toString(), function ($query, string $search) {
+            ->addSelect([
+                // Total verifikasi dari semua soal dalam bundle yang sama
+                'bundle_verifications_count' => QuestionVerification::query()
+                    ->selectRaw('COUNT(*)')
+                    ->whereIn(
+                        'question_id',
+                        Question::query()
+                            ->from('questions as bundle_verification_questions')
+                            ->select('bundle_verification_questions.id')
+                            ->whereColumn('bundle_verification_questions.story_generation_id', 'questions.story_generation_id')
+                            ->whereNull('bundle_verification_questions.superseded_by_id'),
+                    ),
+            ])
+            ->when(trim($request->string('search')->toString()), function ($query, string $search) {
+                $questionId = filter_var($search, FILTER_VALIDATE_INT, [
+                    'options' => ['min_range' => 1],
+                ]);
+
+                if ($questionId !== false) {
+                    $query->where(fn ($nested) => $nested
+                        ->where('questions.id', $questionId)
+                        ->orWhereHas('bundleQuestions', fn ($bundleQuestion) => $bundleQuestion
+                            ->where('id', $questionId)));
+
+                    return;
+                }
+
                 $query->where(fn ($nested) => $nested
                     ->where('questions.title', 'like', "%{$search}%")
                     ->orWhere('questions.prompt', 'like', "%{$search}%")
@@ -130,12 +176,14 @@ class QuestionController extends Controller
             'questionTypes' => $this->questionTypeConfiguration->options($request->user()->school),
             'selectedSubjectId' => $selectedSubjectId,
             'stimulusSvgTemplates' => $this->stimulusSvgTemplates(),
+            'requiredVerifications' => QuestionVerificationService::requiredGlobally(),
         ]);
     }
 
     public function store(Request $request, AuditLogger $auditLogger, StimulusImageService $imageService): RedirectResponse
     {
         $data = $this->validatedData($request);
+        $intent = $request->input('intent') === 'review' ? QuestionStatus::Review : QuestionStatus::Draft;
         $illustration = null;
         $explanationIllustration = null;
 
@@ -147,12 +195,11 @@ class QuestionController extends Controller
                 $data,
                 $explanationIllustration,
             );
-            $question = DB::transaction(function () use ($data, $request, $metadata): Question {
+            $question = DB::transaction(function () use ($data, $request, $metadata, $intent): Question {
                 $question = Question::create([
                     ...$this->attributes($data, $metadata),
-                    'school_id' => $request->user()->school_id,
                     'author_id' => $request->user()->id,
-                    'status' => QuestionStatus::Draft,
+                    'status' => $intent,
                 ]);
                 $this->syncOptions($question, $data['options'] ?? []);
 
@@ -169,12 +216,16 @@ class QuestionController extends Controller
         // Attach question to target assessment if specified
         $this->attachToAssessment($request, $question);
 
-        return to_route('questions.show', $question)->with('success', 'Soal berhasil disimpan sebagai draft.');
+        $message = $intent === QuestionStatus::Review
+            ? 'Soal disimpan dan diajukan untuk verifikasi guru.'
+            : 'Soal berhasil disimpan sebagai draft.';
+
+        return to_route('questions.show', $question)->with('success', $message);
     }
 
     public function show(Request $request, Question $question): Response
     {
-        $this->ensureSameSchool($request, $question);
+        $this->ensureAccessible($request, $question);
         $question->load([
             'competency:id,subject_id,code,domain,name',
             'competency.subject:id,code,name',
@@ -182,15 +233,46 @@ class QuestionController extends Controller
             'author:id,name',
             'approver:id,name',
             'options',
-            'reviews.reviewer:id,name',
             'verifications.verifier:id,name',
             'variants' => fn ($query) => $query->with('competency:id,code,name')->latest(),
             'revisionOf:id,title,version,status',
             'supersededBy:id,title,version,status',
         ]);
 
+        $packageUsage = $question->assessments()
+            ->withCount('attempts')
+            ->orderByDesc('assessments.created_at')
+            ->get(['assessments.id', 'assessments.title', 'assessments.status'])
+            ->map(fn (Assessment $assessment): array => [
+                'id' => $assessment->id,
+                'title' => $assessment->title,
+                'status' => $assessment->status->value,
+                'position' => $assessment->pivot->position,
+                'attemptsCount' => $assessment->attempts_count,
+            ]);
+
+        $availablePackages = Assessment::query()
+            ->where('grade_level', $question->grade_level)
+            ->whereIn('status', [AssessmentStatus::Draft, AssessmentStatus::Published])
+            ->where(fn ($query) => $query
+                ->whereNull('subject_id')
+                ->orWhere('subject_id', $question->competency->subject_id))
+            ->whereNotIn('id', $packageUsage->pluck('id'))
+            ->withCount(['questions', 'attempts'])
+            ->latest()
+            ->get(['id', 'title', 'status'])
+            ->map(fn (Assessment $assessment): array => [
+                'id' => $assessment->id,
+                'title' => $assessment->title,
+                'status' => $assessment->status->value,
+                'questionsCount' => $assessment->questions_count,
+                'attemptsCount' => $assessment->attempts_count,
+            ]);
+
         return Inertia::render('Questions/Show', [
             'question' => $question,
+            'packageUsage' => $packageUsage,
+            'availablePackages' => $availablePackages,
             'stimulusSvgTemplates' => $this->stimulusSvgTemplates(),
             'verification' => $this->verificationSummary($question, $request->user()),
             'latestGeneration' => ($latestGeneration = AiGeneration::query()
@@ -208,7 +290,7 @@ class QuestionController extends Controller
 
     public function edit(Request $request, Question $question): Response
     {
-        $this->ensureSameSchool($request, $question);
+        $this->ensureAccessible($request, $question);
         abort_if($question->superseded_by_id !== null, 409, 'Versi soal ini sudah digantikan oleh revisi yang lebih baru.');
         $question->load('options');
         $returnGeneration = $this->returnGeneration($request, $question);
@@ -220,6 +302,7 @@ class QuestionController extends Controller
             'assessments' => $this->assessmentsForQuestion($request),
             'questionTypes' => $this->questionTypeConfiguration->options($request->user()->school, $question->type),
             'question' => $question,
+            'requiredVerifications' => QuestionVerificationService::requiredGlobally(),
             'returnGeneration' => $returnGeneration ? [
                 'id' => $returnGeneration->id,
                 'format' => data_get($returnGeneration->request_payload, 'format') === 'direct' ? 'direct' : 'story',
@@ -229,10 +312,11 @@ class QuestionController extends Controller
 
     public function update(Request $request, Question $question, AuditLogger $auditLogger, StimulusImageService $imageService): RedirectResponse
     {
-        $this->ensureSameSchool($request, $question);
+        $this->ensureAccessible($request, $question);
         abort_if($question->superseded_by_id !== null, 409, 'Versi soal ini sudah digantikan oleh revisi yang lebih baru.');
         $returnGeneration = $this->returnGeneration($request, $question);
         $data = $this->validatedData($request, $question);
+        $intent = $request->input('intent') === 'review' ? QuestionStatus::Review : QuestionStatus::Draft;
         $illustration = null;
         $explanationIllustration = null;
         $createRevision = $question->status === QuestionStatus::Published
@@ -246,17 +330,16 @@ class QuestionController extends Controller
                 $data,
                 $explanationIllustration,
             );
-            $savedQuestion = DB::transaction(function () use ($question, $data, $request, $createRevision, $metadata): Question {
+            $savedQuestion = DB::transaction(function () use ($question, $data, $request, $createRevision, $metadata, $intent): Question {
                 if ($createRevision) {
                     $revision = Question::create([
                         ...$this->attributes($data, $metadata),
-                        'school_id' => $question->school_id,
                         'author_id' => $request->user()->id,
                         'parent_id' => $question->parent_id,
                         'revision_of_id' => $question->id,
                         'version' => $question->version + 1,
                         'story_generation_id' => $question->story_generation_id,
-                        'status' => QuestionStatus::Draft,
+                        'status' => $intent,
                     ]);
                     $this->syncOptions($revision, $data['options'] ?? []);
 
@@ -265,7 +348,7 @@ class QuestionController extends Controller
 
                 $question->update([
                     ...$this->attributes($data, $metadata),
-                    'status' => QuestionStatus::Draft,
+                    'status' => $intent,
                     'approved_by' => null,
                     'approved_at' => null,
                 ]);
@@ -294,12 +377,14 @@ class QuestionController extends Controller
             )
             : to_route('questions.show', $savedQuestion);
 
-        return $redirect->with(
-            'success',
-            $createRevision
-                ? "Revisi versi {$savedQuestion->version} disimpan sebagai draft. Versi lama tetap aman untuk paket yang sudah terbit."
-                : 'Perubahan disimpan sebagai draft dan perlu diterbitkan ulang.',
-        );
+        $draftMsg = $createRevision
+            ? "Revisi versi {$savedQuestion->version} disimpan sebagai draft. Versi lama tetap aman untuk paket yang sudah terbit."
+            : 'Perubahan disimpan sebagai draft dan perlu diterbitkan ulang.';
+        $reviewMsg = $createRevision
+            ? "Revisi versi {$savedQuestion->version} diajukan untuk verifikasi."
+            : 'Perubahan disimpan dan diajukan untuk verifikasi.';
+
+        return $redirect->with('success', $intent === QuestionStatus::Review ? $reviewMsg : $draftMsg);
     }
 
     public function inlineUpdate(
@@ -308,10 +393,9 @@ class QuestionController extends Controller
         Question $question,
         AuditLogger $auditLogger,
     ): RedirectResponse {
-        $this->ensureSameSchool($request, $question);
+        $this->ensureAccessible($request, $question);
         abort_unless(
-            $generation->school_id === $request->user()->school_id
-            && $generation->type === AiGenerationType::StoryQuestions
+            $generation->type === AiGenerationType::StoryQuestions
             && $question->story_generation_id === $generation->id
             && in_array($question->id, data_get($generation->result_payload, 'question_ids', []), true),
             404,
@@ -395,7 +479,7 @@ class QuestionController extends Controller
 
     public function duplicateCheck(Request $request, Question $question, QuestionDuplicateDetector $detector): JsonResponse
     {
-        $this->ensureSameSchool($request, $question);
+        $this->ensureAccessible($request, $question);
         $candidates = $detector->candidates($question);
 
         return response()->json([
@@ -406,7 +490,7 @@ class QuestionController extends Controller
 
     public function duplicate(Request $request, Question $question, AuditLogger $auditLogger): RedirectResponse
     {
-        $this->ensureSameSchool($request, $question);
+        $this->ensureAccessible($request, $question);
         $question->load('options');
 
         $duplicate = DB::transaction(function () use ($question, $request): Question {
@@ -440,7 +524,7 @@ class QuestionController extends Controller
 
     public function archive(Request $request, Question $question, AuditLogger $auditLogger): RedirectResponse
     {
-        $this->ensureSameSchool($request, $question);
+        $this->ensureAccessible($request, $question);
         $question->update(['status' => QuestionStatus::Archived]);
         $auditLogger->log($request, 'question.archived', $question);
 
@@ -454,7 +538,7 @@ class QuestionController extends Controller
         QuestionDuplicateDetector $duplicateDetector,
         QuestionVerificationService $verificationService,
     ): RedirectResponse {
-        $this->ensureSameSchool($request, $question);
+        $this->ensureAccessible($request, $question);
         abort_if($question->superseded_by_id !== null, 409, 'Versi soal ini sudah digantikan.');
         if ($question->status !== QuestionStatus::Published && $duplicateDetector->hasBlockingDuplicate($question)) {
             throw ValidationException::withMessages([
@@ -489,27 +573,65 @@ class QuestionController extends Controller
         }
 
         if (! $result['created']) {
-            return back()->with('success', "Anda sudah memverifikasi soal ini. Progres tetap {$result['count']}/".Question::REQUIRED_VERIFICATIONS.'.');
+            return back()->with('success', "Anda sudah memverifikasi soal ini. Progres tetap {$result['count']} guru.");
         }
+
+        $total = $result['remaining'] + $result['count'];
 
         return back()->with(
             'success',
-            "Verifikasi Anda tercatat ({$result['count']}/".Question::REQUIRED_VERIFICATIONS."). Masih diperlukan {$result['remaining']} guru lagi.",
+            "Verifikasi Anda tercatat ({$result['count']}/{$total}). Masih diperlukan {$result['remaining']} guru lagi.",
+        );
+    }
+
+    public function updateStatus(Request $request, Question $question, AuditLogger $auditLogger): RedirectResponse
+    {
+        $this->ensureAccessible($request, $question);
+        abort_unless(
+            $question->author_id === $request->user()->id || $request->user()->hasRole(UserRole::Admin),
+            403,
+        );
+        abort_if($question->status === QuestionStatus::Published, 409, 'Soal yang sudah terbit tidak dapat diubah statusnya.');
+
+        $targetStatus = $request->input('status') === 'review' ? QuestionStatus::Review : QuestionStatus::Draft;
+        $metadata = $question->metadata ?? [];
+        $metadata['verification_locked'] = $targetStatus === QuestionStatus::Draft;
+
+        $question->update([
+            'status' => $targetStatus,
+            'metadata' => $metadata,
+        ]);
+
+        if ($targetStatus === QuestionStatus::Draft) {
+            $question->verifications()->delete();
+        }
+
+        $auditLogger->log($request, 'question.status_changed', $question, [
+            'status' => $targetStatus->value,
+        ]);
+
+        return back()->with(
+            'success',
+            $targetStatus === QuestionStatus::Review
+                ? 'Soal diajukan ke status menunggu verifikasi guru lain.'
+                : 'Soal dikembalikan ke status draft pribadi.',
         );
     }
 
     private function verificationSummary(Question $question, User $user): array
     {
         $count = $question->verifications->count();
+        $required = QuestionVerificationService::requiredFor($question);
 
         return [
-            'required' => Question::REQUIRED_VERIFICATIONS,
+            'required' => $required,
             'count' => $count,
-            'remaining' => max(0, Question::REQUIRED_VERIFICATIONS - $count),
+            'remaining' => max(0, $required - $count),
             'currentUserVerified' => $question->verifications->contains('verifier_id', $user->id),
             'canVerify' => $user->hasRole(UserRole::Teacher)
                 && $question->status !== QuestionStatus::Archived
-                && $question->superseded_by_id === null,
+                && $question->superseded_by_id === null
+                && ! (bool) data_get($question->metadata, 'verification_locked', false),
             'verifiers' => $question->verifications->map(fn ($verification): array => [
                 'id' => $verification->verifier_id,
                 'name' => $verification->verifier?->name ?? 'Guru tidak aktif',
@@ -822,9 +944,6 @@ class QuestionController extends Controller
 
         $subjectExists = Subject::query()
             ->whereKey($data['subject_id'])
-            ->where(fn ($query) => $query
-                ->whereNull('school_id')
-                ->orWhere('school_id', $request->user()->school_id))
             ->exists();
 
         if (! $subjectExists) {
@@ -835,9 +954,6 @@ class QuestionController extends Controller
 
         $competency = Competency::query()
             ->whereKey($data['competency_id'])
-            ->where(fn ($query) => $query
-                ->whereNull('school_id')
-                ->orWhere('school_id', $request->user()->school_id))
             ->firstOrFail();
 
         if ($competency->subject_id !== (int) $data['subject_id']) {
@@ -857,9 +973,6 @@ class QuestionController extends Controller
             $blueprintExists = QuestionBlueprint::query()
                 ->whereKey($blueprintId)
                 ->where('subject_id', $competency->subject_id)
-                ->where(fn ($query) => $query
-                    ->whereNull('school_id')
-                    ->orWhere('school_id', $request->user()->school_id))
                 ->exists();
             if (! $blueprintExists) {
                 throw ValidationException::withMessages([
@@ -935,17 +1048,15 @@ class QuestionController extends Controller
 
         return AiGeneration::query()
             ->whereKey($generationId)
-            ->where('school_id', $request->user()->school_id)
             ->where('type', AiGenerationType::StoryQuestions)
             ->first();
     }
 
     private function ensureGeneratedQuestion(Request $request, AiGeneration $generation, Question $question): void
     {
-        $this->ensureSameSchool($request, $question);
+        $this->ensureAccessible($request, $question);
         abort_unless(
-            $generation->school_id === $request->user()->school_id
-            && $generation->type === AiGenerationType::StoryQuestions
+            $generation->type === AiGenerationType::StoryQuestions
             && $question->story_generation_id === $generation->id
             && in_array($question->id, data_get($generation->result_payload, 'question_ids', []), true),
             404,
@@ -1293,9 +1404,6 @@ class QuestionController extends Controller
     private function competencies(Request $request)
     {
         return Competency::query()
-            ->where(fn ($query) => $query
-                ->whereNull('school_id')
-                ->orWhere('school_id', $request->user()->school_id))
             ->orderBy('grade_level')
             ->orderBy('domain')
             ->orderBy('name')
@@ -1305,9 +1413,6 @@ class QuestionController extends Controller
     private function subjects(Request $request)
     {
         return Subject::query()
-            ->where(fn ($query) => $query
-                ->whereNull('school_id')
-                ->orWhere('school_id', $request->user()->school_id))
             ->orderBy('name')
             ->get(['id', 'code', 'name', 'ai_question_format']);
     }
@@ -1315,9 +1420,6 @@ class QuestionController extends Controller
     private function questionBlueprints(Request $request)
     {
         return QuestionBlueprint::query()
-            ->where(fn ($query) => $query
-                ->whereNull('school_id')
-                ->orWhere('school_id', $request->user()->school_id))
             ->with('competencies:id')
             ->orderBy('name')
             ->get(['id', 'subject_id', 'code', 'name'])
@@ -1330,7 +1432,6 @@ class QuestionController extends Controller
     private function assessmentsForQuestion(Request $request): Collection
     {
         return Assessment::query()
-            ->where('school_id', $request->user()->school_id)
             ->whereIn('status', [AssessmentStatus::Draft, AssessmentStatus::Published])
             ->with(['questions:id,competency_id', 'questions.competency:id,parent_id,code,name'])
             ->oldest() // oldest first — so frontend can suggest the earliest package that still needs coverage
@@ -1360,7 +1461,6 @@ class QuestionController extends Controller
         }
 
         $assessment = Assessment::query()
-            ->where('school_id', $request->user()->school_id)
             ->whereIn('status', [AssessmentStatus::Draft, AssessmentStatus::Published])
             ->find($assessmentId);
 
@@ -1379,8 +1479,13 @@ class QuestionController extends Controller
         }
     }
 
-    private function ensureSameSchool(Request $request, Question $question): void
+    private function ensureAccessible(Request $request, Question $question): void
     {
-        abort_unless($question->school_id === $request->user()->school_id, 404);
+        $isPrivateDraft = data_get($question->metadata, 'verification_locked') === true;
+
+        abort_unless(
+            ! $isPrivateDraft || $question->author_id === $request->user()->id,
+            404,
+        );
     }
 }

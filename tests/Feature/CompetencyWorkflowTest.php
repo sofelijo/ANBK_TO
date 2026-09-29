@@ -25,6 +25,12 @@ class CompetencyWorkflowTest extends TestCase
         $subject = $this->subject($teacher->school);
 
         $this->actingAs($teacher)
+            ->get(route('competencies.create', ['subject_id' => $subject->id]))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Competencies/Form')
+                ->where('defaultSubjectId', $subject->id));
+
+        $this->actingAs($teacher)
             ->post(route('competencies.store'), [
                 'subject_id' => $subject->id,
                 'code' => ' lit6-main ',

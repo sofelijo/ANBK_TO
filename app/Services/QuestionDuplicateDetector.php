@@ -13,7 +13,6 @@ class QuestionDuplicateDetector
         $question->loadMissing('competency:id,subject_id');
 
         return Question::query()
-            ->where('school_id', $question->school_id)
             ->where('id', '!=', $question->id)
             ->whereNotIn('id', array_filter([$question->revision_of_id, $question->parent_id]))
             ->where(fn ($query) => $query
@@ -24,6 +23,10 @@ class QuestionDuplicateDetector
                 ->orWhere('parent_id', '!=', $question->id))
             ->whereNull('superseded_by_id')
             ->where('status', '!=', QuestionStatus::Archived)
+            ->where(fn ($query) => $query
+                ->where('status', '!=', QuestionStatus::Draft)
+                ->orWhereNull('metadata->verification_locked')
+                ->orWhere('metadata->verification_locked', false))
             ->where('grade_level', $question->grade_level)
             ->whereHas('competency', fn ($query) => $query->where('subject_id', $question->competency->subject_id))
             ->with('competency:id,code,name')
@@ -73,16 +76,28 @@ class QuestionDuplicateDetector
 
     private function tokens(?string $value): array
     {
-        $normalized = $this->normalize($value);
-        if ($normalized === '') {
-            return [];
-        }
-
-        return array_values(array_unique(array_filter(explode(' ', $normalized), fn (string $token): bool => mb_strlen($token) > 1)));
+        return array_values(array_unique(array_filter(
+            $this->lexemes($value),
+            fn (string $token): bool => mb_strlen($token) > 1
+                || preg_match('/^\d/u', $token) === 1
+                || in_array($token, ['+', '-', '*', '/', '=', '<', '>', ':'], true),
+        )));
     }
 
     private function normalize(?string $value): string
     {
-        return trim(preg_replace('/\s+/u', ' ', preg_replace('/[^\pL\pN]+/u', ' ', mb_strtolower($value ?? ''))) ?? '');
+        return implode(' ', $this->lexemes($value));
+    }
+
+    private function lexemes(?string $value): array
+    {
+        $normalized = str_replace(
+            ['×', '÷', '−', '–', '—'],
+            [' * ', ' / ', ' - ', ' - ', ' - '],
+            mb_strtolower($value ?? ''),
+        );
+        preg_match_all('/\d+(?:[.,]\d+)?(?:\/\d+(?:[.,]\d+)?)?|[\pL]+|[+\-*\/=<>:]/u', $normalized, $matches);
+
+        return $matches[0] ?? [];
     }
 }

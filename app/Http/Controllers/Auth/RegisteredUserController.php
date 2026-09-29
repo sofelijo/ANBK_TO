@@ -118,6 +118,12 @@ class RegisteredUserController extends Controller
             default => 'Pendaftaran guru berhasil. Akun Anda menunggu persetujuan admin sekolah.',
         };
 
-        return to_route('login')->with('status', $status);
+        $redirect = to_route('login')->with('status', $status);
+
+        if (in_array($role, [UserRole::Teacher, UserRole::Operator], true)) {
+            $redirect = $redirect->with('pending_school_id', $school->id);
+        }
+
+        return $redirect;
     }
 }

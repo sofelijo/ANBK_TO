@@ -74,7 +74,6 @@ class QuestionImportService
         $competency = Competency::query()
             ->where('code', trim((string) $row['competency_code']))
             ->where('grade_level', $gradeLevel)
-            ->where(fn ($query) => $query->whereNull('school_id')->orWhere('school_id', $user->school_id))
             ->first();
         if (! $competency) {
             throw new \RuntimeException('kode kompetensi tidak ditemukan.');
@@ -107,7 +106,6 @@ class QuestionImportService
 
         DB::transaction(function () use ($row, $user, $competency, $type, $gradeLevel, $difficulty, $options, $acceptedAnswers, $line): void {
             $question = Question::create([
-                'school_id' => $user->school_id,
                 'author_id' => $user->id,
                 'competency_id' => $competency->id,
                 'type' => $type,

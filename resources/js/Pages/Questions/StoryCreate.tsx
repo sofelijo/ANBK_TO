@@ -1,7 +1,7 @@
 import InputError from '@/Components/InputError';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, Link, useForm } from '@inertiajs/react';
-import { FormEvent } from 'react';
+import { FormEvent, useState } from 'react';
 
 type Generation = {
     id: number;
@@ -36,8 +36,12 @@ const cognitiveLevels: { value: CognitiveLevel; label: string }[] = [
     { value: 'evaluation', label: 'Evaluasi dan Apresiasi (Level 3)' },
 ];
 
-export default function StoryCreate({ subjects, competencies, questionBlueprints, recentGenerations, selectedSubjectId, generationFormat, indonesianBundleDefaults }: { subjects: { id: number; code: string; name: string; ai_question_format: 'direct' | 'story' }[]; competencies: Competency[]; questionBlueprints: QuestionBlueprint[]; recentGenerations: Generation[]; selectedSubjectId?: number | null; generationFormat: 'direct' | 'story'; indonesianBundleDefaults: BundleDefault[] }) {
+export default function StoryCreate({ subjects, competencies, questionBlueprints, recentGenerations, selectedSubjectId, generationFormat, indonesianBundleDefaults, creationMode = 'ai' }: { subjects: { id: number; code: string; name: string; ai_question_format: 'direct' | 'story' }[]; competencies: Competency[]; questionBlueprints: QuestionBlueprint[]; recentGenerations: Generation[]; selectedSubjectId?: number | null; generationFormat: 'direct' | 'story'; indonesianBundleDefaults: BundleDefault[]; creationMode?: 'ai' | 'json' }) {
     const storyMode = generationFormat === 'story';
+    const jsonMode = creationMode === 'json';
+    const [generatedPrompt, setGeneratedPrompt] = useState('');
+    const [promptCopied, setPromptCopied] = useState(false);
+    const jsonImportForm = useForm({ json_payload: '' });
     const { data, setData, post, transform, processing, errors, clearErrors } = useForm({
         subject_id: selectedSubjectId || 0,
         root_competency_id: 0,
@@ -53,6 +57,7 @@ export default function StoryCreate({ subjects, competencies, questionBlueprints
         paragraph_count: 3,
         max_words: 200,
         question_count: 3,
+        submission_mode: 'draft' as 'draft' | 'review',
     });
     const availableCompetencies = competencies.filter(
         (competency) => competency.subject_id === data.subject_id && !competency.parent_id,
@@ -88,6 +93,47 @@ export default function StoryCreate({ subjects, competencies, questionBlueprints
 
     const submit = (event: FormEvent) => {
         event.preventDefault();
+        if (jsonMode) {
+            const targetCompetency = competencies.find((competency) => competency.id === data.competency_id);
+            const bundleBlueprints = data.bundle_slots.map((slot, index) => {
+                const blueprint = questionBlueprints.find((item) => item.id === slot.question_blueprint_id);
+
+                return {
+                    position: index + 1,
+                    code: blueprint?.code,
+                    name: blueprint?.name,
+                    description: blueprint?.description || '',
+                    answer_format: slot.answer_format,
+                    cognitive_level: slot.cognitive_level,
+                    cognitive_level_label: cognitiveLevels.find((item) => item.value === slot.cognitive_level)?.label,
+                };
+            });
+            const answerDirection = {
+                single_choice: 'Semua soal bertipe single_choice, berisi 4 opsi dan tepat 1 jawaban benar.',
+                true_false: 'Semua soal bertipe category_matrix, memakai matrix_columns ["Benar", "Salah"] dan tepat 3 pernyataan.',
+                multiple_choice: 'Semua soal bertipe multiple_choice (MCMA), berisi 4 opsi dan minimal 2 jawaban benar.',
+                mixed: 'Campurkan minimal 2 tipe dari single_choice, multiple_choice, dan category_matrix.',
+            }[data.answer_format];
+            const topic = data.theme.trim();
+            const competency = targetCompetency
+                ? JSON.stringify({ code: targetCompetency.code, name: targetCompetency.name, grade_level: targetCompetency.grade_level }, null, 2)
+                : '{}';
+            const schema = storyMode
+                ? '{"title":"Judul cerita","story_paragraphs":["Paragraf pertama","Paragraf berikutnya"],"questions":[{"competency_code":"KODE_KOMPETENSI","type":"single_choice","title":"Judul internal soal","prompt":"Pertanyaan","explanation":"Pembahasan","difficulty":1,"cognitive_level":"proses kognitif","options":[{"content":"Pilihan","is_correct":true}],"accepted_answers":[],"matching_pairs":[],"matching_distractors":[],"matrix_columns":[],"matrix_rows":[]}]}'
+                : '{"title":"Judul paket","visual_description":"Deskripsi ilustrasi atau string kosong","visual_spec":null,"story_paragraphs":[],"questions":[{"competency_code":"KODE_KOMPETENSI","type":"single_choice","title":"Judul internal soal","stimulus":"Stimulus singkat atau kosong","prompt":"Pertanyaan","explanation":"Pembahasan langkah demi langkah","difficulty":1,"cognitive_level":"proses kognitif","options":[{"content":"Pilihan","is_correct":true}],"accepted_answers":[],"matching_pairs":[],"matching_distractors":[],"matrix_columns":[],"matrix_rows":[]}]}' ;
+            const bundleDirection = usesIndonesianBundle
+                ? `\nGunakan tepat tiga slot berikut sesuai urutan dan jangan menukarnya:\n${JSON.stringify(bundleBlueprints, null, 2)}\nAturan slot: single_choice memakai 4 opsi dan tepat 1 benar; true_false memakai type=category_matrix, matrix_columns ["Benar", "Salah"], dan tepat 3 matrix_rows; multiple_choice memakai 4 opsi dan minimal 2 benar. Semua soal memakai cerita yang sama.`
+                : `\nFormat jawaban: ${answerDirection}\nLevel kesulitan semua soal: ${data.difficulty} (1=mudah, 2=sedang, 3=sulit).`;
+            const contentDirection = storyMode
+                ? `Buat satu cerita tepat ${data.paragraph_count} paragraf dengan total maksimal ${data.max_words} kata, lalu buat tepat ${usesIndonesianBundle ? 3 : data.question_count} soal yang hanya dapat dijawab dari cerita tersebut. ${topic ? `Tema wajib: ${JSON.stringify(topic)}.` : 'Pilih tema konkret, menarik, aman, dan sesuai usia siswa.'}`
+                : `Buat tepat ${data.question_count} soal ${data.question_style === 'reasoning' ? 'penalaran yang menuntut analisis atau strategi' : 'langsung yang ringkas dan fokus pada konsep/prosedur'}. ${topic ? `Gunakan contoh berikut sebagai pola tanpa menyalinnya: ${JSON.stringify(topic)}.` : 'Susun soal baru langsung dari kompetensi.'} ${data.use_illustration ? `Gunakan satu ilustrasi bersama. Isi visual_description secara presisi. ${data.illustration_mode === 'lite' ? 'Jika berupa diagram Matematika, isi visual_spec terstruktur dengan data mentah yang dibutuhkan.' : 'Isi visual_spec dengan null dan jangan tampilkan kunci jawaban pada gambar.'}` : 'Tanpa ilustrasi: visual_description harus berupa string kosong dan visual_spec harus null.'}`;
+
+            setGeneratedPrompt(`Anda membantu guru membuat soal untuk TOA (Try Out Adaptif) dalam bahasa Indonesia.\n\n${contentDirection}${bundleDirection}\n\nKompetensi yang wajib digunakan:\n${competency}\n\nPastikan isi faktual, aman untuk anak, tidak bias, sesuai kelas, dan seluruh kunci serta pembahasan konsisten. Jangan membuat pertanyaan yang membutuhkan informasi yang tidak tersedia. Untuk single_choice gunakan tepat 1 jawaban benar. Untuk multiple_choice gunakan minimal 2 jawaban benar. Untuk category_matrix, correct_column_index dimulai dari 0. Field yang tidak digunakan tetap harus berupa array kosong.\n\nKembalikan JSON valid saja, tanpa markdown, tanpa code fence, dan tanpa kalimat pembuka/penutup. Gunakan struktur ini:\n${schema}`);
+            setPromptCopied(false);
+            jsonImportForm.setData('json_payload', '');
+            jsonImportForm.clearErrors();
+            return;
+        }
         transform((formData) => ({
             ...formData,
             bundle_slots: usesIndonesianBundle ? formData.bundle_slots : null,
@@ -95,22 +141,34 @@ export default function StoryCreate({ subjects, competencies, questionBlueprints
         post(route(storyMode ? 'story-questions.store' : 'ai-questions.store'));
     };
 
+    const importJson = (event: FormEvent) => {
+        event.preventDefault();
+        jsonImportForm.transform(() => ({
+            ...data,
+            bundle_slots: usesIndonesianBundle ? data.bundle_slots : null,
+            json_payload: jsonImportForm.data.json_payload,
+        }));
+        jsonImportForm.post(route('json-questions.store'));
+    };
+
     return (
         <AuthenticatedLayout
             header={
                 <div>
-                    <p className="text-sm font-medium text-indigo-600">Asisten AI · {storyMode ? 'Paket Cerita' : 'Soal Langsung'}</p>
-                    <h1 className="mt-1 text-2xl font-bold text-slate-900">{storyMode ? 'Buat Soal Cerita' : 'Buat Soal dengan AI'}</h1>
+                    <p className="text-sm font-medium text-indigo-600">{jsonMode ? 'Prompt JSON' : 'Asisten AI'} · {storyMode ? 'Paket Cerita' : 'Soal Langsung'}</p>
+                    <h1 className="mt-1 text-2xl font-bold text-slate-900">{jsonMode ? 'Buat Prompt JSON' : storyMode ? 'Buat Soal Cerita' : 'Buat Soal dengan AI'}</h1>
                 </div>
             }
         >
-            <Head title={storyMode ? 'Buat Soal Cerita AI' : 'Buat Soal AI'} />
-            <div className="mx-auto grid max-w-6xl gap-6 px-4 py-8 sm:px-6 lg:grid-cols-[1fr_360px]">
+            <Head title={jsonMode ? 'Buat Prompt JSON' : storyMode ? 'Buat Soal Cerita AI' : 'Buat Soal AI'} />
+            <div className={`mx-auto grid max-w-6xl gap-6 px-4 py-8 sm:px-6 ${jsonMode ? '' : 'xl:grid-cols-[minmax(0,1fr)_320px]'}`}>
                 <form onSubmit={submit} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                     <div className="rounded-xl bg-indigo-50 p-5">
                         <h2 className="font-semibold text-indigo-950">{storyMode ? 'Tentukan tema dan panjang paket' : selectedTargetCompetency ? 'Topik latihan sudah dipilih' : 'Tentukan topik latihan'}</h2>
                         <p className="mt-2 text-sm leading-6 text-indigo-800">
-                            {storyMode
+                            {jsonMode
+                                ? 'Isi pengaturan seperti pada versi AI. TOA akan menyusun prompt yang dapat Anda salin ke ChatGPT untuk menghasilkan JSON.'
+                                : storyMode
                                 ? 'AI menulis satu cerita, lalu membuat beberapa soal dari stimulus yang sama.'
                                 : selectedTargetCompetency
                                     ? <>AI akan membuat soal berdasarkan <strong>{selectedTargetCompetency.name}</strong>. Contoh soal di bawah tetap opsional.</>
@@ -171,10 +229,25 @@ export default function StoryCreate({ subjects, competencies, questionBlueprints
 
                     {usesIndonesianBundle && data.root_competency_id > 0 && <fieldset className="mt-5 rounded-xl border border-indigo-200 bg-indigo-50 p-5"><legend className="px-2 text-sm font-bold text-indigo-950">Komposisi bundle <span className="font-normal text-indigo-700">(1 cerita · 3 soal)</span></legend>
                         {selectedBundleBlueprints.length === 3 ? <div className="mt-1 overflow-hidden rounded-xl border border-indigo-100 bg-white">
-                            <div className="hidden grid-cols-[60px_1fr_160px_220px] gap-3 bg-indigo-100/60 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-indigo-800 lg:grid"><span>Soal</span><span>Tipe soal</span><span>Jawaban</span><span>Level soal</span></div>
-                            <div className="divide-y divide-indigo-100">{data.bundle_slots.map((slot, index) => <div key={index} className="grid gap-2 px-3 py-3 lg:grid-cols-[60px_1fr_160px_220px] lg:items-center lg:gap-3">
+                            <div className="hidden grid-cols-[44px_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 bg-indigo-100/60 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-indigo-800 lg:grid"><span>Soal</span><span>Tipe soal</span><span>Jawaban</span><span>Level soal</span></div>
+                            <div className="divide-y divide-indigo-100">{data.bundle_slots.map((slot, index) => <div key={index} className="grid gap-2 px-3 py-3 lg:grid-cols-[44px_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] lg:items-center lg:gap-3">
                                 <strong className="text-xs text-indigo-800">Soal {index + 1}</strong>
-                                <select value={slot.question_blueprint_id} onChange={(event) => updateBundleSlot(index, 'question_blueprint_id', Number(event.target.value))} className="w-full rounded-lg border-slate-300 text-sm">{selectedBundleBlueprints.map((blueprint) => <option key={blueprint.id} value={blueprint.id}>{blueprint.name}</option>)}</select>
+                                <div className="flex items-center gap-1.5">
+                                    <select value={slot.question_blueprint_id} onChange={(event) => updateBundleSlot(index, 'question_blueprint_id', Number(event.target.value))} className="w-full rounded-lg border-slate-300 text-sm">{selectedBundleBlueprints.map((blueprint) => <option key={blueprint.id} value={blueprint.id}>{blueprint.name}</option>)}</select>
+                                    {slot.question_blueprint_id > 0 && (
+                                        <a
+                                            href={route('question-types.edit', slot.question_blueprint_id)}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="inline-flex shrink-0 items-center justify-center rounded-lg border border-indigo-200 bg-white p-2 text-indigo-700 shadow-sm hover:bg-indigo-50 hover:text-indigo-900"
+                                            title="Customize tipe soal ini di tab baru"
+                                        >
+                                            <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                                                <path d="m13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                                            </svg>
+                                        </a>
+                                    )}
+                                </div>
                                 <select value={slot.answer_format} onChange={(event) => updateBundleSlot(index, 'answer_format', event.target.value as AnswerFormat)} className="w-full rounded-lg border-slate-300 text-sm">{answerFormats.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
                                 <select value={slot.cognitive_level} onChange={(event) => updateBundleSlot(index, 'cognitive_level', event.target.value as CognitiveLevel)} className="w-full rounded-lg border-slate-300 text-sm">{cognitiveLevels.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
                             </div>)}</div>
@@ -320,16 +393,91 @@ export default function StoryCreate({ subjects, competencies, questionBlueprints
                     </div>
 
                     <div className="mt-6 flex flex-wrap justify-end gap-3">
-                        <Link href={route('questions.index')} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700">
+                        <Link href={route('questions.index')} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
                             Kembali
                         </Link>
-                        <button disabled={processing || data.subject_id === 0 || data.root_competency_id === 0 || (!usesQuestionBlueprints && needsSubcompetency && !hasSelectedSubcompetency) || (usesIndonesianBundle && selectedBundleBlueprints.length !== 3)} className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50">
-                            {processing ? 'Mengirim permintaan...' : storyMode ? 'Buat Cerita & Soal' : 'Buat Soal AI'}
-                        </button>
+                        {!jsonMode && <button
+                            type="submit"
+                            onClick={() => setData('submission_mode', 'draft')}
+                            disabled={processing || data.subject_id === 0 || data.root_competency_id === 0 || (!usesQuestionBlueprints && needsSubcompetency && !hasSelectedSubcompetency) || (usesIndonesianBundle && selectedBundleBlueprints.length !== 3)}
+                            className="rounded-lg bg-amber-600 px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-amber-500 disabled:opacity-50 transition"
+                        >
+                            {processing && data.submission_mode === 'draft' ? 'Mengirim permintaan...' : 'Buat sebagai Draft (Pribadi)'}
+                        </button>}
+                        {!jsonMode && <button
+                            type="submit"
+                            onClick={() => setData('submission_mode', 'review')}
+                            disabled={processing || data.subject_id === 0 || data.root_competency_id === 0 || (!usesQuestionBlueprints && needsSubcompetency && !hasSelectedSubcompetency) || (usesIndonesianBundle && selectedBundleBlueprints.length !== 3)}
+                            className="rounded-lg border border-indigo-300 bg-indigo-50 px-5 py-2 text-sm font-semibold text-indigo-700 shadow-sm hover:bg-indigo-100 disabled:opacity-50 transition"
+                        >
+                            {processing && data.submission_mode === 'review' ? 'Mengirim permintaan...' : storyMode ? 'Buat & Langsung Ajukan Verifikasi' : 'Buat Soal & Ajukan'}
+                        </button>}
+                        {jsonMode && <button
+                            type="submit"
+                            disabled={data.subject_id === 0 || data.root_competency_id === 0 || (!usesQuestionBlueprints && needsSubcompetency && !hasSelectedSubcompetency) || (usesIndonesianBundle && selectedBundleBlueprints.length !== 3)}
+                            className="rounded-lg bg-amber-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-500 disabled:opacity-50"
+                        >
+                            Buat Prompt JSON
+                        </button>}
                     </div>
                 </form>
 
-                <aside className="h-fit rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                {jsonMode && generatedPrompt && <section className="rounded-2xl border border-amber-200 bg-amber-50/50 p-6 shadow-sm">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                            <p className="text-xs font-bold uppercase tracking-wider text-amber-700">Langkah 1</p>
+                            <h2 className="mt-1 font-bold text-slate-900">Salin prompt ke ChatGPT</h2>
+                            <p className="mt-1 text-sm text-slate-600">Salin seluruh prompt berikut. ChatGPT diminta mengembalikan JSON valid tanpa format markdown.</p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={async () => {
+                                await navigator.clipboard.writeText(generatedPrompt);
+                                setPromptCopied(true);
+                            }}
+                            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+                        >
+                            {promptCopied ? '✓ Tersalin' : 'Salin prompt'}
+                        </button>
+                    </div>
+                    <textarea
+                        readOnly
+                        value={generatedPrompt}
+                        rows={22}
+                        className="mt-4 block w-full rounded-xl border-amber-200 bg-white font-mono text-xs leading-5 text-slate-700 focus:border-amber-400 focus:ring-amber-400"
+                    />
+
+                    <form onSubmit={importJson} className="mt-8 border-t border-amber-200 pt-6">
+                        <div className="flex items-start gap-3">
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-sm font-bold text-white">2</span>
+                            <div>
+                                <h2 className="font-bold text-slate-900">Tempel JSON hasil ChatGPT</h2>
+                                <p className="mt-1 text-sm leading-6 text-slate-600">Kembali ke halaman ini, tempel seluruh hasil JSON di bawah, lalu impor sebagai draft agar bisa diperiksa sebelum diajukan.</p>
+                            </div>
+                        </div>
+                        <textarea
+                            value={jsonImportForm.data.json_payload}
+                            onChange={(event) => jsonImportForm.setData('json_payload', event.target.value)}
+                            rows={14}
+                            spellCheck={false}
+                            placeholder={'Tempel JSON dari ChatGPT di sini, contoh:\n{\n  "title": "...",\n  "questions": [...]\n}'}
+                            className="mt-4 block w-full rounded-xl border-slate-300 bg-white font-mono text-xs leading-5 text-slate-700 focus:border-emerald-500 focus:ring-emerald-500"
+                        />
+                        <InputError message={jsonImportForm.errors.json_payload} className="mt-2" />
+                        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                            <p className="text-xs text-slate-500">JSON akan divalidasi dan disimpan sebagai draft pribadi.</p>
+                            <button
+                                type="submit"
+                                disabled={jsonImportForm.processing || jsonImportForm.data.json_payload.trim() === ''}
+                                className="rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                {jsonImportForm.processing ? 'Memvalidasi JSON...' : 'Impor JSON sebagai Draft'}
+                            </button>
+                        </div>
+                    </form>
+                </section>}
+
+                {!jsonMode && <aside className="h-fit rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                     <h2 className="font-semibold text-slate-900">Permintaan terbaru</h2>
                     {recentGenerations.length === 0 ? (
                         <p className="mt-4 text-sm text-slate-500">Belum ada soal cerita yang dibuat.</p>
@@ -352,7 +500,7 @@ export default function StoryCreate({ subjects, competencies, questionBlueprints
                             ))}
                         </div>
                     )}
-                </aside>
+                </aside>}
             </div>
         </AuthenticatedLayout>
     );

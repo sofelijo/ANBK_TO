@@ -4,9 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Enums\AiGenerationStatus;
 use App\Enums\AiGenerationType;
+use App\Enums\UserRole;
 use App\Jobs\GenerateSchoolAssessmentAnalysis;
 use App\Models\AiGeneration;
 use App\Models\Assessment;
+use App\Models\School;
 use App\Services\AI\AiManager;
 use App\Services\AssessmentAiAnalysisData;
 use Illuminate\Http\RedirectResponse;
@@ -21,7 +23,10 @@ class MonitoringAiAnalysisController extends Controller
         AssessmentAiAnalysisData $analysisData,
         AiManager $manager,
     ): RedirectResponse {
-        $schoolId = (int) $request->user()->school_id;
+        $schoolId = $request->user()->hasRole(UserRole::Admin)
+            ? (int) $request->validate(['school_id' => ['required', 'integer', 'exists:schools,id']])['school_id']
+            : (int) $request->user()->school_id;
+        abort_unless(School::query()->whereKey($schoolId)->whereNotNull('npsn')->exists(), 404);
         $this->ensureAccessible($assessment, $schoolId);
         $context = $analysisData->build($assessment, $schoolId);
 

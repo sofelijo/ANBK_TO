@@ -94,6 +94,48 @@ class QuestionBlueprintWorkflowTest extends TestCase
             ->assertOk();
     }
 
+    public function test_teacher_can_customize_global_question_type_for_their_school(): void
+    {
+        [$teacher, $subject, $description] = $this->context();
+
+        $globalBlueprint = QuestionBlueprint::create([
+            'school_id' => null,
+            'subject_id' => $subject->id,
+            'code' => 'KOSAKATA-GLOBAL',
+            'name' => 'Menentukan arti kata',
+            'description' => 'Definisi standar nasional.',
+        ]);
+
+        $this->actingAs($teacher)
+            ->get(route('question-types.edit', $globalBlueprint))
+            ->assertOk();
+
+        $this->actingAs($teacher)
+            ->put(route('question-types.update', $globalBlueprint), [
+                'subject_id' => $subject->id,
+                'code' => 'KOSAKATA-GLOBAL',
+                'name' => 'Menentukan makna kata kontekstual (Kustom)',
+                'description' => 'Disesuaikan dengan modul ajar sekolah.',
+                'competency_ids' => [$description->id],
+            ])
+            ->assertRedirect(route('question-types.index'))
+            ->assertSessionHas('success', 'Tipe soal berhasil disesuaikan untuk sekolah Anda.');
+
+        $schoolBlueprint = QuestionBlueprint::query()
+            ->where('school_id', $teacher->school_id)
+            ->where('code', 'KOSAKATA-GLOBAL')
+            ->firstOrFail();
+
+        $this->assertSame('Menentukan makna kata kontekstual (Kustom)', $schoolBlueprint->name);
+        $this->assertSame('Disesuaikan dengan modul ajar sekolah.', $schoolBlueprint->description);
+        $this->assertTrue($schoolBlueprint->competencies->contains($description));
+
+        $this->assertDatabaseHas('audit_logs', [
+            'actor_id' => $teacher->id,
+            'action' => 'question_blueprint.customized',
+        ]);
+    }
+
     public function test_competency_defaults_can_be_adjusted_and_manual_question_stores_selected_type(): void
     {
         [$teacher, $subject, $description] = $this->context();

@@ -170,7 +170,7 @@ class RankingDemoSeeder extends Seeder
         mixed $endsAt,
     ): Assessment {
         return Assessment::query()->updateOrCreate(
-            ['school_id' => $school->id, 'title' => $title],
+            ['title' => $title],
             [
                 'created_by' => $creator->id,
                 'description' => 'Paket data dummy bervariasi untuk memeriksa seluruh tampilan dan filter ranking TOA.',

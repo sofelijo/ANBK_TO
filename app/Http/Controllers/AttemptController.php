@@ -6,6 +6,7 @@ use App\Enums\AssessmentStatus;
 use App\Enums\AttemptStatus;
 use App\Enums\QuestionType;
 use App\Models\Assessment;
+use App\Models\AssessmentSchedule;
 use App\Models\Attempt;
 use App\Models\Question;
 use App\Services\AI\AiManager;
@@ -41,6 +42,7 @@ class AttemptController extends Controller
         abort_if($assessment->starts_at?->isFuture(), 403, 'Try out belum dimulai.');
         abort_if($assessment->ends_at?->isPast(), 403, 'Try out telah ditutup.');
         $attemptStartedAt = now();
+        $scheduleId = null;
 
         if ($assessment->requiresSchoolSchedule()) {
             $schoolNpsn = $user->school()->value('npsn');
@@ -52,19 +54,41 @@ class AttemptController extends Controller
 
             abort_if($schedule === null, 403, 'Sekolah Anda belum memiliki jadwal aktif untuk try out ini. Minta guru mengambil jadwal terlebih dahulu.');
             $attemptStartedAt = $schedule->starts_at;
+            $scheduleId = $schedule->id;
         }
 
         $snapshotService->snapshotAssessment($assessment);
 
-        $attempt = DB::transaction(function () use ($assessment, $user, $questionSelector, $snapshotService, $attemptStartedAt): Attempt {
-            $attempt = Attempt::firstOrCreate(
-                ['assessment_id' => $assessment->id, 'user_id' => $user->id],
-                [
+        $attempt = DB::transaction(function () use ($assessment, $user, $questionSelector, $snapshotService, $attemptStartedAt, $scheduleId): Attempt {
+            $attempt = Attempt::query()
+                ->where('assessment_id', $assessment->id)
+                ->where('user_id', $user->id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($attempt === null && $scheduleId !== null) {
+                $schedule = AssessmentSchedule::query()->lockForUpdate()->findOrFail($scheduleId);
+                $participantCount = Attempt::query()
+                    ->where('assessment_schedule_id', $schedule->id)
+                    ->count();
+
+                abort_if(
+                    $participantCount >= $schedule->student_count,
+                    403,
+                    'Kuota peserta sekolah untuk sesi ini sudah penuh. Hubungi operator sekolah.',
+                );
+            }
+
+            if ($attempt === null) {
+                $attempt = Attempt::create([
                     'public_id' => (string) Str::uuid(),
+                    'assessment_id' => $assessment->id,
+                    'assessment_schedule_id' => $scheduleId,
+                    'user_id' => $user->id,
                     'status' => AttemptStatus::InProgress,
                     'started_at' => $attemptStartedAt,
-                ],
-            );
+                ]);
+            }
 
             if ($attempt->questions()->doesntExist()) {
                 $questions = $questionSelector->select($assessment, $user);

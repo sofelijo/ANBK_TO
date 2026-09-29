@@ -106,7 +106,7 @@ export default function AuthenticatedLayout({
                                 </span>
                             </Link>
 
-                            <div className="hidden sm:ms-10 sm:flex sm:items-stretch sm:gap-6">
+                            <div className="hidden xl:ms-8 xl:flex xl:items-stretch xl:gap-5">
                                 <NavLink href={dashboard.href} active={isItemActive(dashboard)}>Dashboard</NavLink>
                                 {!isStudent ? managementGroups.map((group) => (
                                     <Dropdown key={group.label}>
@@ -130,9 +130,9 @@ export default function AuthenticatedLayout({
                         </div>
 
                         <div className="flex items-center gap-2 sm:ms-6">
-                            <ThemeToggle />
+                            <ThemeToggle showLabel={false} />
 
-                            <div className="hidden sm:flex sm:items-center">
+                            <div className="hidden xl:flex xl:items-center">
                                 <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-700">
                                     {roleLabels[auth.user.role]}
                                 </span>
@@ -140,7 +140,7 @@ export default function AuthenticatedLayout({
                                     <Dropdown>
                                         <Dropdown.Trigger>
                                             <button className="inline-flex items-center rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900">
-                                                {auth.user.name}
+                                                <span className="max-w-40 truncate">{auth.user.name}</span>
                                                 <span className="ms-2">⌄</span>
                                             </button>
                                         </Dropdown.Trigger>
@@ -164,10 +164,11 @@ export default function AuthenticatedLayout({
                                 type="button"
                                 aria-label={showingNavigationDropdown ? 'Tutup menu navigasi' : 'Buka menu navigasi'}
                                 aria-expanded={showingNavigationDropdown}
+                                aria-controls="mobile-navigation"
                                 onClick={() =>
                                     setShowingNavigationDropdown((value) => !value)
                                 }
-                                className="my-auto min-h-11 min-w-11 rounded-lg p-2 text-slate-500 sm:hidden"
+                                className="my-auto min-h-11 min-w-11 rounded-lg p-2 text-slate-500 xl:hidden"
                             >
                                 ☰
                             </button>
@@ -176,7 +177,8 @@ export default function AuthenticatedLayout({
                 </div>
 
                 <div
-                    className={`${showingNavigationDropdown ? 'block' : 'hidden'} border-t border-slate-100 sm:hidden`}
+                    id="mobile-navigation"
+                    className={`${showingNavigationDropdown ? 'block' : 'hidden'} border-t border-slate-100 xl:hidden`}
                 >
                     <div className="space-y-1 py-2">
                         <ResponsiveNavLink href={dashboard.href} active={isItemActive(dashboard)}>Dashboard</ResponsiveNavLink>

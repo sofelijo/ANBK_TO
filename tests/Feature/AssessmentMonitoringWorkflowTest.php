@@ -76,6 +76,51 @@ class AssessmentMonitoringWorkflowTest extends TestCase
         $this->actingAs($student)->get(route('monitoring.index'))->assertForbidden();
     }
 
+    public function test_admin_can_monitor_students_across_selected_schools(): void
+    {
+        [$operator, $studentCorrect, $studentIncorrect, $otherStudent, $assessment, $question] = $this->scenario();
+        $this->attempt($assessment, $studentCorrect, $question);
+        $this->attempt($assessment, $studentIncorrect, $question);
+        $this->attempt($assessment, $otherStudent, $question);
+        $admin = User::create([
+            'school_id' => null,
+            'name' => 'Admin Global Monitoring',
+            'email' => 'admin-global-monitoring@example.com',
+            'password' => 'password',
+            'role' => UserRole::Admin,
+            'is_active' => true,
+            'approved_at' => now(),
+            'email_verified_at' => now(),
+        ]);
+
+        $this->actingAs($admin)
+            ->get(route('monitoring.index', [
+                'school_id' => $operator->school_id,
+                'assessment_id' => $assessment->id,
+            ]))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('canChooseSchool', true)
+                ->where('selectedSchoolId', $operator->school_id)
+                ->where('selectedSchool.npsn', '10000002')
+                ->has('schools', 3)
+                ->where('monitor.participant_count', 2)
+                ->has('monitor.rows', 2));
+
+        $this->actingAs($admin)
+            ->get(route('monitoring.index', [
+                'school_id' => $otherStudent->school_id,
+                'assessment_id' => $assessment->id,
+            ]))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('selectedSchoolId', $otherStudent->school_id)
+                ->where('monitor.participant_count', 1)
+                ->where('monitor.rows.0.student.name', 'Siswa Sekolah Lain'));
+
+        $this->actingAs($admin)
+            ->get(route('monitoring.index', ['school_id' => 999999]))
+            ->assertNotFound();
+    }
+
     private function scenario(): array
     {
         $ownerSchool = School::create(['name' => 'Sekolah Pembuat', 'npsn' => '10000001']);

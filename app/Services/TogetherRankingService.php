@@ -3,11 +3,9 @@
 namespace App\Services;
 
 use App\Enums\AttemptStatus;
-use App\Enums\UserRole;
 use App\Models\Assessment;
 use App\Models\Attempt;
 use App\Models\School;
-use App\Models\User;
 use Illuminate\Support\Collection;
 
 class TogetherRankingService
@@ -29,24 +27,18 @@ class TogetherRankingService
     }
 
     /** @return Collection<int, Assessment> */
-    public function selectableAssessments(User $user): Collection
+    public function selectableAssessments(): Collection
     {
         return Assessment::query()
             ->whereHas('attempts', fn ($query) => $query
                 ->where('status', AttemptStatus::Submitted)
                 ->where('max_score', '>', 0))
-            ->when($user->hasRole(UserRole::Teacher), fn ($query) => $query->where(
-                fn ($scope) => $scope
-                    ->where('settings->type', Assessment::TYPE_TOGETHER)
-                    ->orWhere('school_id', $user->school_id),
-            ))
-            ->with('school:id,name')
             ->withCount(['attempts as participant_count' => fn ($query) => $query
                 ->where('status', AttemptStatus::Submitted)
                 ->where('max_score', '>', 0)])
             ->orderByDesc('starts_at')
             ->orderByDesc('id')
-            ->get(['id', 'school_id', 'title', 'grade_level', 'starts_at', 'ends_at', 'settings']);
+            ->get(['id', 'title', 'grade_level', 'starts_at', 'ends_at', 'settings']);
     }
 
     /** @return Collection<int, array<string, mixed>> */
@@ -235,7 +227,6 @@ class TogetherRankingService
             'participantCount' => (int) ($assessment->participant_count ?? 0),
             'type' => $assessment->assessmentType(),
             'typeLabel' => config("assessment.types.{$assessment->assessmentType()}"),
-            'schoolName' => $assessment->school?->name,
         ];
     }
 }

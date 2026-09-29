@@ -21,7 +21,7 @@ export default function Import({ errors: importErrors }: { errors: string[] }) {
                     <form onSubmit={submit} className="mt-6">
                         <input type="file" accept=".csv,.xlsx,.xls" onChange={(event) => setData('file', event.target.files?.[0] || null)} className="block w-full rounded-xl border border-dashed border-slate-300 p-6 text-sm" />
                         <InputError message={errors.file} className="mt-2" />
-                        <div className="mt-5 flex justify-end gap-3"><Link href={route('questions.index')} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Kembali</Link><button disabled={processing || !data.file} className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white disabled:opacity-40">Impor sebagai draft</button></div>
+                        <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:justify-end"><Link href={route('questions.index')} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Kembali</Link><button disabled={processing || !data.file} className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white disabled:opacity-40">Impor sebagai draft</button></div>
                     </form>
                 </section>
 

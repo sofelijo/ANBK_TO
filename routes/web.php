@@ -5,6 +5,7 @@ use App\Http\Controllers\Admin\IndonesianBundleController;
 use App\Http\Controllers\Admin\QuestionTypeSettingController;
 use App\Http\Controllers\Admin\TeacherVerificationAnalyticsController;
 use App\Http\Controllers\Admin\UserController as AdminUserController;
+use App\Http\Controllers\Admin\VerificationSettingController;
 use App\Http\Controllers\AiQuestionController;
 use App\Http\Controllers\AiQuestionReviewController;
 use App\Http\Controllers\AiStoryIllustrationController;
@@ -71,6 +72,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/questions/manual-bundle', [ManualIndonesianBundleController::class, 'store'])->name('manual-story-bundles.store');
         Route::get('/story-questions/create', [AiStoryQuestionController::class, 'create'])->name('story-questions.create');
         Route::get('/ai-questions/create', [AiStoryQuestionController::class, 'create'])->name('ai-questions.create');
+        Route::get('/json-questions/create', [AiStoryQuestionController::class, 'create'])->name('json-questions.create');
+        Route::post('/json-questions', [AiStoryQuestionController::class, 'storeJson'])->name('json-questions.store');
         Route::post('/story-questions', [AiStoryQuestionController::class, 'store'])->name('story-questions.store');
         Route::post('/ai-questions', [AiStoryQuestionController::class, 'store'])->name('ai-questions.store');
         Route::get('/story-questions/{generation}', [AiStoryQuestionController::class, 'show'])->name('story-questions.show');
@@ -78,9 +81,24 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/story-questions/{generation}/retry', [AiStoryQuestionController::class, 'retry'])->name('story-questions.retry');
         Route::post('/ai-questions/{generation}/retry', [AiStoryQuestionController::class, 'retry'])->name('ai-questions.retry');
         Route::post('/story-questions/{generation}/publish', [AiStoryQuestionController::class, 'publishBundle'])->name('story-questions.publish');
+        Route::post('/story-questions/{generation}/submit-review', [AiStoryQuestionController::class, 'submitForReview'])->name('story-questions.submit-review');
+        Route::post('/story-questions/{generation}/revert-draft', [AiStoryQuestionController::class, 'revertToDraft'])->name('story-questions.revert-draft');
+        Route::put('/story-questions/{generation}/stimulus', [AiStoryQuestionController::class, 'updateStimulus'])->name('story-questions.update-stimulus');
         Route::post('/ai-questions/{generation}/publish', [AiStoryQuestionController::class, 'publishBundle'])->name('ai-questions.publish');
+        Route::post('/ai-questions/{generation}/submit-review', [AiStoryQuestionController::class, 'submitForReview'])->name('ai-questions.submit-review');
+        Route::post('/ai-questions/{generation}/revert-draft', [AiStoryQuestionController::class, 'revertToDraft'])->name('ai-questions.revert-draft');
+        Route::put('/ai-questions/{generation}/stimulus', [AiStoryQuestionController::class, 'updateStimulus'])->name('ai-questions.update-stimulus');
+        Route::delete('/story-questions/{generation}', [AiStoryQuestionController::class, 'destroy'])->name('story-questions.destroy');
+        Route::delete('/ai-questions/{generation}', [AiStoryQuestionController::class, 'destroy'])->name('ai-questions.destroy');
+        Route::post('/story-questions/{generation}/questions', [AiStoryQuestionController::class, 'storeQuestion'])->name('story-questions.questions.store');
+        Route::post('/ai-questions/{generation}/questions', [AiStoryQuestionController::class, 'storeQuestion'])->name('ai-questions.questions.store');
+        Route::post('/story-questions/{generation}/questions/generate-ai', [AiStoryQuestionController::class, 'generateQuestion'])->name('story-questions.questions.generate-ai');
+        Route::post('/ai-questions/{generation}/questions/generate-ai', [AiStoryQuestionController::class, 'generateQuestion'])->name('ai-questions.questions.generate-ai');
+        Route::post('/story-questions/{generation}/questions/{question}/regenerate', [AiStoryQuestionController::class, 'regenerateQuestion'])->name('story-questions.questions.regenerate');
+        Route::post('/ai-questions/{generation}/questions/{question}/regenerate', [AiStoryQuestionController::class, 'regenerateQuestion'])->name('ai-questions.questions.regenerate');
         Route::post('/story-questions/{generation}/illustration', [AiStoryIllustrationController::class, 'store'])->name('story-questions.illustration.store');
         Route::post('/ai-questions/{generation}/illustration', [AiStoryIllustrationController::class, 'store'])->name('ai-questions.illustration.store');
+        Route::post('/questions/{question}/update-status', [QuestionController::class, 'updateStatus'])->name('questions.update-status');
         Route::put('/generated-questions/{generation}/questions/{question}', [QuestionController::class, 'inlineUpdate'])->name('generated-questions.inline-update');
         Route::delete('/generated-questions/{generation}/questions/{question}', [QuestionController::class, 'destroyGenerated'])->name('generated-questions.destroy');
         Route::resource('questions', QuestionController::class)->only(['index', 'create', 'store', 'show', 'edit', 'update']);
@@ -99,6 +117,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('/assessments/create', [AssessmentController::class, 'create'])->name('assessments.create');
         Route::post('/assessments', [AssessmentController::class, 'store'])->name('assessments.store');
         Route::get('/assessments/{assessment}', [AssessmentController::class, 'show'])->name('assessments.show');
+        Route::get('/assessments/{assessment}/preview', [AssessmentController::class, 'preview'])->name('assessments.preview');
         Route::get('/assessments/{assessment}/edit', [AssessmentController::class, 'edit'])->name('assessments.edit');
         Route::put('/assessments/{assessment}', [AssessmentController::class, 'update'])->name('assessments.update');
         Route::post('/assessments/{assessment}/publish', [AssessmentController::class, 'publish'])->name('assessments.publish');
@@ -122,6 +141,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
     });
 
     Route::middleware('role:admin')->group(function () {
+        Route::patch('/schedules/capacity', [AssessmentScheduleController::class, 'updateCapacity'])->name('schedules.capacity.update');
+        Route::patch('/schedules/session-duration', [AssessmentScheduleController::class, 'updateSessionDuration'])->name('schedules.duration.update');
+        Route::patch('/schedules/availability-thresholds', [AssessmentScheduleController::class, 'updateAvailabilityThresholds'])->name('schedules.thresholds.update');
         Route::get('/admin/teacher-verifications', TeacherVerificationAnalyticsController::class)
             ->name('admin.teacher-verifications.index');
         Route::get('/admin/indonesian-bundles', [IndonesianBundleController::class, 'edit'])->name('admin.indonesian-bundles.edit');
@@ -130,6 +152,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::patch('/admin/ai-quotas', [AiQuotaController::class, 'update'])->name('admin.ai-quotas.update');
         Route::get('/admin/question-types', [QuestionTypeSettingController::class, 'edit'])->name('admin.question-types.edit');
         Route::patch('/admin/question-types', [QuestionTypeSettingController::class, 'update'])->name('admin.question-types.update');
+        Route::get('/admin/verification-setting', [VerificationSettingController::class, 'edit'])->name('admin.verification-setting.edit');
+        Route::patch('/admin/verification-setting', [VerificationSettingController::class, 'update'])->name('admin.verification-setting.update');
         Route::get('/admin/users', [AdminUserController::class, 'index'])->name('admin.users.index');
         Route::post('/admin/users', [AdminUserController::class, 'store'])->name('admin.users.store');
         Route::patch('/admin/users/{user}/approve', [AdminUserController::class, 'approve'])->name('admin.users.approve');

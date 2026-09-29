@@ -47,7 +47,7 @@ class GenerateAttemptSummary implements ShouldQueue
 
         $provider = $manager->provider();
         $generation = AiGeneration::create([
-            'school_id' => $attempt->assessment->school_id,
+            'school_id' => $attempt->student->school_id,
             'requested_by' => $attempt->user_id,
             'attempt_id' => $attempt->id,
             'type' => AiGenerationType::AttemptSummary,

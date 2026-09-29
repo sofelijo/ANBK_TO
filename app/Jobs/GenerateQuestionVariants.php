@@ -69,7 +69,6 @@ class GenerateQuestionVariants implements ShouldQueue
                 foreach ($variants as $variant) {
                     $this->validateCorrectAnswers($question, $variant);
                     $created = Question::create([
-                        'school_id' => $question->school_id,
                         'author_id' => $question->author_id,
                         'parent_id' => $question->id,
                         'competency_id' => $question->competency_id,
