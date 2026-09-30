@@ -2,12 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\UserRole;
 use App\Models\CensoredResponse;
 use App\Models\CensoredWord;
 use App\Services\StudentChatService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -19,11 +19,8 @@ class CensoredWordController extends Controller
         $schoolId = $user->school_id;
 
         $words = CensoredWord::query()
-            ->where(function ($query) use ($schoolId) {
-                $query->whereNull('school_id');
-                if ($schoolId) {
-                    $query->orWhere('school_id', $schoolId);
-                }
+            ->when(! $user->hasRole(UserRole::Admin), function ($query) use ($schoolId) {
+                $query->where(fn ($scope) => $scope->whereNull('school_id')->orWhere('school_id', $schoolId));
             })
             ->orderBy('word')
             ->get()
@@ -36,11 +33,8 @@ class CensoredWordController extends Controller
             ]);
 
         $responses = CensoredResponse::query()
-            ->where(function ($query) use ($schoolId) {
-                $query->whereNull('school_id');
-                if ($schoolId) {
-                    $query->orWhere('school_id', $schoolId);
-                }
+            ->when(! $user->hasRole(UserRole::Admin), function ($query) use ($schoolId) {
+                $query->where(fn ($scope) => $scope->whereNull('school_id')->orWhere('school_id', $schoolId));
             })
             ->latest('id')
             ->get()
@@ -81,14 +75,12 @@ class CensoredWordController extends Controller
 
             $exists = CensoredWord::query()
                 ->where('word', $cleaned)
-                ->where(function ($q) use ($user) {
-                    $q->whereNull('school_id')->orWhere('school_id', $user->school_id);
-                })
+                ->where('school_id', $user->hasRole(UserRole::Admin) ? null : $user->school_id)
                 ->exists();
 
             if (! $exists) {
                 CensoredWord::create([
-                    'school_id' => $user->school_id,
+                    'school_id' => $user->hasRole(UserRole::Admin) ? null : $user->school_id,
                     'created_by' => $user->id,
                     'word' => $cleaned,
                 ]);
@@ -118,7 +110,7 @@ class CensoredWordController extends Controller
         ]);
 
         CensoredResponse::create([
-            'school_id' => $user->school_id,
+            'school_id' => $user->hasRole(UserRole::Admin) ? null : $user->school_id,
             'created_by' => $user->id,
             'response_text' => trim($data['response_text']),
             'is_active' => true,

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\UserRole;
 use App\Models\AssessmentSchedule;
 use App\Models\School;
 use App\Services\AuditLogger;
@@ -23,10 +24,14 @@ class SchoolProfileController extends Controller
 
     public function edit(Request $request): Response
     {
-        $school = $request->user()->school()->firstOrFail();
+        $isAdmin = $request->user()->hasRole(UserRole::Admin);
+        $school = $isAdmin
+            ? School::query()->findOrFail($request->integer('school_id') ?: School::query()->value('id'))
+            : $request->user()->school()->firstOrFail();
 
         return Inertia::render('Schools/Edit', [
             'school' => [
+                'id' => $school->id,
                 'name' => $school->name,
                 'npsn' => $school->npsn,
                 'subdistrict' => $school->subdistrict,
@@ -42,13 +47,18 @@ class SchoolProfileController extends Controller
                 ->map(fn (string $label, string $value): array => compact('value', 'label'))
                 ->values(),
             'subdistricts' => School::SUBDISTRICTS,
+            'canChooseSchool' => $isAdmin,
+            'schools' => $isAdmin ? School::query()->orderBy('name')->get(['id', 'name', 'npsn']) : [],
         ]);
     }
 
     public function update(Request $request, AuditLogger $auditLogger): RedirectResponse
     {
-        $school = $request->user()->school()->firstOrFail();
+        $school = $request->user()->hasRole(UserRole::Admin)
+            ? School::query()->findOrFail($request->integer('school_id'))
+            : $request->user()->school()->firstOrFail();
         $data = $request->validate([
+            'school_id' => [Rule::requiredIf($request->user()->hasRole(UserRole::Admin)), 'nullable', 'integer', Rule::exists('schools', 'id')],
             'name' => ['required', 'string', 'max:255'],
             'npsn' => ['required', 'digits:8', Rule::unique('schools', 'npsn')->ignore($school->id)],
             'subdistrict' => ['required', Rule::in(School::SUBDISTRICTS)],

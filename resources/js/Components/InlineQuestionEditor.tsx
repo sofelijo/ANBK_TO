@@ -132,6 +132,7 @@ export default function InlineQuestionEditor({
             <label className="block text-sm font-medium text-slate-700">
                 Pertanyaan
                 <textarea value={data.prompt} onChange={(event) => setData('prompt', event.target.value)} rows={3} className="mt-1 block w-full rounded-lg border-slate-300 bg-white focus:border-indigo-500 focus:ring-indigo-500" />
+                <span className="mt-1 block text-xs font-normal text-slate-500">Ketik pecahan seperti 1/4; pada tampilan soal akan otomatis menjadi pecahan bertingkat.</span>
             </label>
 
             <div>

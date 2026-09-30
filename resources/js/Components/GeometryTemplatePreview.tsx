@@ -1,4 +1,5 @@
-import type { MouseEvent } from 'react';
+import { useRef } from 'react';
+import type { MouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 
 export type GeometryTemplate =
     | 'square' | 'rectangle' | 'parallelogram' | 'trapezoid' | 'trapezoid_right' | 'trapezoid_isosceles' | 'rhombus' | 'kite'
@@ -19,18 +20,40 @@ export type GeometryTemplate =
     | 'fraction_circle' | 'fraction_bar' | 'fraction_equivalent_circles' | 'fraction_equivalent_bars'
     | 'cube_net' | 'cuboid_net' | 'triangular_prism_net' | 'cylinder_net' | 'cone_net'
     | 'cartesian_point' | 'cartesian_line' | 'translation' | 'reflection' | 'rotation' | 'dilation'
-    | 'ruler' | 'clock' | 'protractor' | 'number_line' | 'scale_bar';
+    | 'ruler' | 'clock' | 'protractor_90' | 'protractor' | 'protractor_270' | 'protractor_360' | 'number_line' | 'scale_bar';
 
 const formatted = (value: string, unit: string) => `${value || '?'} ${unit || 'cm'}`;
 const shape = { fill: '#dbeafe', stroke: '#1e40af', strokeWidth: 6 };
 const top = { fill: '#bfdbfe', stroke: '#1e40af', strokeWidth: 5 };
 const front = { fill: '#60a5fa', stroke: '#1e40af', strokeWidth: 5 };
 const side = { fill: '#2563eb', stroke: '#1e40af', strokeWidth: 5 };
+type CanvasOverlay = { id: string; type: 'text' | 'symbol'; content: string; x: number; y: number; font_size: number; color: string; rotation: number };
+type ProtractorAngle = { id: string; label: string; degrees: string; asked: boolean };
 
-export default function GeometryTemplatePreview({ template, dimensionA, dimensionB, dimensionC = '', unit, fractionModels = [], onToggleFractionPart, zoom = 1, offsetX = 0, offsetY = 0, className = '' }: { template: GeometryTemplate; dimensionA: string; dimensionB: string; dimensionC?: string; unit: string; fractionModels?: { numerator: string; denominator: string; shaded_parts?: number[] }[]; onToggleFractionPart?: (modelIndex: number, partIndex: number) => void; zoom?: number; offsetX?: number; offsetY?: number; className?: string }) {
+export default function GeometryTemplatePreview({ template, dimensionA, dimensionB, dimensionC = '', unit, fractionModels = [], protractorAngles = [], onToggleFractionPart, overlays = [], selectedOverlayId = null, onSelectOverlay, onMoveOverlay, zoom = 1, offsetX = 0, offsetY = 0, className = '' }: { template: GeometryTemplate; dimensionA: string; dimensionB: string; dimensionC?: string; unit: string; fractionModels?: { numerator: string; denominator: string; shaded_parts?: number[] }[]; protractorAngles?: ProtractorAngle[]; onToggleFractionPart?: (modelIndex: number, partIndex: number) => void; overlays?: CanvasOverlay[]; selectedOverlayId?: string | null; onSelectOverlay?: (id: string) => void; onMoveOverlay?: (id: string, x: number, y: number) => void; zoom?: number; offsetX?: number; offsetY?: number; className?: string }) {
     const a = formatted(dimensionA, unit);
     const b = formatted(dimensionB, unit);
     const c = formatted(dimensionC, unit);
+    const overlayDrag = useRef<{ id: string; clientX: number; clientY: number; x: number; y: number } | null>(null);
+    const startOverlayDrag = (event: ReactPointerEvent<SVGTextElement>, overlay: CanvasOverlay) => {
+        event.stopPropagation();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        overlayDrag.current = { id: overlay.id, clientX: event.clientX, clientY: event.clientY, x: overlay.x, y: overlay.y };
+        onSelectOverlay?.(overlay.id);
+    };
+    const moveOverlay = (event: ReactPointerEvent<SVGTextElement>) => {
+        if (!overlayDrag.current || !onMoveOverlay) return;
+        event.stopPropagation();
+        const bounds = event.currentTarget.ownerSVGElement?.getBoundingClientRect();
+        if (!bounds) return;
+        const x = Math.max(0, Math.min(1000, Math.round(overlayDrag.current.x + ((event.clientX - overlayDrag.current.clientX) * 1000 / bounds.width))));
+        const y = Math.max(0, Math.min(600, Math.round(overlayDrag.current.y + ((event.clientY - overlayDrag.current.clientY) * 600 / bounds.height))));
+        onMoveOverlay(overlayDrag.current.id, x, y);
+    };
+    const stopOverlayDrag = (event: ReactPointerEvent<SVGTextElement>) => {
+        event.stopPropagation();
+        overlayDrag.current = null;
+    };
 
     return (
         <svg viewBox="0 0 1000 600" role="img" aria-label="Preview template geometri" className={className}>
@@ -79,13 +102,17 @@ export default function GeometryTemplatePreview({ template, dimensionA, dimensio
             {template === 'cone' && <><path d="M500 70 270 440a230 70 0 0 0 460 0Z" {...front} /><ellipse cx="500" cy="440" rx="230" ry="70" {...side} /><Guide x1={500} y1={70} x2={500} y2={440} /><DimensionLine x1={500} y1={440} x2={730} y2={440} /><Label x={615} y={420} text={`r = ${a}`} /><Label x={630} y={260} text={`tinggi = ${b}`} /></>}
             {template === 'sphere' && <><circle cx="500" cy="290" r="210" {...shape} /><ellipse cx="500" cy="290" rx="210" ry="75" fill="none" stroke="#1e40af" strokeWidth="5" strokeDasharray="12 10" /><DimensionLine x1={500} y1={290} x2={710} y2={290} /><Label x={605} y={270} text={`r = ${a}`} /></>}
             {template === 'hemisphere' && <><path d="M270 300a230 230 0 0 0 460 0Z" {...shape} /><ellipse cx="500" cy="300" rx="230" ry="75" {...top} /><DimensionLine x1={500} y1={300} x2={730} y2={300} /><Label x={615} y={280} text={`r = ${a}`} /></>}
-            <ExtendedTemplate template={template} dimensionA={dimensionA} dimensionB={dimensionB} dimensionC={dimensionC} a={a} b={b} c={c} unit={unit} fractionModels={fractionModels} onToggleFractionPart={onToggleFractionPart} />
+            <ExtendedTemplate template={template} dimensionA={dimensionA} dimensionB={dimensionB} dimensionC={dimensionC} a={a} b={b} c={c} unit={unit} fractionModels={fractionModels} protractorAngles={protractorAngles} onToggleFractionPart={onToggleFractionPart} />
             </g>
+            {overlays.map((overlay) => <g key={overlay.id} data-canvas-overlay="true">
+                {selectedOverlayId === overlay.id && <rect x={overlay.x - Math.max(30, overlay.content.length * overlay.font_size * 0.3)} y={overlay.y - overlay.font_size} width={Math.max(60, overlay.content.length * overlay.font_size * 0.6)} height={overlay.font_size * 1.35} rx="8" fill="none" stroke="#7c3aed" strokeWidth="3" strokeDasharray="8 6" transform={`rotate(${overlay.rotation} ${overlay.x} ${overlay.y})`} />}
+                <text x={overlay.x} y={overlay.y} textAnchor="middle" dominantBaseline="middle" fontSize={overlay.font_size} fontWeight={overlay.type === 'symbol' ? 700 : 600} fill={overlay.color} transform={`rotate(${overlay.rotation} ${overlay.x} ${overlay.y})`} className={onMoveOverlay ? 'cursor-move select-none' : undefined} onPointerDown={(event) => startOverlayDrag(event, overlay)} onPointerMove={moveOverlay} onPointerUp={stopOverlayDrag} onPointerCancel={stopOverlayDrag}>{overlay.content}</text>
+            </g>)}
         </svg>
     );
 }
 
-function ExtendedTemplate({ template, dimensionA, dimensionB, dimensionC, a, b, c, unit, fractionModels, onToggleFractionPart }: { template: GeometryTemplate; dimensionA: string; dimensionB: string; dimensionC: string; a: string; b: string; c: string; unit: string; fractionModels: { numerator: string; denominator: string; shaded_parts?: number[] }[]; onToggleFractionPart?: (modelIndex: number, partIndex: number) => void }) {
+function ExtendedTemplate({ template, dimensionA, dimensionB, dimensionC, a, b, c, unit, fractionModels, protractorAngles, onToggleFractionPart }: { template: GeometryTemplate; dimensionA: string; dimensionB: string; dimensionC: string; a: string; b: string; c: string; unit: string; fractionModels: { numerator: string; denominator: string; shaded_parts?: number[] }[]; protractorAngles: ProtractorAngle[]; onToggleFractionPart?: (modelIndex: number, partIndex: number) => void }) {
     const rawA = dimensionA || '?';
     const rawB = dimensionB || '?';
     const numericA = Number(dimensionA);
@@ -146,7 +173,7 @@ function ExtendedTemplate({ template, dimensionA, dimensionB, dimensionC, a, b, 
     if (['cartesian_point', 'cartesian_line', 'translation', 'reflection', 'rotation', 'dilation'].includes(template)) return <CoordinateTemplate template={template} a={rawA} b={rawB} />;
     if (template === 'ruler') return <Ruler length={rawA} unit={unit} />;
     if (template === 'clock') return <Clock hour={Number(dimensionA)} minute={Number(dimensionB)} />;
-    if (template === 'protractor') return <><path d="M170 430a330 330 0 0 1 660 0Z" fill="#dbeafe" stroke="#1e40af" strokeWidth="7" /><line x1={500} y1={430} x2={820} y2={430} stroke="#334155" strokeWidth="4" /><line x1={500} y1={430} x2={500 + (300 * Math.cos(referenceRadians))} y2={430 - (300 * Math.sin(referenceRadians))} stroke="#334155" strokeWidth="4" /><path d={`M610 430A110 110 0 0 0 ${500 + (110 * Math.cos(referenceRadians))} ${430 - (110 * Math.sin(referenceRadians))}`} fill="none" stroke="#f59e0b" strokeWidth="4" /><Label x={650} y={335} text={`${rawA}°`} /></>;
+    if (template.startsWith('protractor')) return <Protractor span={template === 'protractor_90' ? 90 : template === 'protractor_270' ? 270 : template === 'protractor_360' ? 360 : 180} degrees={Number(dimensionA)} angles={protractorAngles} />;
     if (template === 'number_line') return <NumberLine minimum={Number(dimensionA)} maximum={Number(dimensionB)} />;
     if (template === 'scale_bar') return <ScaleBar length={rawA} intervals={Number(dimensionB)} unit={unit} />;
     return null;
@@ -160,6 +187,46 @@ function AngleTemplate({ template, degrees }: { template: GeometryTemplate; degr
     const arcX = 500 + (110 * Math.cos(radians));
     const arcY = 360 - (110 * Math.sin(radians));
     return <><DimensionLine x1={500} y1={360} x2={780} y2={360} /><DimensionLine x1={500} y1={360} x2={endX} y2={endY} />{template === 'angle_right' ? <RightAngle x={500} y={320} /> : <path d={`M610 360A110 110 0 ${angle > 180 ? 1 : 0} 0 ${arcX} ${arcY}`} fill="none" stroke="#f59e0b" strokeWidth="4" />}<circle cx="500" cy="360" r="7" fill="#0f172a" /><Label x={650} y={300} text={`${degrees}°`} /></>;
+}
+
+function Protractor({ span, degrees, angles }: { span: 90 | 180 | 270 | 360; degrees: number; angles: ProtractorAngle[] }) {
+    const angle = Number.isFinite(degrees) ? Math.max(0, Math.min(span, degrees)) : Math.min(45, span);
+    const radians = (angle * Math.PI) / 180;
+    const rayX = 500 + (210 * Math.cos(radians));
+    const rayY = 300 - (210 * Math.sin(radians));
+    const arcX = 500 + (85 * Math.cos(radians));
+    const arcY = 300 - (85 * Math.sin(radians));
+    const body = span === 360
+        ? <circle cx={500} cy={300} r={230} fill="#dbeafe" stroke="#1e40af" strokeWidth="7" />
+        : span === 270
+            ? <><circle cx={500} cy={300} r={230} fill="#dbeafe" stroke="#1e40af" strokeWidth="7" /><path d="M500 300L730 300A230 230 0 0 1 500 530Z" fill="#fff" stroke="#1e40af" strokeWidth="7" /></>
+        : <path d={span === 90
+            ? 'M500 300L730 300A230 230 0 0 0 500 70Z'
+            : 'M270 300A230 230 0 0 1 730 300Z'} fill="#dbeafe" stroke="#1e40af" strokeWidth="7" />;
+
+    if (angles.length === 0) return <>{body}<line x1={500} y1={300} x2={710} y2={300} stroke="#334155" strokeWidth="4" /><line x1={500} y1={300} x2={rayX} y2={rayY} stroke="#334155" strokeWidth="4" />{angle >= 360 ? <circle cx={500} cy={300} r={85} fill="none" stroke="#f59e0b" strokeWidth="4" /> : <path d={`M585 300A85 85 0 ${angle > 180 ? 1 : 0} 0 ${arcX} ${arcY}`} fill="none" stroke="#f59e0b" strokeWidth="4" />}<circle cx={500} cy={300} r={7} fill="#0f172a" /><Label x={650} y={255} text={`${angle}°`} /></>;
+
+    let start = 0;
+    const colors = ['#f59e0b', '#7c3aed', '#0891b2', '#dc2626', '#16a34a', '#db2777', '#4f46e5', '#ea580c'];
+    return <>{body}<line x1={500} y1={300} x2={710} y2={300} stroke="#334155" strokeWidth="4" />{angles.map((item, index) => {
+        const size = Math.max(0, Number(item.degrees) || 0);
+        const end = Math.min(span, start + size);
+        const startRadians = start * Math.PI / 180;
+        const endRadians = end * Math.PI / 180;
+        const middleRadians = ((start + end) / 2) * Math.PI / 180;
+        const radius = 82 + ((index % 3) * 18);
+        const startX = 500 + radius * Math.cos(startRadians);
+        const startY = 300 - radius * Math.sin(startRadians);
+        const endX = 500 + radius * Math.cos(endRadians);
+        const endY = 300 - radius * Math.sin(endRadians);
+        const labelX = 500 + 150 * Math.cos(middleRadians);
+        const labelY = 300 - 150 * Math.sin(middleRadians);
+        const rayX = 500 + 210 * Math.cos(endRadians);
+        const rayY = 300 - 210 * Math.sin(endRadians);
+        const segmentStart = start;
+        start = end;
+        return <g key={item.id}><line x1={500} y1={300} x2={rayX} y2={rayY} stroke="#334155" strokeWidth="4" />{size >= 360 ? <circle cx={500} cy={300} r={radius} fill="none" stroke={colors[index % colors.length]} strokeWidth="6" /> : <path d={`M${startX} ${startY}A${radius} ${radius} 0 ${end - segmentStart > 180 ? 1 : 0} 0 ${endX} ${endY}`} fill="none" stroke={colors[index % colors.length]} strokeWidth="6" />}<Label x={labelX} y={labelY} text={`${item.label || `s${index + 1}`} = ${item.asked ? '?' : `${size}°`}`} /></g>;
+    })}<circle cx={500} cy={300} r={7} fill="#0f172a" /></>;
 }
 
 function CircleSector({ radiusLabel, angle }: { radiusLabel: string; angle: string }) {

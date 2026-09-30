@@ -649,14 +649,16 @@ class AiStoryQuestionController extends Controller
             && ! $questions->contains(fn (Question $q): bool => $q->status === QuestionStatus::Published || $q->assessments()->exists());
 
         $school = $request->user()->school;
-        $questionTypes = $school
+        $questionTypes = $request->user()->hasRole(UserRole::Admin)
+            ? $questionTypeConfiguration->allOptions()
+            : ($school
             ? $questionTypeConfiguration->options($school)
             : collect(QuestionType::cases())->map(fn (QuestionType $type): array => [
                 'value' => $type->value,
                 'label' => $questionTypeConfiguration->label($type),
                 'description' => $questionTypeConfiguration->description($type),
                 'active' => true,
-            ])->all();
+            ])->all());
 
         return Inertia::render('Questions/StoryShow', [
             'generation' => [
@@ -943,9 +945,11 @@ class AiStoryQuestionController extends Controller
         $this->ensureAccessible($request, $generation);
 
         $school = $request->user()->school;
-        $allowedQuestionTypes = $school
+        $allowedQuestionTypes = $request->user()->hasRole(UserRole::Admin)
+            ? array_column(QuestionType::cases(), 'value')
+            : ($school
             ? $questionTypeConfiguration->enabledValues($school)
-            : array_column(QuestionType::cases(), 'value');
+            : array_column(QuestionType::cases(), 'value'));
 
         if (! in_array($request->input('type'), $allowedQuestionTypes, true)) {
             throw ValidationException::withMessages([
@@ -1092,9 +1096,11 @@ class AiStoryQuestionController extends Controller
         ]);
 
         $school = $request->user()->school;
-        $allowedQuestionTypes = $school
+        $allowedQuestionTypes = $request->user()->hasRole(UserRole::Admin)
+            ? array_column(QuestionType::cases(), 'value')
+            : ($school
             ? $questionTypeConfiguration->enabledValues($school)
-            : array_column(QuestionType::cases(), 'value');
+            : array_column(QuestionType::cases(), 'value'));
 
         $formatToCheck = ($validated['answer_format'] ?? 'single_choice') === 'true_false'
             ? 'category_matrix'

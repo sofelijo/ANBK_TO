@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\UserRole;
 use App\Models\Competency;
 use App\Models\QuestionBlueprint;
 use App\Models\Subject;
@@ -20,14 +21,19 @@ class QuestionBlueprintController extends Controller
     {
         $schoolId = $request->user()->school_id;
         $allBlueprints = QuestionBlueprint::query()
-            ->where(fn ($query) => $query->whereNull('school_id')->orWhere('school_id', $schoolId))
+            ->when(
+                ! $request->user()->hasRole(UserRole::Admin),
+                fn ($query) => $query->where(fn ($scope) => $scope->whereNull('school_id')->orWhere('school_id', $schoolId)),
+            )
             ->whereHas('subject', fn ($query) => $query->where('code', 'BIND'))
             ->with(['subject:id,code,name', 'competencies:id,code,name'])
             ->withCount('questions')
             ->orderBy('name')
             ->get();
 
-        $schoolCodes = $allBlueprints->where('school_id', $schoolId)->pluck('code')->all();
+        $schoolCodes = $request->user()->hasRole(UserRole::Admin)
+            ? []
+            : $allBlueprints->where('school_id', $schoolId)->pluck('code')->all();
 
         $blueprints = $allBlueprints
             ->reject(fn (QuestionBlueprint $blueprint): bool => $blueprint->school_id === null && in_array($blueprint->code, $schoolCodes, true))
@@ -37,7 +43,7 @@ class QuestionBlueprintController extends Controller
                 'subject' => $blueprint->subject,
                 'competencies' => $blueprint->competencies,
                 'questions_count' => $blueprint->questions_count,
-                'can_manage' => $blueprint->school_id === $schoolId,
+                'can_manage' => $request->user()->hasRole(UserRole::Admin) || $blueprint->school_id === $schoolId,
                 'is_global' => $blueprint->school_id === null,
             ]);
 
@@ -57,7 +63,7 @@ class QuestionBlueprintController extends Controller
 
         $blueprint = QuestionBlueprint::create([
             ...$data,
-            'school_id' => $request->user()->school_id,
+            'school_id' => $request->user()->hasRole(UserRole::Admin) ? null : $request->user()->school_id,
         ]);
         $this->syncCompetencies($blueprint, $competencyIds);
         $auditLogger->log($request, 'question_blueprint.created', $blueprint);
@@ -81,7 +87,7 @@ class QuestionBlueprintController extends Controller
         $competencyIds = $data['competency_ids'];
         unset($data['competency_ids']);
 
-        if ($questionType->school_id === null) {
+        if ($questionType->school_id === null && ! $request->user()->hasRole(UserRole::Admin)) {
             $target = QuestionBlueprint::query()
                 ->where('school_id', $schoolId)
                 ->where('subject_id', $data['subject_id'])
@@ -140,7 +146,10 @@ class QuestionBlueprintController extends Controller
             'competencies' => Competency::query()
                 ->whereIn('subject_id', $subjectIds)
                 ->whereNull('parent_id')
-                ->where(fn ($query) => $query->whereNull('school_id')->orWhere('school_id', $request->user()->school_id))
+                ->when(
+                    ! $request->user()->hasRole(UserRole::Admin),
+                    fn ($query) => $query->where(fn ($scope) => $scope->whereNull('school_id')->orWhere('school_id', $request->user()->school_id)),
+                )
                 ->orderBy('grade_level')
                 ->orderBy('name')
                 ->get(['id', 'subject_id', 'code', 'name', 'grade_level']),
@@ -149,20 +158,21 @@ class QuestionBlueprintController extends Controller
 
     private function validatedData(Request $request, ?QuestionBlueprint $blueprint = null): array
     {
+        $schoolId = $request->user()->hasRole(UserRole::Admin) ? null : $request->user()->school_id;
         $request->merge([
             'code' => Str::upper(trim($request->string('code')->toString())),
             'name' => Str::squish($request->string('name')->toString()),
         ]);
 
-        $existingSchoolBlueprint = $blueprint && $blueprint->school_id === null
+        $existingSchoolBlueprint = ! $request->user()->hasRole(UserRole::Admin) && $blueprint && $blueprint->school_id === null
             ? QuestionBlueprint::query()
-                ->where('school_id', $request->user()->school_id)
+                ->where('school_id', $schoolId)
                 ->where('subject_id', $request->integer('subject_id'))
                 ->where('code', $request->string('code')->toString())
                 ->first()
             : null;
 
-        $ignoreId = $blueprint?->school_id === $request->user()->school_id
+        $ignoreId = $blueprint?->school_id === $schoolId
             ? $blueprint->id
             : $existingSchoolBlueprint?->id;
 
@@ -171,7 +181,7 @@ class QuestionBlueprintController extends Controller
             'code' => [
                 'required', 'string', 'max:50', 'regex:/^[A-Z0-9][A-Z0-9._-]*$/',
                 Rule::unique('question_blueprints', 'code')
-                    ->where('school_id', $request->user()->school_id)
+                    ->where('school_id', $schoolId)
                     ->where('subject_id', $request->integer('subject_id'))
                     ->ignore($ignoreId),
             ],
@@ -190,7 +200,10 @@ class QuestionBlueprintController extends Controller
             ->whereIn('id', $data['competency_ids'] ?? [])
             ->where('subject_id', $subject->id)
             ->whereNull('parent_id')
-            ->where(fn ($query) => $query->whereNull('school_id')->orWhere('school_id', $request->user()->school_id))
+            ->when(
+                ! $request->user()->hasRole(UserRole::Admin),
+                fn ($query) => $query->where(fn ($scope) => $scope->whereNull('school_id')->orWhere('school_id', $request->user()->school_id)),
+            )
             ->count();
         if ($validCompetencyCount !== count($data['competency_ids'] ?? [])) {
             throw ValidationException::withMessages(['competency_ids' => 'Ada kompetensi yang tidak tersedia.']);
@@ -212,7 +225,10 @@ class QuestionBlueprintController extends Controller
     {
         return Subject::query()
             ->where('code', 'BIND')
-            ->where(fn ($query) => $query->whereNull('school_id')->orWhere('school_id', $request->user()->school_id))
+            ->when(
+                ! $request->user()->hasRole(UserRole::Admin),
+                fn ($query) => $query->where(fn ($scope) => $scope->whereNull('school_id')->orWhere('school_id', $request->user()->school_id)),
+            )
             ->orderByDesc('school_id')
             ->get(['id', 'code', 'name']);
     }
@@ -220,13 +236,18 @@ class QuestionBlueprintController extends Controller
     private function ensureAccess(Request $request, QuestionBlueprint $blueprint): void
     {
         abort_unless(
-            $blueprint->school_id === null || $blueprint->school_id === $request->user()->school_id,
+            $request->user()->hasRole(UserRole::Admin)
+            || $blueprint->school_id === null
+            || $blueprint->school_id === $request->user()->school_id,
             404,
         );
     }
 
     private function ensureManageable(Request $request, QuestionBlueprint $blueprint): void
     {
-        abort_unless($blueprint->school_id === $request->user()->school_id, 404);
+        abort_unless(
+            $request->user()->hasRole(UserRole::Admin) || $blueprint->school_id === $request->user()->school_id,
+            404,
+        );
     }
 }

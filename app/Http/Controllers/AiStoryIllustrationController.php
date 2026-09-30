@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\AiGenerationStatus;
 use App\Enums\AiGenerationType;
+use App\Enums\UserRole;
 use App\Models\AiGeneration;
 use App\Models\Question;
 use App\Services\AI\StoryIllustrationService;
@@ -26,7 +27,7 @@ class AiStoryIllustrationController extends Controller
         $isPrivateDraft = data_get($generation->request_payload, 'submission_mode') === 'draft';
         abort_unless(
             $generation->type === AiGenerationType::StoryQuestions
-            && (! $isPrivateDraft || $generation->requested_by === $request->user()->id)
+            && (! $isPrivateDraft || $generation->requested_by === $request->user()->id || $request->user()->hasRole(UserRole::Admin))
             && ($format === 'story' || data_get($generation->request_payload, 'use_illustration') === true || $hasRecoverableVisualSpec)
             && $generation->status === AiGenerationStatus::Completed,
             404,

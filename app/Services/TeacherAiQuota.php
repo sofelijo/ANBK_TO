@@ -6,6 +6,7 @@ use App\Enums\AiGenerationStatus;
 use App\Enums\AiGenerationType;
 use App\Enums\UserRole;
 use App\Models\AiGeneration;
+use App\Models\School;
 use App\Models\User;
 use Illuminate\Validation\ValidationException;
 
@@ -36,14 +37,24 @@ class TeacherAiQuota
 
     public function limits(User $user): array
     {
+        return $this->limitsForSchool($user->school);
+    }
+
+    public function limitsForSchool(?School $school): array
+    {
         return [
-            'question_variants' => $this->limit($user, AiGenerationType::QuestionVariants),
-            'story_questions' => $this->limit($user, AiGenerationType::StoryQuestions),
-            'story_illustrations' => $this->limit($user, AiGenerationType::StoryIllustration),
+            'question_variants' => $this->limitForSchool($school, AiGenerationType::QuestionVariants),
+            'story_questions' => $this->limitForSchool($school, AiGenerationType::StoryQuestions),
+            'story_illustrations' => $this->limitForSchool($school, AiGenerationType::StoryIllustration),
         ];
     }
 
     private function limit(User $user, AiGenerationType $type): int
+    {
+        return $this->limitForSchool($user->school, $type);
+    }
+
+    private function limitForSchool(?School $school, AiGenerationType $type): int
     {
         $setting = match ($type) {
             AiGenerationType::QuestionVariants => 'question_variants',
@@ -62,7 +73,7 @@ class TeacherAiQuota
             return $default;
         }
 
-        return max(0, (int) data_get($user->school?->settings, self::SETTINGS_KEY.'.'.$setting, $default));
+        return max(0, (int) data_get($school?->settings, self::SETTINGS_KEY.'.'.$setting, $default));
     }
 
     private function label(AiGenerationType $type): string

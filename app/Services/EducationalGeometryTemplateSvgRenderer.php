@@ -25,7 +25,7 @@ class EducationalGeometryTemplateSvgRenderer
         'fraction_circle', 'fraction_bar', 'fraction_equivalent_circles', 'fraction_equivalent_bars',
         'cube_net', 'cuboid_net', 'triangular_prism_net', 'cylinder_net', 'cone_net',
         'cartesian_point', 'cartesian_line', 'translation', 'reflection', 'rotation', 'dilation',
-        'ruler', 'clock', 'protractor', 'number_line', 'scale_bar',
+        'ruler', 'clock', 'protractor_90', 'protractor', 'protractor_270', 'protractor_360', 'number_line', 'scale_bar',
     ];
 
     public function render(string $template, float $dimensionA, ?float $dimensionB, string $unit, ?float $dimensionC = null, float $zoom = 1, float $offsetX = 0, float $offsetY = 0, array $options = []): string
@@ -142,7 +142,10 @@ class EducationalGeometryTemplateSvgRenderer
             'dilation' => $this->coordinatePlane('Dilatasi k = '.$aNumber, 3, 2, false, false, false, null, (float) $dimensionA),
             'ruler' => $this->ruler($aNumber, $unit),
             'clock' => $this->clock((float) $dimensionA, (float) $dimensionB),
-            'protractor' => $this->protractor((float) $dimensionA),
+            'protractor_90' => $this->protractor((float) $dimensionA, 90, $options['protractor_angles'] ?? []),
+            'protractor' => $this->protractor((float) $dimensionA, 180, $options['protractor_angles'] ?? []),
+            'protractor_270' => $this->protractor((float) $dimensionA, 270, $options['protractor_angles'] ?? []),
+            'protractor_360' => $this->protractor((float) $dimensionA, 360, $options['protractor_angles'] ?? []),
             'number_line' => $this->numberLine((float) $dimensionA, (float) $dimensionB),
             'scale_bar' => $this->scaleBar($aNumber, max(1, (int) $dimensionB), $unit),
         };
@@ -152,7 +155,19 @@ class EducationalGeometryTemplateSvgRenderer
         $offsetY = max(-300, min(300, $offsetY));
         $transform = 'translate(500 300) translate('.$this->number($offsetX).' '.$this->number($offsetY).') scale('.$this->number($zoom).') translate(-500 -300)';
 
-        return '<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="600" viewBox="0 0 1000 600" role="img" aria-label="Template geometri"><defs><marker id="arrow-start" markerWidth="10" markerHeight="10" refX="2" refY="5" orient="auto"><path d="M10 0L0 5l10 5" fill="#334155"/></marker><marker id="arrow-end" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0l10 5-10 5" fill="#334155"/></marker></defs><style>.shape{fill:#dbeafe;stroke:#1e40af;stroke-width:6}.dimension{stroke:#334155;stroke-width:4;marker-start:url(#arrow-start);marker-end:url(#arrow-end)}.guide{stroke:#f59e0b;stroke-width:4;stroke-dasharray:12 10}.angle{fill:none;stroke:#f59e0b;stroke-width:4}.label{font:700 26px sans-serif;fill:#0f172a}.top{fill:#bfdbfe;stroke:#1e40af;stroke-width:5}.front{fill:#60a5fa;stroke:#1e40af;stroke-width:5}.side{fill:#2563eb;stroke:#1e40af;stroke-width:5}</style><rect width="1000" height="600" fill="#fff"/><g transform="'.$transform.'">'.$content.'</g></svg>';
+        $overlays = collect($options['overlays'] ?? [])->map(function (array $overlay): string {
+            $content = $this->escape((string) ($overlay['content'] ?? ''));
+            $x = max(0, min(1000, (float) ($overlay['x'] ?? 500)));
+            $y = max(0, min(600, (float) ($overlay['y'] ?? 300)));
+            $fontSize = max(12, min(160, (float) ($overlay['font_size'] ?? 32)));
+            $rotation = max(-180, min(180, (float) ($overlay['rotation'] ?? 0)));
+            $color = preg_match('/^#[0-9A-Fa-f]{6}$/', (string) ($overlay['color'] ?? '')) ? $overlay['color'] : '#0f172a';
+            $weight = ($overlay['type'] ?? 'text') === 'symbol' ? 700 : 600;
+
+            return '<text x="'.$this->number($x).'" y="'.$this->number($y).'" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif" font-size="'.$this->number($fontSize).'" font-weight="'.$weight.'" fill="'.$color.'" transform="rotate('.$this->number($rotation).' '.$this->number($x).' '.$this->number($y).')">'.$content.'</text>';
+        })->implode('');
+
+        return '<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="600" viewBox="0 0 1000 600" role="img" aria-label="Template geometri"><defs><marker id="arrow-start" markerWidth="10" markerHeight="10" refX="2" refY="5" orient="auto"><path d="M10 0L0 5l10 5" fill="#334155"/></marker><marker id="arrow-end" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0l10 5-10 5" fill="#334155"/></marker></defs><style>.shape{fill:#dbeafe;stroke:#1e40af;stroke-width:6}.dimension{stroke:#334155;stroke-width:4;marker-start:url(#arrow-start);marker-end:url(#arrow-end)}.guide{stroke:#f59e0b;stroke-width:4;stroke-dasharray:12 10}.angle{fill:none;stroke:#f59e0b;stroke-width:4}.label{font:700 26px sans-serif;fill:#0f172a}.top{fill:#bfdbfe;stroke:#1e40af;stroke-width:5}.front{fill:#60a5fa;stroke:#1e40af;stroke-width:5}.side{fill:#2563eb;stroke:#1e40af;stroke-width:5}</style><rect width="1000" height="600" fill="#fff"/><g transform="'.$transform.'">'.$content.'</g>'.$overlays.'</svg>';
     }
 
     private function angle(string $template, float $degrees): string
@@ -259,15 +274,56 @@ class EducationalGeometryTemplateSvgRenderer
         return $content.'<line x1="500" y1="290" x2="'.$hourX.'" y2="'.$hourY.'" stroke="#0f172a" stroke-width="12"/><line x1="500" y1="290" x2="'.$minuteX.'" y2="'.$minuteY.'" stroke="#ef4444" stroke-width="7"/><circle cx="500" cy="290" r="12" fill="#0f172a"/><text x="500" y="570" class="label" text-anchor="middle">'.sprintf('%02d:%02d', (int) $hour, (int) $minute).'</text>';
     }
 
-    private function protractor(float $degrees): string
+    private function protractor(float $degrees, int $span, array $angles = []): string
     {
-        $radians = deg2rad(min(180, $degrees));
-        $rayX = 500 + (300 * cos($radians));
-        $rayY = 430 - (300 * sin($radians));
-        $arcX = 500 + (110 * cos($radians));
-        $arcY = 430 - (110 * sin($radians));
+        $degrees = max(0, min($span, $degrees));
+        $radians = deg2rad($degrees);
+        $rayX = 500 + (210 * cos($radians));
+        $rayY = 300 - (210 * sin($radians));
+        $arcX = 500 + (85 * cos($radians));
+        $arcY = 300 - (85 * sin($radians));
+        $body = match ($span) {
+            90 => '<path d="M500 300L730 300A230 230 0 0 0 500 70Z" fill="#dbeafe" stroke="#1e40af" stroke-width="7"/>',
+            180 => '<path d="M270 300A230 230 0 0 1 730 300Z" fill="#dbeafe" stroke="#1e40af" stroke-width="7"/>',
+            270 => '<circle cx="500" cy="300" r="230" fill="#dbeafe" stroke="#1e40af" stroke-width="7"/><path d="M500 300L730 300A230 230 0 0 1 500 530Z" fill="#fff" stroke="#1e40af" stroke-width="7"/>',
+            360 => '<circle cx="500" cy="300" r="230" fill="#dbeafe" stroke="#1e40af" stroke-width="7"/>',
+        };
+        $angleMark = $degrees >= 360
+            ? '<circle cx="500" cy="300" r="85" class="angle"/>'
+            : '<path d="M585 300A85 85 0 '.($degrees > 180 ? 1 : 0).' 0 '.$this->number($arcX).' '.$this->number($arcY).'" class="angle"/>';
 
-        return '<path d="M170 430a330 330 0 0 1 660 0Z" fill="#dbeafe" stroke="#1e40af" stroke-width="7"/><line x1="500" y1="430" x2="820" y2="430" stroke="#334155" stroke-width="4"/><line x1="500" y1="430" x2="'.$this->number($rayX).'" y2="'.$this->number($rayY).'" stroke="#334155" stroke-width="4"/><path d="M610 430A110 110 0 0 0 '.$this->number($arcX).' '.$this->number($arcY).'" class="angle"/><text x="620" y="335" class="label">'.$this->number($degrees).'°</text>';
+        if ($angles === []) {
+            return $body.'<line x1="500" y1="300" x2="710" y2="300" stroke="#334155" stroke-width="4"/><line x1="500" y1="300" x2="'.$this->number($rayX).'" y2="'.$this->number($rayY).'" stroke="#334155" stroke-width="4"/>'.$angleMark.'<circle cx="500" cy="300" r="7" fill="#0f172a"/><text x="650" y="255" class="label">'.$this->number($degrees).'°</text>';
+        }
+
+        $content = $body.'<line x1="500" y1="300" x2="710" y2="300" stroke="#334155" stroke-width="4"/>';
+        $colors = ['#f59e0b', '#7c3aed', '#0891b2', '#dc2626', '#16a34a', '#db2777', '#4f46e5', '#ea580c'];
+        $start = 0.0;
+        foreach ($angles as $index => $item) {
+            $size = max(0, (float) ($item['degrees'] ?? 0));
+            $end = min($span, $start + $size);
+            $startRadians = deg2rad($start);
+            $endRadians = deg2rad($end);
+            $middleRadians = deg2rad(($start + $end) / 2);
+            $radius = 82 + (($index % 3) * 18);
+            $startX = 500 + ($radius * cos($startRadians));
+            $startY = 300 - ($radius * sin($startRadians));
+            $endX = 500 + ($radius * cos($endRadians));
+            $endY = 300 - ($radius * sin($endRadians));
+            $labelX = 500 + (150 * cos($middleRadians));
+            $labelY = 300 - (150 * sin($middleRadians));
+            $outerX = 500 + (210 * cos($endRadians));
+            $outerY = 300 - (210 * sin($endRadians));
+            $label = $this->escape((string) ($item['label'] ?? 's'.($index + 1)));
+            $value = (bool) ($item['asked'] ?? false) ? '?' : $this->number($size).'°';
+            $arc = $size >= 360
+                ? '<circle cx="500" cy="300" r="'.$radius.'" fill="none" stroke="'.$colors[$index % count($colors)].'" stroke-width="6"/>'
+                : '<path d="M'.$this->number($startX).' '.$this->number($startY).'A'.$radius.' '.$radius.' 0 '.($size > 180 ? 1 : 0).' 0 '.$this->number($endX).' '.$this->number($endY).'" fill="none" stroke="'.$colors[$index % count($colors)].'" stroke-width="6"/>';
+            $content .= '<line x1="500" y1="300" x2="'.$this->number($outerX).'" y2="'.$this->number($outerY).'" stroke="#334155" stroke-width="4"/>'.$arc.'<text x="'.$this->number($labelX).'" y="'.$this->number($labelY).'" class="label" text-anchor="middle">'.$label.' = '.$value.'</text>';
+            $start = $end;
+        }
+
+        return $content.'<circle cx="500" cy="300" r="7" fill="#0f172a"/>';
     }
 
     private function numberLine(float $minimum, float $maximum): string

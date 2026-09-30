@@ -52,7 +52,75 @@ class QuestionWorkflowTest extends TestCase
                 ->where('questions.data', fn ($questions): bool => $questions->contains('id', $question->id)));
 
         $this->actingAs($otherTeacher)->get(route('questions.show', $question))->assertOk();
+        $this->actingAs($otherTeacher)
+            ->get(route('questions.show', ['question' => $question, 'student_preview' => 1]))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Questions/Show')
+                ->where('studentPreview', true));
         $this->actingAs($otherTeacher)->get(route('questions.edit', $question))->assertOk();
+    }
+
+    public function test_draft_is_private_until_submitted_for_review(): void
+    {
+        [$author, $competency] = $this->teacherAndCompetency();
+        $question = $this->question($author, $competency);
+        $question->update([
+            'status' => QuestionStatus::Draft,
+            'metadata' => ['verification_locked' => true],
+        ]);
+
+        $otherSchool = School::create(['name' => 'Sekolah Pengakses Review', 'npsn' => '10000997']);
+        $otherTeacher = User::create([
+            'school_id' => $otherSchool->id,
+            'name' => 'Guru Pengakses Review',
+            'email' => 'guru-pengakses-review@example.com',
+            'password' => 'password',
+            'role' => UserRole::Teacher,
+            'is_active' => true,
+            'approved_at' => now(),
+            'email_verified_at' => now(),
+        ]);
+
+        $this->actingAs($otherTeacher)
+            ->get(route('questions.index'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('questions.data', fn ($questions): bool => ! $questions->contains('id', $question->id)));
+        $this->actingAs($otherTeacher)->get(route('questions.show', $question))->assertNotFound();
+
+        $this->actingAs($author)
+            ->get(route('questions.show', $question))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Questions/Show')
+                ->where('question.status', 'draft')
+                ->where('canManageStatus', true));
+
+        $this->actingAs($author)
+            ->post(route('questions.update-status', $question), ['status' => 'review'])
+            ->assertRedirect();
+
+        $question->refresh();
+        $this->assertSame(QuestionStatus::Review, $question->status);
+        $this->assertFalse((bool) data_get($question->metadata, 'verification_locked'));
+        $this->assertSame(1, $question->verifications()->count());
+        $this->assertSame($author->id, $question->verifications()->first()->verifier_id);
+
+        $this->actingAs($otherTeacher)
+            ->get(route('questions.index'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('questions.data', fn ($questions): bool => $questions->contains('id', $question->id)));
+        $this->actingAs($otherTeacher)->get(route('questions.show', $question))->assertOk();
+
+        // Data lama dapat berstatus review tetapi masih membawa flag lock draft.
+        $question->update(['metadata' => ['verification_locked' => true]]);
+
+        $this->actingAs($otherTeacher)
+            ->get(route('questions.index'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('questions.data', fn ($questions): bool => $questions->contains('id', $question->id)));
+        $this->actingAs($otherTeacher)
+            ->post(route('questions.approve', $question))
+            ->assertSessionHasNoErrors();
+        $this->assertSame(2, $question->verifications()->count());
     }
 
     public function test_teacher_can_open_manual_and_ai_question_creation_flows(): void
@@ -86,6 +154,54 @@ class QuestionWorkflowTest extends TestCase
                 ->component('Questions/StoryCreate')
                 ->where('selectedSubjectId', $competency->subject_id)
                 ->where('creationMode', 'json'));
+    }
+
+    public function test_question_catalog_does_not_expose_another_schools_subjects_or_competencies(): void
+    {
+        [$teacher, $ownCompetency] = $this->teacherAndCompetency();
+        $otherSchool = School::create(['name' => 'Sekolah Lain', 'npsn' => '10000998']);
+        $otherSubject = Subject::create([
+            'school_id' => $otherSchool->id,
+            'code' => 'MTK-OTHER',
+            'name' => 'Matematika Sekolah Lain',
+        ]);
+        $otherCompetency = Competency::create([
+            'school_id' => $otherSchool->id,
+            'subject_id' => $otherSubject->id,
+            'code' => 'MTK-OTHER-6',
+            'domain' => 'Bilangan',
+            'name' => 'Kompetensi Sekolah Lain',
+            'grade_level' => 6,
+        ]);
+        $globalSubject = Subject::create([
+            'school_id' => null,
+            'code' => 'MAT',
+            'name' => 'Matematika',
+        ]);
+        $globalCompetency = Competency::create([
+            'school_id' => null,
+            'subject_id' => $globalSubject->id,
+            'code' => 'NUM6-GLOBAL',
+            'domain' => 'Bilangan',
+            'name' => 'Kompetensi Global',
+            'grade_level' => 6,
+        ]);
+
+        $this->actingAs($teacher)
+            ->get(route('questions.create'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('subjects', fn ($subjects): bool => collect($subjects)->pluck('id')->sort()->values()->all() === collect([
+                    $ownCompetency->subject_id,
+                    $globalSubject->id,
+                ])->sort()->values()->all())
+                ->where('competencies', fn ($competencies): bool => collect($competencies)->pluck('id')->sort()->values()->all() === collect([
+                    $ownCompetency->id,
+                    $globalCompetency->id,
+                ])->sort()->values()->all()));
+
+        $this->actingAs($teacher)
+            ->post(route('questions.store'), $this->payload($otherCompetency, 'Soal lintas sekolah?'))
+            ->assertSessionHasErrors('subject_id');
     }
 
     public function test_teacher_can_import_chatgpt_json_as_draft_questions(): void
@@ -331,6 +447,16 @@ class QuestionWorkflowTest extends TestCase
             'stimulus_svg_template' => 'square',
             'stimulus_svg_dimension_a' => '8',
             'stimulus_svg_unit' => 'cm',
+            'stimulus_svg_overlays' => [[
+                'id' => '11111111-1111-4111-8111-111111111111',
+                'type' => 'text',
+                'content' => 'Titik A & B',
+                'x' => 420,
+                'y' => 180,
+                'font_size' => 36,
+                'color' => '#7c3aed',
+                'rotation' => -15,
+            ]],
             'stimulus_image_width' => 600,
             'stimulus_image_height' => 360,
             'stimulus_image_alt' => 'Persegi dengan panjang sisi delapan sentimeter',
@@ -342,8 +468,11 @@ class QuestionWorkflowTest extends TestCase
         $this->assertSame('square', data_get($question->metadata, 'illustration.template'));
         $this->assertEquals(8.0, data_get($question->metadata, 'illustration.dimension_a'));
         $this->assertSame(600, data_get($question->metadata, 'illustration.display_width'));
+        $this->assertSame('Titik A & B', data_get($question->metadata, 'illustration.overlays.0.content'));
         Storage::disk('public')->assertExists($path);
         $this->assertStringContainsString('sisi = 8 cm', Storage::disk('public')->get($path));
+        $this->assertStringContainsString('Titik A &amp; B', Storage::disk('public')->get($path));
+        $this->assertStringContainsString('rotate(-15 420 180)', Storage::disk('public')->get($path));
     }
 
     public function test_geometry_templates_are_grouped_and_support_three_dimensions(): void
@@ -355,7 +484,7 @@ class QuestionWorkflowTest extends TestCase
             ->get(route('questions.create'))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('Questions/Create')
-                ->has('stimulusSvgTemplates', 88)
+                ->has('stimulusSvgTemplates', 91)
                 ->where('stimulusSvgTemplates.9.category', '2d')
                 ->where('stimulusSvgTemplates.9.family', 'triangle')
                 ->where('stimulusSvgTemplates.9.label', 'Siku-siku')
@@ -387,6 +516,33 @@ class QuestionWorkflowTest extends TestCase
         $svg = Storage::disk('public')->get($path);
         $this->assertStringContainsString('t = 5 cm', $svg);
         $this->assertStringContainsString('translate(-50 25) scale(0.8)', $svg);
+    }
+
+    public function test_protractor_can_render_multiple_labeled_angles_and_hide_the_asked_value(): void
+    {
+        Storage::fake('public');
+        [$teacher, $competency] = $this->teacherAndCompetency();
+
+        $this->actingAs($teacher)->post(route('questions.store'), [
+            ...$this->payload($competency, 'Berapakah besar sudut y?'),
+            'stimulus_image_source' => 'template',
+            'stimulus_svg_template' => 'protractor_270',
+            'stimulus_svg_dimension_a' => '60',
+            'stimulus_svg_unit' => '',
+            'stimulus_protractor_angles' => [
+                ['id' => '11111111-1111-4111-8111-111111111111', 'label' => 'x', 'degrees' => 60, 'asked' => false],
+                ['id' => '22222222-2222-4222-8222-222222222222', 'label' => 'y', 'degrees' => 75, 'asked' => true],
+                ['id' => '33333333-3333-4333-8333-333333333333', 'label' => 'z', 'degrees' => 135, 'asked' => false],
+            ],
+        ])->assertSessionHasNoErrors()->assertRedirect();
+
+        $question = Question::firstOrFail();
+        $this->assertTrue((bool) data_get($question->metadata, 'illustration.protractor_angles.1.asked'));
+        $svg = Storage::disk('public')->get(data_get($question->metadata, 'illustration.path'));
+        $this->assertStringContainsString('x = 60°', $svg);
+        $this->assertStringContainsString('y = ?', $svg);
+        $this->assertStringNotContainsString('y = 75°', $svg);
+        $this->assertStringContainsString('z = 135°', $svg);
     }
 
     public function test_fraction_reasoning_template_stores_two_to_four_independent_circles_without_revealing_answers(): void
@@ -529,19 +685,26 @@ class QuestionWorkflowTest extends TestCase
             'stimulus_visual_type' => 'pie_chart',
             'stimulus_visual_title' => 'Hobi Siswa',
             'stimulus_pie_unit' => 'siswa',
-            'stimulus_pie_show_percentages' => true,
+            'stimulus_pie_total_mode' => 'custom',
+            'stimulus_pie_total' => 40,
+            'stimulus_pie_total_asked' => true,
             'stimulus_pie_items' => [
-                ['label' => 'Membaca', 'value' => '12'],
-                ['label' => 'Olahraga', 'value' => '18'],
-                ['label' => 'Musik', 'value' => '10'],
+                ['label' => 'Membaca', 'value' => '12', 'asked' => true, 'auto_calculate' => false],
+                ['label' => 'Olahraga', 'value' => '18', 'asked' => true, 'auto_calculate' => false],
+                ['label' => 'Musik', 'value' => '10', 'asked' => false, 'auto_calculate' => true],
             ],
         ])->assertRedirect();
 
         $pieQuestion = Question::where('title', 'Diagram lingkaran hobi')->firstOrFail();
         $this->assertSame('pie_chart', data_get($pieQuestion->metadata, 'stimulus_visual.type'));
-        $this->assertTrue(data_get($pieQuestion->metadata, 'stimulus_visual.show_percentages'));
+        $this->assertSame('custom', data_get($pieQuestion->metadata, 'stimulus_visual.total_mode'));
+        $this->assertEquals(40.0, data_get($pieQuestion->metadata, 'stimulus_visual.total'));
+        $this->assertTrue(data_get($pieQuestion->metadata, 'stimulus_visual.total_asked'));
         $this->assertSame('Olahraga', data_get($pieQuestion->metadata, 'stimulus_visual.items.1.label'));
         $this->assertEquals(18.0, data_get($pieQuestion->metadata, 'stimulus_visual.items.1.value'));
+        $this->assertTrue(data_get($pieQuestion->metadata, 'stimulus_visual.items.0.asked'));
+        $this->assertTrue(data_get($pieQuestion->metadata, 'stimulus_visual.items.1.asked'));
+        $this->assertTrue(data_get($pieQuestion->metadata, 'stimulus_visual.items.2.auto_calculate'));
     }
 
     public function test_teacher_can_create_a_matching_question_with_distractor(): void
@@ -1999,6 +2162,11 @@ class QuestionWorkflowTest extends TestCase
                 ['content' => 'Jawaban salah', 'is_correct' => false],
             ],
             'accepted_answers' => [],
+            // The browser submits empty structured-answer arrays for other question types.
+            'matching_pairs' => [],
+            'matching_distractors' => [],
+            'matrix_columns' => [],
+            'matrix_rows' => [],
         ];
     }
 }

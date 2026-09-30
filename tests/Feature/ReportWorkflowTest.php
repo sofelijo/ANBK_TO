@@ -14,6 +14,7 @@ use App\Models\School;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
 class ReportWorkflowTest extends TestCase
@@ -38,6 +39,29 @@ class ReportWorkflowTest extends TestCase
             ->get(route('reports.export', ['assessment_id' => $assessment->id]))
             ->assertOk()
             ->assertHeader('content-type', 'text/csv; charset=UTF-8');
+    }
+
+    public function test_admin_can_view_report_attempts_from_every_school(): void
+    {
+        [$teacher, $assessment] = $this->scenario();
+        $adminSchool = School::create(['name' => 'Sekolah Admin', 'npsn' => '10000012']);
+        $admin = User::create([
+            'school_id' => $adminSchool->id,
+            'name' => 'Admin Global',
+            'email' => 'admin-global-report@example.com',
+            'password' => 'password',
+            'role' => UserRole::Admin,
+            'email_verified_at' => now(),
+            'is_active' => true,
+        ]);
+
+        $this->assertNotSame($teacher->school_id, $admin->school_id);
+
+        $this->actingAs($admin)
+            ->get(route('reports.index', ['assessment_id' => $assessment->id]))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('summary.completed', 1)
+                ->where('students.0.name', 'Murid'));
     }
 
     public function test_advanced_item_analysis_flags_problematic_questions_and_calculates_reliability(): void

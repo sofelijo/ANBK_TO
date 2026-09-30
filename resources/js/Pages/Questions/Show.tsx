@@ -1,6 +1,7 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import StimulusVisual, { StimulusVisualData } from '@/Components/StimulusVisual';
 import PositionedImage from '@/Components/PositionedImage';
+import FormattedText from '@/Components/FormattedText';
 import { Head, Link, router } from '@inertiajs/react';
 import { useState } from 'react';
 
@@ -67,16 +68,36 @@ export default function Show({
     latestGeneration,
     packageUsage = [],
     availablePackages = [],
+    studentPreview = false,
+    canManageStatus = false,
+    isAuthor = false,
 }: {
     question: Question;
     verification: VerificationSummary;
     latestGeneration?: { status: string; error?: string };
     packageUsage?: PackageUsage[];
     availablePackages?: PackageUsage[];
+    studentPreview?: boolean;
+    canManageStatus?: boolean;
+    isAuthor?: boolean;
 }) {
     const [isVerifying, setIsVerifying] = useState(false);
     const [selectedPackageId, setSelectedPackageId] = useState<number | ''>(availablePackages[0]?.id ?? '');
     const [isUpdatingPackage, setIsUpdatingPackage] = useState(false);
+    const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+
+    if (studentPreview) return <QuestionStudentPreview question={question} />;
+
+    const status = questionStatusPresentation(question.status);
+
+    const submitForReview = () => {
+        if (isUpdatingStatus) return;
+        setIsUpdatingStatus(true);
+        router.post(route('questions.update-status', question.id), { status: 'review' }, {
+            preserveScroll: true,
+            onFinish: () => setIsUpdatingStatus(false),
+        });
+    };
 
     const verifyQuestion = () => {
         if (verification.currentUserVerified || isVerifying) return;
@@ -111,11 +132,15 @@ export default function Show({
             header={
                 <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
                     <div>
-                        <p className="text-sm font-medium text-emerald-600">Detail soal #{question.id}</p>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-sm font-medium text-emerald-600">Detail soal #{question.id}</p>
+                            <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${status.className}`}>Status: {status.label}</span>
+                        </div>
                         <h1 className="mt-1 text-2xl font-bold text-slate-900">{question.title || 'Soal tanpa judul'}</h1>
                     </div>
                     <div className="flex flex-wrap gap-2">
                         <Link href={route('questions.index')} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">← Bank soal</Link>
+                        <a href={`${route('questions.show', question.id)}?student_preview=1`} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-indigo-300 bg-white px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50">Preview Siswa ↗</a>
                         <Link href={route('questions.edit', question.id)} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800">Edit soal</Link>
                     </div>
                 </div>
@@ -130,9 +155,11 @@ export default function Show({
                                 <div className="max-w-2xl">
                                     <p className={`text-xs font-bold uppercase tracking-wide ${verification.currentUserVerified ? 'text-emerald-700' : 'text-blue-700'}`}>Langkah verifikasi guru</p>
                                     <h2 className="mt-1 text-xl font-bold text-slate-900">
-                                        {verification.currentUserVerified ? 'Verifikasi Anda sudah tercatat' : 'Periksa soal, lalu catat verifikasi Anda'}
+                                        {question.status === 'draft' ? 'Soal masih berstatus Draft' : verification.currentUserVerified ? 'Verifikasi Anda sudah tercatat' : 'Periksa soal, lalu catat verifikasi Anda'}
                                     </h2>
-                                    {verification.currentUserVerified ? (
+                                    {question.status === 'draft' ? (
+                                        <p className="mt-2 text-sm leading-6 text-slate-600">Ajukan verifikasi melalui tombol di bagian atas agar guru lain dapat memeriksa soal ini.</p>
+                                    ) : verification.currentUserVerified ? (
                                         <p className="mt-2 text-sm leading-6 text-slate-600">
                                             Tidak perlu melakukan apa pun lagi. {verification.remaining > 0 ? `Soal ini masih menunggu ${verification.remaining} guru lain.` : 'Syarat verifikasi sudah terpenuhi.'}
                                         </p>
@@ -170,6 +197,7 @@ export default function Show({
                                         </button>
                                     )}
                                     {verification.currentUserVerified && <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-center text-xs font-semibold text-emerald-700">✓ Anda sudah memverifikasi soal ini</p>}
+                                    {question.status === 'draft' && canManageStatus && <button type="button" disabled={isUpdatingStatus} onClick={submitForReview} className="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-500 disabled:cursor-wait disabled:opacity-60">{isUpdatingStatus ? 'Mengajukan…' : isAuthor ? 'Ajukan dan verifikasi' : 'Ajukan verifikasi'}</button>}
                                 </div>
                             </div>
                         </div>
@@ -188,7 +216,6 @@ export default function Show({
 
                     <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                         <div className="flex flex-wrap gap-2 text-xs font-semibold">
-                            <span className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-700">{question.status}</span>
                             <span className="rounded-full bg-indigo-50 px-3 py-1 text-indigo-700">Versi {question.version}</span>
                             <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">Kelas {question.grade_level}</span>
                             <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">Kesulitan {question.difficulty}</span>
@@ -205,14 +232,14 @@ export default function Show({
                         )}
                         {question.illustration_url && <PositionedImage src={question.illustration_url} alt={question.metadata?.illustration?.alt || 'Ilustrasi soal'} width={question.metadata?.illustration?.display_width || 800} height={question.metadata?.illustration?.display_height || 450} zoom={question.metadata?.illustration?.display_zoom || 1} offsetX={question.metadata?.illustration?.display_offset_x || 0} offsetY={question.metadata?.illustration?.display_offset_y || 0} className="mt-6" />}
                         {question.metadata?.stimulus_visual && <StimulusVisual visual={question.metadata.stimulus_visual} className="mt-6" />}
-                        {question.stimulus && <div className="mt-6 whitespace-pre-wrap rounded-xl bg-slate-50 p-5 leading-7 text-slate-700">{question.stimulus}</div>}
-                        <h2 className="mt-6 text-lg font-semibold leading-7 text-slate-900">{question.prompt}</h2>
+                        {question.stimulus && <FormattedText text={question.stimulus} className="mt-6 block whitespace-pre-wrap rounded-xl bg-slate-50 p-5 leading-7 text-slate-700" />}
+                        <h2 className="mt-6 text-lg font-semibold leading-7 text-slate-900"><FormattedText text={question.prompt} /></h2>
                         {question.options.length > 0 && (
                             <div className="mt-5 space-y-3">
                                 {question.options.map((option) => (
                                     <div key={option.id} className={`flex gap-3 rounded-xl border p-4 ${option.is_correct ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200'}`}>
                                         {question.type === 'multiple_choice' ? <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border text-xs ${option.is_correct ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-300 text-transparent'}`}>✓</span> : <span className="font-semibold">{option.label}.</span>}
-                                        <span>{option.content}</span>
+                                        <FormattedText text={option.content} />
                                     </div>
                                 ))}
                             </div>
@@ -245,7 +272,7 @@ export default function Show({
                             </div>
                         )}
                         {question.metadata?.accepted_answers && <p className="mt-5 text-sm text-emerald-700">Jawaban diterima: {question.metadata.accepted_answers.join(', ')}</p>}
-                        {(question.explanation || question.explanation_image_url) && <div className="mt-6 border-t border-slate-100 pt-5"><h3 className="text-sm font-semibold text-slate-900">Pembahasan</h3>{question.explanation && <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">{question.explanation}</p>}{question.explanation_image_url && <img src={question.explanation_image_url} alt={question.metadata?.explanation_illustration?.alt || 'Gambar pembahasan soal'} className="mt-4 max-h-96 w-full rounded-xl border border-slate-200 bg-white object-contain" />}</div>}
+                        {(question.explanation || question.explanation_image_url) && <div className="mt-6 border-t border-slate-100 pt-5"><h3 className="text-sm font-semibold text-slate-900">Pembahasan</h3>{question.explanation && <FormattedText text={question.explanation} className="mt-2 block whitespace-pre-wrap text-sm leading-6 text-slate-600" />}{question.explanation_image_url && <img src={question.explanation_image_url} alt={question.metadata?.explanation_illustration?.alt || 'Gambar pembahasan soal'} className="mt-4 max-h-96 w-full rounded-xl border border-slate-200 bg-white object-contain" />}</div>}
                     </article>
 
                     <section>
@@ -346,6 +373,80 @@ export default function Show({
             </div>
         </AuthenticatedLayout>
     );
+}
+
+function QuestionStudentPreview({ question }: { question: Question }) {
+    const [selectedOptions, setSelectedOptions] = useState<number[]>([]);
+    const [matrixAnswers, setMatrixAnswers] = useState<Record<string, string>>({});
+    const hasStimulus = Boolean(question.illustration_url || question.metadata?.stimulus_visual || question.stimulus);
+    const matchingChoices = [
+        ...(question.metadata?.matching_pairs || []).map((pair) => ({ id: pair.right_id, content: pair.right })),
+        ...(question.metadata?.matching_distractors || []).map((item) => ({ id: item.id, content: item.content })),
+    ];
+
+    const chooseOption = (optionId: number) => setSelectedOptions((current) => question.type === 'single_choice'
+        ? [optionId]
+        : current.includes(optionId) ? current.filter((id) => id !== optionId) : [...current, optionId]);
+
+    return (
+        <div className="min-h-screen bg-slate-100">
+            <Head title="Preview POV Siswa" />
+            <header className="bg-slate-900 text-white shadow-sm">
+                <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
+                    <div><p className="text-xs font-bold uppercase tracking-widest text-emerald-300">Preview POV siswa</p><h1 className="mt-1 font-bold">Simulasi Adaptif</h1></div>
+                    <button type="button" onClick={() => window.close()} className="rounded-lg border border-white/20 px-3 py-2 text-sm font-semibold text-white hover:bg-white/10">Tutup tab</button>
+                </div>
+            </header>
+            <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
+                    <span>Ini tampilan siswa. Jawaban pada preview tidak disimpan.</span><span className="font-bold">Soal 1 dari 1</span>
+                </div>
+                <main className={`grid overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm ${hasStimulus ? 'lg:grid-cols-2' : ''}`}>
+                    {hasStimulus && <aside className="border-b border-slate-200 bg-slate-50/70 p-5 lg:border-b-0 lg:border-r sm:p-6">
+                        <p className="text-xs font-bold uppercase tracking-wider text-indigo-600">Stimulus</p>
+                        {question.illustration_url && <PositionedImage src={question.illustration_url} alt={question.metadata?.illustration?.alt || 'Ilustrasi soal'} width={question.metadata?.illustration?.display_width || 800} height={question.metadata?.illustration?.display_height || 450} zoom={question.metadata?.illustration?.display_zoom || 1} offsetX={question.metadata?.illustration?.display_offset_x || 0} offsetY={question.metadata?.illustration?.display_offset_y || 0} className="mt-3" />}
+                        {question.metadata?.stimulus_visual && <StimulusVisual visual={question.metadata.stimulus_visual} className="mt-3" />}
+                        {question.stimulus && <FormattedText text={question.stimulus} className="mt-4 block whitespace-pre-wrap text-sm leading-7 text-slate-700" />}
+                    </aside>}
+                    <section className="min-w-0 p-5 sm:p-7">
+                        <p className="text-xs font-bold uppercase tracking-wider text-emerald-600">Soal 1</p>
+                        <h2 className="mt-2 text-lg font-semibold leading-8 text-slate-900"><FormattedText text={question.prompt} /></h2>
+
+                        {['single_choice', 'multiple_choice'].includes(question.type) && <div className="mt-6 space-y-3">
+                            {question.options.map((option) => {
+                                const selected = selectedOptions.includes(option.id);
+                                return <button key={option.id} type="button" onClick={() => chooseOption(option.id)} className={`flex w-full items-start gap-3 rounded-xl border p-4 text-left transition ${selected ? 'border-indigo-500 bg-indigo-50 ring-1 ring-indigo-500' : 'border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/40'}`}>
+                                    <span className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center border text-xs font-bold ${question.type === 'single_choice' ? 'rounded-full' : 'rounded-md'} ${selected ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300 text-slate-500'}`}>{selected ? '✓' : option.label}</span>
+                                    <FormattedText text={option.content} className="leading-6 text-slate-800" />
+                                </button>;
+                            })}
+                        </div>}
+
+                        {question.type === 'short_answer' && <label className="mt-6 block text-sm font-semibold text-slate-700">Jawaban Anda<input type="text" className="mt-2 block w-full rounded-xl border-slate-300 focus:border-indigo-500 focus:ring-indigo-500" placeholder="Ketik jawaban" /></label>}
+
+                        {question.type === 'matching' && <div className="mt-6 space-y-3">
+                            <p className="text-sm text-slate-600">Pilih pasangan yang sesuai untuk setiap pernyataan.</p>
+                            {(question.metadata?.matching_pairs || []).map((pair, index) => <label key={pair.left_id} className="grid gap-2 rounded-xl border border-slate-200 p-3 text-sm sm:grid-cols-2 sm:items-center"><span><strong className="mr-2 text-slate-500">{index + 1}.</strong>{pair.left}</span><select defaultValue="" className="rounded-lg border-slate-300 text-sm focus:border-indigo-500 focus:ring-indigo-500"><option value="" disabled>Pilih pasangan</option>{matchingChoices.map((choice) => <option key={choice.id} value={choice.id}>{choice.content}</option>)}</select></label>)}
+                        </div>}
+
+                        {question.type === 'category_matrix' && <div className="mt-6 space-y-3">
+                            <p className="text-sm text-slate-600">Pilih satu jawaban untuk setiap pernyataan.</p>
+                            {(question.metadata?.matrix_rows || []).map((row, index) => <div key={row.id} className="rounded-xl border border-slate-200 p-3"><p className="text-sm leading-6 text-slate-800"><strong className="mr-2 text-slate-500">{index + 1}.</strong>{row.statement}</p><div className="mt-3 flex flex-wrap gap-2">{(question.metadata?.matrix_columns || []).map((column) => { const selected = matrixAnswers[row.id] === column.id; return <button key={column.id} type="button" onClick={() => setMatrixAnswers((current) => ({ ...current, [row.id]: column.id }))} className={`rounded-lg border px-3 py-2 text-xs font-semibold ${selected ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300 text-slate-700 hover:bg-indigo-50'}`}>{column.label}</button>; })}</div></div>)}
+                        </div>}
+                    </section>
+                </main>
+            </div>
+        </div>
+    );
+}
+
+function questionStatusPresentation(status: string): { label: string; className: string } {
+    return {
+        draft: { label: 'Draft', className: 'bg-amber-100 text-amber-800' },
+        review: { label: 'Menunggu verifikasi', className: 'bg-blue-100 text-blue-800' },
+        published: { label: 'Terbit', className: 'bg-emerald-100 text-emerald-800' },
+        archived: { label: 'Diarsipkan', className: 'bg-slate-200 text-slate-700' },
+    }[status] || { label: status, className: 'bg-slate-100 text-slate-700' };
 }
 
 function formatVerificationDate(value: string): string {

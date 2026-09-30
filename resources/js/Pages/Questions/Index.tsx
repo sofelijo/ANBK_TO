@@ -1,4 +1,5 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
+import FormattedText from '@/Components/FormattedText';
 import Modal from '@/Components/Modal';
 import { Head, Link, router } from '@inertiajs/react';
 import { FormEvent, useState } from 'react';
@@ -281,7 +282,7 @@ export default function Index({ questions, subjects, filters }: Props) {
                                                     <p className="mt-2 line-clamp-1 text-xs font-medium text-slate-500">{question.title}</p>
                                                 )}
                                                 <h2 className="mt-1 rounded-lg border-l-4 border-emerald-500 bg-emerald-50/70 px-4 py-3 text-base font-bold leading-relaxed text-slate-900 transition group-hover:bg-emerald-50 sm:text-lg">
-                                                    {question.prompt}
+                                                    <FormattedText text={question.prompt} />
                                                 </h2>
 
                                                 <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\UserRole;
 use App\Models\Competency;
 use App\Models\CompetencyResult;
 use App\Models\QuestionBlueprint;
@@ -22,9 +23,12 @@ class CompetencyController extends Controller
     {
         $schoolId = $request->user()->school_id;
         $competencies = Competency::query()
-            ->where(fn ($query) => $query
-                ->whereNull('school_id')
-                ->orWhere('school_id', $schoolId))
+            ->when(
+                ! $request->user()->hasRole(UserRole::Admin),
+                fn ($query) => $query->where(fn ($scope) => $scope
+                    ->whereNull('school_id')
+                    ->orWhere('school_id', $schoolId)),
+            )
             ->when($request->string('search')->toString(), function ($query, string $search) {
                 $query->where(fn ($nested) => $nested
                     ->where('code', 'like', "%{$search}%")
@@ -63,7 +67,7 @@ class CompetencyController extends Controller
                     ? $competency->subcompetency_questions_count
                     : $competency->questions_count,
                 'children_count' => $competency->children_count,
-                'can_manage' => $competency->school_id === $schoolId,
+                'can_manage' => $request->user()->hasRole(UserRole::Admin) || $competency->school_id === $schoolId,
             ]),
             'subjects' => $this->subjects($request),
             'filters' => $request->only(['search', 'grade_level', 'subject_id']),
@@ -101,7 +105,7 @@ class CompetencyController extends Controller
         unset($data['question_blueprint_ids']);
 
         $competency = Competency::create([
-            'school_id' => $request->user()->school_id,
+            'school_id' => $request->user()->hasRole(UserRole::Admin) ? null : $request->user()->school_id,
             ...$data,
         ]);
         $this->syncQuestionBlueprints($competency, $questionBlueprintIds);
@@ -165,6 +169,7 @@ class CompetencyController extends Controller
 
     private function validatedData(Request $request, ?Competency $competency = null): array
     {
+        $schoolId = $request->user()->hasRole(UserRole::Admin) ? null : $request->user()->school_id;
         $gradeLevel = $request->integer('grade_level');
         $normalizedGradeLevel = [5 => 6, 8 => 9, 11 => 12][$gradeLevel] ?? $gradeLevel;
 
@@ -182,7 +187,7 @@ class CompetencyController extends Controller
             $suffix = 2;
             while (
                 Competency::query()
-                    ->where('school_id', $request->user()->school_id)
+                    ->where('school_id', $schoolId)
                     ->where('code', $rawCode)
                     ->when($competency, fn ($q) => $q->whereKeyNot($competency->id))
                     ->exists()
@@ -206,7 +211,7 @@ class CompetencyController extends Controller
                 'max:50',
                 'regex:/^[A-Z0-9][A-Z0-9._-]*$/',
                 Rule::unique('competencies', 'code')
-                    ->where('school_id', $request->user()->school_id)
+                    ->where('school_id', $schoolId)
                     ->ignore($competency),
             ],
             'domain' => ['nullable', 'string', 'max:100'],
@@ -224,9 +229,12 @@ class CompetencyController extends Controller
 
         $subjectExists = Subject::query()
             ->whereKey($data['subject_id'])
-            ->where(fn ($query) => $query
-                ->whereNull('school_id')
-                ->orWhere('school_id', $request->user()->school_id))
+            ->when(
+                ! $request->user()->hasRole(UserRole::Admin),
+                fn ($query) => $query->where(fn ($scope) => $scope
+                    ->whereNull('school_id')
+                    ->orWhere('school_id', $request->user()->school_id)),
+            )
             ->exists();
 
         if (! $subjectExists) {
@@ -236,9 +244,12 @@ class CompetencyController extends Controller
         $validBlueprintCount = QuestionBlueprint::query()
             ->whereIn('id', $data['question_blueprint_ids'] ?? [])
             ->where('subject_id', $data['subject_id'])
-            ->where(fn ($query) => $query
-                ->whereNull('school_id')
-                ->orWhere('school_id', $request->user()->school_id))
+            ->when(
+                ! $request->user()->hasRole(UserRole::Admin),
+                fn ($query) => $query->where(fn ($scope) => $scope
+                    ->whereNull('school_id')
+                    ->orWhere('school_id', $request->user()->school_id)),
+            )
             ->count();
         if ($validBlueprintCount !== count($data['question_blueprint_ids'] ?? [])) {
             throw ValidationException::withMessages([
@@ -267,9 +278,12 @@ class CompetencyController extends Controller
     private function questionBlueprints(Request $request)
     {
         return QuestionBlueprint::query()
-            ->where(fn ($query) => $query
-                ->whereNull('school_id')
-                ->orWhere('school_id', $request->user()->school_id))
+            ->when(
+                ! $request->user()->hasRole(UserRole::Admin),
+                fn ($query) => $query->where(fn ($scope) => $scope
+                    ->whereNull('school_id')
+                    ->orWhere('school_id', $request->user()->school_id)),
+            )
             ->whereHas('subject', fn ($query) => $query->where('code', 'BIND'))
             ->orderBy('name')
             ->get(['id', 'subject_id', 'code', 'name']);
@@ -283,9 +297,12 @@ class CompetencyController extends Controller
 
         $parent = Competency::query()
             ->whereKey($data['parent_id'])
-            ->where(fn ($query) => $query
-                ->whereNull('school_id')
-                ->orWhere('school_id', $request->user()->school_id))
+            ->when(
+                ! $request->user()->hasRole(UserRole::Admin),
+                fn ($query) => $query->where(fn ($scope) => $scope
+                    ->whereNull('school_id')
+                    ->orWhere('school_id', $request->user()->school_id)),
+            )
             ->first();
 
         if (! $parent) {
@@ -318,9 +335,12 @@ class CompetencyController extends Controller
         $excludedIds = $competency ? [$competency->id, ...$this->descendantIds($competency)] : [];
 
         return Competency::query()
-            ->where(fn ($query) => $query
-                ->whereNull('school_id')
-                ->orWhere('school_id', $request->user()->school_id))
+            ->when(
+                ! $request->user()->hasRole(UserRole::Admin),
+                fn ($query) => $query->where(fn ($scope) => $scope
+                    ->whereNull('school_id')
+                    ->orWhere('school_id', $request->user()->school_id)),
+            )
             ->when($excludedIds, fn ($query) => $query->whereNotIn('id', $excludedIds))
             ->whereNull('parent_id')
             ->orderBy('grade_level')
@@ -345,15 +365,21 @@ class CompetencyController extends Controller
 
     private function ensureManageable(Request $request, Competency $competency): void
     {
-        abort_unless($competency->school_id === $request->user()->school_id, 404);
+        abort_unless(
+            $request->user()->hasRole(UserRole::Admin) || $competency->school_id === $request->user()->school_id,
+            404,
+        );
     }
 
     private function subjects(Request $request)
     {
         return Subject::query()
-            ->where(fn ($query) => $query
-                ->whereNull('school_id')
-                ->orWhere('school_id', $request->user()->school_id))
+            ->when(
+                ! $request->user()->hasRole(UserRole::Admin),
+                fn ($query) => $query->where(fn ($scope) => $scope
+                    ->whereNull('school_id')
+                    ->orWhere('school_id', $request->user()->school_id)),
+            )
             ->orderBy('name')
             ->get(['id', 'code', 'name']);
     }

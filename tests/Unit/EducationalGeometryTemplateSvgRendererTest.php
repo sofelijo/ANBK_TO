@@ -79,6 +79,17 @@ class EducationalGeometryTemplateSvgRendererTest extends TestCase
         $angle = $renderer->render('angle_acute', 30, null, 'cm');
         $this->assertStringContainsString('x2="690.53" y2="250"', $angle);
 
+        $quarterProtractor = $renderer->render('protractor_90', 45, null, 'cm');
+        $this->assertStringContainsString('M500 300L730 300A230 230 0 0 0 500 70Z', $quarterProtractor);
+
+        $reflexProtractor = $renderer->render('protractor_270', 135, null, 'cm');
+        $this->assertStringContainsString('<circle cx="500" cy="300" r="230"', $reflexProtractor);
+        $this->assertStringContainsString('M500 300L730 300A230 230 0 0 1 500 530Z', $reflexProtractor);
+
+        $fullProtractor = $renderer->render('protractor_360', 225, null, 'cm');
+        $this->assertStringContainsString('<circle cx="500" cy="300" r="230"', $fullProtractor);
+        $this->assertStringContainsString('225°', $fullProtractor);
+
         $line = $renderer->render('cartesian_line', 1, 0, 'cm');
         $this->assertStringContainsString('x1="225" y1="500" x2="775" y2="100"', $line);
 

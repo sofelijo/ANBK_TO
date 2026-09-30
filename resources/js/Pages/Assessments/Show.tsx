@@ -1,5 +1,6 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import Modal from '@/Components/Modal';
+import FormattedText from '@/Components/FormattedText';
 import { Head, Link, router } from '@inertiajs/react';
 import { useState } from 'react';
 
@@ -749,7 +750,7 @@ export default function Show({
                                 <span className="mb-2 block text-xs font-bold uppercase tracking-wide text-amber-900">
                                     📄 Stimulus / Teks Bacaan
                                 </span>
-                                <div className="whitespace-pre-wrap">{previewBundle.stimulus}</div>
+                                <FormattedText text={previewBundle.stimulus} className="block whitespace-pre-wrap" />
                             </div>
                         )}
 
@@ -770,7 +771,7 @@ export default function Show({
                                     </div>
 
                                     <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm font-bold leading-relaxed text-slate-900">
-                                        {question.prompt}
+                                        <FormattedText text={question.prompt} />
                                     </p>
 
                                     {question.options && question.options.length > 0 && (
@@ -783,7 +784,7 @@ export default function Show({
                                                     <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${option.is_correct ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
                                                         {option.label || String.fromCharCode(65 + optionIndex)}
                                                     </span>
-                                                    <span>{option.content || option.option_text}</span>
+                                                    <FormattedText text={option.content || option.option_text || ''} />
                                                     {option.is_correct && <span className="ml-auto text-emerald-700">✓ Kunci</span>}
                                                 </div>
                                             ))}
@@ -793,7 +794,7 @@ export default function Show({
                                     {question.explanation && (
                                         <div className="mt-3 rounded-lg border border-indigo-200 bg-indigo-50/70 p-3 text-xs leading-relaxed text-indigo-950">
                                             <span className="font-bold">💡 Pembahasan: </span>
-                                            <span className="whitespace-pre-wrap">{question.explanation}</span>
+                                            <FormattedText text={question.explanation} className="whitespace-pre-wrap" />
                                         </div>
                                     )}
                                 </section>
@@ -862,7 +863,7 @@ export default function Show({
                                 <span className="font-bold text-amber-900 block mb-1 text-xs uppercase tracking-wide">
                                     📄 Stimulus / Teks Bacaan:
                                 </span>
-                                <div className="whitespace-pre-wrap">{previewQuestion.stimulus}</div>
+                                <FormattedText text={previewQuestion.stimulus} className="block whitespace-pre-wrap" />
                             </div>
                         )}
 
@@ -871,7 +872,7 @@ export default function Show({
                                 ❓ Teks Pertanyaan:
                             </span>
                             <p className="text-sm font-bold text-slate-900 leading-relaxed bg-slate-50 p-4 rounded-xl border border-slate-200">
-                                {previewQuestion.prompt}
+                                <FormattedText text={previewQuestion.prompt} />
                             </p>
                         </div>
 
@@ -903,7 +904,7 @@ export default function Show({
                                                 >
                                                     {isMcma ? '✓' : labelLetter}
                                                 </span>
-                                                <span className="flex-1 text-sm">{text}</span>
+                                                <FormattedText text={text} className="flex-1 text-sm" />
                                                 {opt.is_correct && (
                                                     <span className="text-[10px] font-extrabold uppercase tracking-wide text-emerald-800 bg-emerald-200/80 px-2.5 py-1 rounded-full shrink-0">
                                                         ✓ Kunci Jawaban
@@ -921,7 +922,7 @@ export default function Show({
                                 <span className="font-bold text-indigo-900 block mb-1 uppercase tracking-wide">
                                     💡 Pembahasan:
                                 </span>
-                                <div className="whitespace-pre-wrap">{previewQuestion.explanation}</div>
+                                <FormattedText text={previewQuestion.explanation} className="block whitespace-pre-wrap" />
                             </div>
                         )}
 

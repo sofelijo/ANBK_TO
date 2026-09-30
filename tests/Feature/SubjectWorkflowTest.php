@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\UserRole;
 use App\Models\Competency;
+use App\Models\QuestionBlueprint;
 use App\Models\School;
 use App\Models\Subject;
 use App\Models\User;
@@ -88,6 +89,41 @@ class SubjectWorkflowTest extends TestCase
 
         $this->actingAs($student)->get(route('subjects.index'))->assertForbidden();
         $this->actingAs($operator)->get(route('subjects.index'))->assertForbidden();
+    }
+
+    public function test_admin_can_access_catalog_records_from_every_school(): void
+    {
+        [$teacher] = $this->users();
+        $adminSchool = School::create(['name' => 'Sekolah Admin Global', 'npsn' => '10000022']);
+        $admin = $this->user($adminSchool, 'Admin Global', 'admin-global-catalog@example.com', UserRole::Admin);
+        $subject = Subject::create([
+            'school_id' => $teacher->school_id,
+            'code' => 'BIND-GLOBAL-ACCESS',
+            'name' => 'Bahasa Indonesia Lintas Sekolah',
+        ]);
+        $competency = Competency::create([
+            'school_id' => $teacher->school_id,
+            'subject_id' => $subject->id,
+            'code' => 'BIND-GLOBAL-6',
+            'domain' => 'Literasi',
+            'name' => 'Kompetensi Lintas Sekolah',
+            'grade_level' => 6,
+        ]);
+        $blueprint = QuestionBlueprint::create([
+            'school_id' => $teacher->school_id,
+            'subject_id' => $subject->id,
+            'code' => 'GLOBAL-ACCESS',
+            'name' => 'Tipe Lintas Sekolah',
+        ]);
+
+        $this->actingAs($admin)
+            ->get(route('subjects.index', ['search' => 'BIND-GLOBAL-ACCESS']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('subjects.0.id', $subject->id)
+                ->where('subjects.0.can_manage', true));
+
+        $this->actingAs($admin)->get(route('competencies.edit', $competency))->assertOk();
+        $this->actingAs($admin)->get(route('question-types.edit', $blueprint))->assertOk();
     }
 
     private function users(): array

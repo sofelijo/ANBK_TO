@@ -81,6 +81,30 @@ class ChatWorkflowTest extends TestCase
             ->assertNotFound();
     }
 
+    public function test_admin_can_access_student_chats_from_all_schools(): void
+    {
+        [$teacher, $student, , $otherStudent] = $this->users();
+        $admin = User::create([
+            'school_id' => $teacher->school_id,
+            'name' => 'Admin Global',
+            'email' => 'admin-global-chat@example.com',
+            'password' => 'password',
+            'role' => UserRole::Admin,
+            'email_verified_at' => now(),
+            'is_active' => true,
+        ]);
+        $room = ChatRoom::create(['school_id' => $otherStudent->school_id, 'student_id' => $otherStudent->id]);
+
+        $this->actingAs($admin)
+            ->get(route('teacher-chat.index'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('students', fn ($students) => collect($students)->contains('id', $student->id)
+                    && collect($students)->contains('id', $otherStudent->id)));
+
+        $this->actingAs($admin)->get(route('teacher-chat.show', $otherStudent))->assertOk();
+        $this->actingAs($admin)->getJson(route('chat.messages.index', $room))->assertOk();
+    }
+
     public function test_chat_is_disabled_during_active_tryout(): void
     {
         config()->set('ai.driver', 'fake');

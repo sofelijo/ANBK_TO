@@ -30,6 +30,7 @@ class TeacherAiQuotaTest extends TestCase
 
         $this->actingAs($admin)
             ->patch(route('admin.ai-quotas.update'), [
+                'school_id' => $school->id,
                 'question_variants' => 7,
                 'story_questions' => 12,
                 'story_illustrations' => 4,

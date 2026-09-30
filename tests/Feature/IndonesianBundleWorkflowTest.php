@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Enums\AiGenerationStatus;
+use App\Enums\AiGenerationType;
 use App\Enums\QuestionStatus;
 use App\Enums\QuestionType;
 use App\Enums\UserRole;
@@ -39,7 +41,7 @@ class IndonesianBundleWorkflowTest extends TestCase
                 ->where('slots.2.cognitive_level', 'evaluation'));
 
         $this->actingAs($admin)
-            ->patch(route('admin.indonesian-bundles.update'), ['slots' => $slots])
+            ->patch(route('admin.indonesian-bundles.update'), ['school_id' => $school->id, 'slots' => $slots])
             ->assertRedirect();
 
         $this->assertSame($slots, data_get($school->fresh()->settings, 'indonesian_bundle_defaults.slots'));
@@ -52,9 +54,9 @@ class IndonesianBundleWorkflowTest extends TestCase
 
     public function test_duplicate_formats_or_levels_are_rejected(): void
     {
-        [, $admin] = $this->context();
+        [$school, $admin] = $this->context();
 
-        $this->actingAs($admin)->patch(route('admin.indonesian-bundles.update'), ['slots' => [
+        $this->actingAs($admin)->patch(route('admin.indonesian-bundles.update'), ['school_id' => $school->id, 'slots' => [
             ['answer_format' => 'single_choice', 'cognitive_level' => 'textual'],
             ['answer_format' => 'single_choice', 'cognitive_level' => 'inferential'],
             ['answer_format' => 'multiple_choice', 'cognitive_level' => 'evaluation'],
@@ -865,8 +867,8 @@ class IndonesianBundleWorkflowTest extends TestCase
             'provider' => 'fake',
             'model' => 'fake-model',
             'input_hash' => hash('sha256', 'bundle-test-disabled-types'),
-            'type' => \App\Enums\AiGenerationType::StoryQuestions,
-            'status' => \App\Enums\AiGenerationStatus::Completed,
+            'type' => AiGenerationType::StoryQuestions,
+            'status' => AiGenerationStatus::Completed,
             'request_payload' => [
                 'subject_id' => $subject->id,
                 'competency_id' => $competency->id,

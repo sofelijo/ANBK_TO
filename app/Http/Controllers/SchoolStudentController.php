@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\UserRole;
+use App\Models\School;
 use App\Models\User;
 use App\Services\AuditLogger;
 use Illuminate\Http\RedirectResponse;
@@ -20,10 +21,14 @@ class SchoolStudentController extends Controller
             'search' => ['nullable', 'string', 'max:100'],
             'grade' => ['nullable', 'integer', Rule::in([6, 9, 12])],
             'status' => ['nullable', Rule::in(['active', 'inactive', 'pending'])],
+            'school_id' => ['nullable', 'integer', Rule::exists('schools', 'id')],
         ]);
-        $school = $request->user()->school()->firstOrFail();
+        $isAdmin = $request->user()->hasRole(UserRole::Admin);
+        $school = $isAdmin
+            ? ($request->integer('school_id') ? School::query()->findOrFail($request->integer('school_id')) : null)
+            : $request->user()->school()->firstOrFail();
         $baseQuery = User::query()
-            ->where('school_id', $school->id)
+            ->when($school, fn ($query) => $query->where('school_id', $school->id))
             ->where('role', UserRole::Student);
 
         $students = (clone $baseQuery)
@@ -45,6 +50,7 @@ class SchoolStudentController extends Controller
                 'attempts',
                 'attempts as completed_attempts_count' => fn ($query) => $query->whereNotNull('submitted_at'),
             ])
+            ->with('school:id,name,npsn')
             ->orderBy('grade_level')
             ->orderBy('name')
             ->paginate(25)
@@ -61,10 +67,13 @@ class SchoolStudentController extends Controller
                 'completed_attempts_count' => $student->completed_attempts_count,
                 'last_login_at' => $student->last_login_at,
                 'registered_at' => $student->created_at,
+                'school' => $student->school?->only(['id', 'name', 'npsn']),
             ]);
 
         return Inertia::render('Schools/Students/Index', [
-            'school' => $school->only(['name', 'npsn']),
+            'school' => $school?->only(['id', 'name', 'npsn']),
+            'schools' => $isAdmin ? School::query()->orderBy('name')->get(['id', 'name', 'npsn']) : [],
+            'canChooseSchool' => $isAdmin,
             'students' => $students,
             'filters' => $filters,
             'summary' => [
@@ -79,7 +88,8 @@ class SchoolStudentController extends Controller
     public function approve(Request $request, User $student, AuditLogger $auditLogger): RedirectResponse
     {
         abort_unless(
-            $student->school_id === $request->user()->school_id && $student->role === UserRole::Student,
+            $student->role === UserRole::Student
+            && ($request->user()->hasRole(UserRole::Admin) || $student->school_id === $request->user()->school_id),
             404,
         );
 

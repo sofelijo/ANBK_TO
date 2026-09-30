@@ -15,7 +15,8 @@ class ChatMessageController extends Controller
         $user = $request->user();
         abort_unless(
             ($user->role === UserRole::Student && $room->student_id === $user->id)
-            || (in_array($user->role, [UserRole::Admin, UserRole::Teacher], true) && $room->school_id === $user->school_id),
+            || $user->role === UserRole::Admin
+            || ($user->role === UserRole::Teacher && $room->school_id === $user->school_id),
             404,
         );
 

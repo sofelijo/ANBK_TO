@@ -1,4 +1,5 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
+import FormattedText from '@/Components/FormattedText';
 import { Head, Link, router } from '@inertiajs/react';
 import { useState } from 'react';
 
@@ -63,9 +64,9 @@ export default function ResultPage({ attempt, questionReviews }: { attempt: Atte
                                     <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Soal {question.position}</p>
                                     <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${question.is_correct ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>{question.is_correct ? 'Benar' : 'Perlu dipelajari'}</span>
                                 </div>
-                                <p className="mt-3 font-medium leading-7 text-slate-900">{question.prompt}</p>
+                                <p className="mt-3 font-medium leading-7 text-slate-900"><FormattedText text={question.prompt} /></p>
                                 {question.explanation
-                                    ? <p className="mt-4 whitespace-pre-wrap rounded-lg bg-indigo-50 p-4 text-sm leading-7 text-slate-700">{question.explanation}</p>
+                                    ? <FormattedText text={question.explanation} className="mt-4 block whitespace-pre-wrap rounded-lg bg-indigo-50 p-4 text-sm leading-7 text-slate-700" />
                                     : !question.explanation_image_url && <p className="mt-4 text-sm italic text-slate-400">Belum ada pembahasan untuk soal ini.</p>}
                                 {question.explanation_image_url && <img src={question.explanation_image_url} alt={question.explanation_image_alt || 'Gambar pembahasan soal'} className="mt-4 max-h-[32rem] w-full rounded-xl border border-slate-200 bg-white object-contain" />}
                             </article>
@@ -80,7 +81,7 @@ export default function ResultPage({ attempt, questionReviews }: { attempt: Atte
                         {attempt.recommendations.length === 0 ? <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500">Belum ada soal latihan tambahan pada bank soal.</div> : attempt.recommendations.map((recommendation, index) => (
                             <article key={recommendation.id} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                                 <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600">Latihan {index + 1} · {recommendation.competency.name}</p>
-                                <p className="mt-3 font-medium leading-7 text-slate-900">{recommendation.question.prompt}</p>
+                                <p className="mt-3 font-medium leading-7 text-slate-900"><FormattedText text={recommendation.question.prompt} /></p>
                                 <p className="mt-2 text-sm text-slate-500">{recommendation.reason}</p>
                             </article>
                         ))}

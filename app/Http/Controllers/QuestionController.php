@@ -45,22 +45,17 @@ class QuestionController extends Controller
     public function index(Request $request): Response
     {
         $questions = Question::query()
-            ->where(function ($visibility) use ($request) {
-                $visibility
-                    // Draft hanya terlihat oleh pembuatnya
-                    ->where(function ($draft) use ($request) {
-                        $draft->where('status', QuestionStatus::Draft)
-                            ->where('author_id', $request->user()->id);
-                    })
-                    // Non-draft: tampil kecuali sedang dikunci verifikasi
-                    ->orWhere(function ($nonDraft) use ($request) {
-                        $nonDraft->where('status', '!=', QuestionStatus::Draft)
-                            ->where(function ($lockFilter) use ($request) {
-                                $lockFilter->where('author_id', $request->user()->id)
-                                    ->orWhereNull('metadata->verification_locked')
-                                    ->orWhere('metadata->verification_locked', false);
-                            });
-                    });
+            ->when(! $request->user()->hasRole(UserRole::Admin), function ($query) use ($request) {
+                $query->where(function ($visibility) use ($request) {
+                    $visibility
+                        // Draft hanya terlihat oleh pembuatnya
+                        ->where(function ($draft) use ($request) {
+                            $draft->where('status', QuestionStatus::Draft)
+                                ->where('author_id', $request->user()->id);
+                        })
+                        // Soal yang sudah diajukan atau diterbitkan bersifat global.
+                        ->orWhere('status', '!=', QuestionStatus::Draft);
+                });
             })
             ->whereNull('superseded_by_id')
             ->where(function ($query) {
@@ -173,7 +168,9 @@ class QuestionController extends Controller
             'competencies' => $this->competencies($request),
             'questionBlueprints' => $this->questionBlueprints($request),
             'assessments' => $this->assessmentsForQuestion($request),
-            'questionTypes' => $this->questionTypeConfiguration->options($request->user()->school),
+            'questionTypes' => $request->user()->hasRole(UserRole::Admin)
+                ? $this->questionTypeConfiguration->allOptions()
+                : $this->questionTypeConfiguration->options($request->user()->school),
             'selectedSubjectId' => $selectedSubjectId,
             'stimulusSvgTemplates' => $this->stimulusSvgTemplates(),
             'requiredVerifications' => QuestionVerificationService::requiredGlobally(),
@@ -195,6 +192,9 @@ class QuestionController extends Controller
                 $data,
                 $explanationIllustration,
             );
+            if ($intent === QuestionStatus::Review) {
+                $metadata['verification_locked'] = false;
+            }
             $question = DB::transaction(function () use ($data, $request, $metadata, $intent): Question {
                 $question = Question::create([
                     ...$this->attributes($data, $metadata),
@@ -271,6 +271,9 @@ class QuestionController extends Controller
 
         return Inertia::render('Questions/Show', [
             'question' => $question,
+            'studentPreview' => $request->boolean('student_preview'),
+            'canManageStatus' => $question->author_id === $request->user()->id || $request->user()->hasRole(UserRole::Admin),
+            'isAuthor' => $question->author_id === $request->user()->id,
             'packageUsage' => $packageUsage,
             'availablePackages' => $availablePackages,
             'stimulusSvgTemplates' => $this->stimulusSvgTemplates(),
@@ -300,7 +303,9 @@ class QuestionController extends Controller
             'competencies' => $this->competencies($request),
             'questionBlueprints' => $this->questionBlueprints($request),
             'assessments' => $this->assessmentsForQuestion($request),
-            'questionTypes' => $this->questionTypeConfiguration->options($request->user()->school, $question->type),
+            'questionTypes' => $request->user()->hasRole(UserRole::Admin)
+                ? $this->questionTypeConfiguration->allOptions()
+                : $this->questionTypeConfiguration->options($request->user()->school, $question->type),
             'question' => $question,
             'requiredVerifications' => QuestionVerificationService::requiredGlobally(),
             'returnGeneration' => $returnGeneration ? [
@@ -330,6 +335,9 @@ class QuestionController extends Controller
                 $data,
                 $explanationIllustration,
             );
+            if ($intent === QuestionStatus::Review) {
+                $metadata['verification_locked'] = false;
+            }
             $savedQuestion = DB::transaction(function () use ($question, $data, $request, $createRevision, $metadata, $intent): Question {
                 if ($createRevision) {
                     $revision = Question::create([
@@ -584,8 +592,13 @@ class QuestionController extends Controller
         );
     }
 
-    public function updateStatus(Request $request, Question $question, AuditLogger $auditLogger): RedirectResponse
-    {
+    public function updateStatus(
+        Request $request,
+        Question $question,
+        AuditLogger $auditLogger,
+        QuestionDuplicateDetector $duplicateDetector,
+        QuestionVerificationService $verificationService,
+    ): RedirectResponse {
         $this->ensureAccessible($request, $question);
         abort_unless(
             $question->author_id === $request->user()->id || $request->user()->hasRole(UserRole::Admin),
@@ -596,26 +609,46 @@ class QuestionController extends Controller
         $targetStatus = $request->input('status') === 'review' ? QuestionStatus::Review : QuestionStatus::Draft;
         $metadata = $question->metadata ?? [];
         $metadata['verification_locked'] = $targetStatus === QuestionStatus::Draft;
+        $isAuthorSubmitting = $targetStatus === QuestionStatus::Review && $question->author_id === $request->user()->id;
 
-        $question->update([
-            'status' => $targetStatus,
-            'metadata' => $metadata,
-        ]);
-
-        if ($targetStatus === QuestionStatus::Draft) {
-            $question->verifications()->delete();
+        if ($isAuthorSubmitting && $duplicateDetector->hasBlockingDuplicate($question)) {
+            throw ValidationException::withMessages([
+                'duplicate' => 'Soal belum dapat diajukan karena ditemukan soal lain yang sangat mirip. Edit atau hapus salah satunya terlebih dahulu.',
+            ]);
         }
 
+        $verificationResult = null;
+        DB::transaction(function () use ($question, $targetStatus, $metadata, $isAuthorSubmitting, $request, $verificationService, &$verificationResult): void {
+            $question->update([
+                'status' => $targetStatus,
+                'metadata' => $metadata,
+            ]);
+
+            if ($targetStatus === QuestionStatus::Draft) {
+                $question->verifications()->delete();
+            } elseif ($isAuthorSubmitting) {
+                $verificationResult = $verificationService->verify($question->fresh(), $request->user(), allowAuthor: true);
+            }
+        });
+
         $auditLogger->log($request, 'question.status_changed', $question, [
-            'status' => $targetStatus->value,
+            'status' => $question->fresh()->status->value,
         ]);
 
-        return back()->with(
-            'success',
-            $targetStatus === QuestionStatus::Review
-                ? 'Soal diajukan ke status menunggu verifikasi guru lain.'
-                : 'Soal dikembalikan ke status draft pribadi.',
-        );
+        if ($verificationResult && $verificationResult['created']) {
+            $auditLogger->log($request, 'question.verified', $question, [
+                'verification_count' => $verificationResult['count'],
+                'published' => $verificationResult['published'],
+            ]);
+        }
+
+        $message = $verificationResult
+            ? "Soal diajukan dan verifikasi Anda tercatat ({$verificationResult['count']}/".QuestionVerificationService::requiredFor($question).').'
+            : ($targetStatus === QuestionStatus::Review
+                ? 'Soal diajukan ke status menunggu verifikasi guru.'
+                : 'Soal dikembalikan ke status draft pribadi.');
+
+        return back()->with('success', $message);
     }
 
     private function verificationSummary(Question $question, User $user): array
@@ -642,7 +675,9 @@ class QuestionController extends Controller
 
     private function validatedData(Request $request, ?Question $existingQuestion = null): array
     {
-        $allowedQuestionTypes = $this->questionTypeConfiguration->enabledValues($request->user()->school);
+        $allowedQuestionTypes = $request->user()->hasRole(UserRole::Admin)
+            ? array_column(QuestionType::cases(), 'value')
+            : $this->questionTypeConfiguration->enabledValues($request->user()->school);
         if ($existingQuestion) {
             $allowedQuestionTypes[] = $existingQuestion->type->value;
         }
@@ -682,10 +717,14 @@ class QuestionController extends Controller
             'stimulus_pictogram_items.*.label' => ['required', 'string', 'max:60'],
             'stimulus_pictogram_items.*.value' => ['required', 'numeric', 'min:0', 'max:1000000000'],
             'stimulus_pie_unit' => ['exclude_unless:stimulus_visual_type,pie_chart', 'nullable', 'string', 'max:50'],
-            'stimulus_pie_show_percentages' => ['exclude_unless:stimulus_visual_type,pie_chart', 'required', 'boolean'],
+            'stimulus_pie_total_mode' => ['exclude_unless:stimulus_visual_type,pie_chart', 'nullable', Rule::in(['percentage', 'degrees', 'custom'])],
+            'stimulus_pie_total' => ['exclude_unless:stimulus_visual_type,pie_chart', 'nullable', 'numeric', 'gt:0', 'max:1000000000'],
+            'stimulus_pie_total_asked' => ['exclude_unless:stimulus_visual_type,pie_chart', 'nullable', 'boolean'],
             'stimulus_pie_items' => ['exclude_unless:stimulus_visual_type,pie_chart', 'required', 'array', 'between:2,12'],
             'stimulus_pie_items.*.label' => ['required', 'string', 'max:60'],
             'stimulus_pie_items.*.value' => ['required', 'numeric', 'min:0', 'max:1000000000'],
+            'stimulus_pie_items.*.asked' => ['nullable', 'boolean'],
+            'stimulus_pie_items.*.auto_calculate' => ['nullable', 'boolean'],
             'stimulus_image' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:10240', 'dimensions:max_width=5000,max_height=5000'],
             'stimulus_image_source' => ['nullable', Rule::in(['upload', 'template'])],
             'stimulus_svg_template' => ['nullable', Rule::in(EducationalGeometryTemplateSvgRenderer::TEMPLATES)],
@@ -701,6 +740,20 @@ class QuestionController extends Controller
             'stimulus_fraction_models.*.denominator' => ['required_with:stimulus_fraction_models', 'integer', 'between:1,24'],
             'stimulus_fraction_models.*.shaded_parts' => ['nullable', 'array', 'max:24'],
             'stimulus_fraction_models.*.shaded_parts.*' => ['integer', 'between:0,23'],
+            'stimulus_svg_overlays' => ['nullable', 'array', 'max:20'],
+            'stimulus_svg_overlays.*.id' => ['required', 'uuid', 'distinct'],
+            'stimulus_svg_overlays.*.type' => ['required', Rule::in(['text', 'symbol'])],
+            'stimulus_svg_overlays.*.content' => ['required', 'string', 'max:100'],
+            'stimulus_svg_overlays.*.x' => ['required', 'numeric', 'between:0,1000'],
+            'stimulus_svg_overlays.*.y' => ['required', 'numeric', 'between:0,600'],
+            'stimulus_svg_overlays.*.font_size' => ['required', 'numeric', 'between:12,160'],
+            'stimulus_svg_overlays.*.color' => ['required', 'regex:/^#[0-9A-Fa-f]{6}$/'],
+            'stimulus_svg_overlays.*.rotation' => ['required', 'numeric', 'between:-180,180'],
+            'stimulus_protractor_angles' => ['nullable', 'array', 'max:8'],
+            'stimulus_protractor_angles.*.id' => ['required', 'uuid', 'distinct'],
+            'stimulus_protractor_angles.*.label' => ['required', 'string', 'max:12', 'distinct'],
+            'stimulus_protractor_angles.*.degrees' => ['required', 'numeric', 'gt:0', 'max:360'],
+            'stimulus_protractor_angles.*.asked' => ['required', 'boolean'],
             'stimulus_image_width' => ['nullable', 'integer', 'between:100,1600'],
             'stimulus_image_height' => ['nullable', 'integer', 'between:100,1200'],
             'stimulus_upload_zoom' => ['nullable', 'numeric', 'between:0.25,3'],
@@ -721,22 +774,31 @@ class QuestionController extends Controller
             'options.*.is_correct' => ['required_with:options', 'boolean'],
             'accepted_answers' => ['array'],
             'accepted_answers.*' => ['nullable', 'string', 'max:500'],
-            'matching_pairs' => ['required_if:type,matching', 'array', 'between:2,8'],
+            'matching_pairs' => ['exclude_unless:type,matching', 'required', 'array', 'between:2,8'],
             'matching_pairs.*.left_id' => ['nullable', 'uuid', 'distinct'],
-            'matching_pairs.*.left' => ['required_if:type,matching', 'string', 'max:1000'],
+            'matching_pairs.*.left' => ['required', 'string', 'max:1000'],
             'matching_pairs.*.right_id' => ['nullable', 'uuid', 'distinct'],
-            'matching_pairs.*.right' => ['required_if:type,matching', 'string', 'max:1000'],
-            'matching_distractors' => ['array', 'max:4'],
+            'matching_pairs.*.right' => ['required', 'string', 'max:1000'],
+            'matching_distractors' => ['exclude_unless:type,matching', 'array', 'max:4'],
             'matching_distractors.*.id' => ['nullable', 'uuid', 'distinct'],
             'matching_distractors.*.content' => ['required_with:matching_distractors', 'string', 'max:1000'],
-            'matrix_columns' => ['required_if:type,category_matrix', 'array', 'between:2,4'],
+            'matrix_columns' => ['exclude_unless:type,category_matrix', 'required', 'array', 'between:2,4'],
             'matrix_columns.*.id' => ['nullable', 'uuid', 'distinct'],
-            'matrix_columns.*.label' => ['required_if:type,category_matrix', 'string', 'max:255'],
-            'matrix_rows' => ['required_if:type,category_matrix', 'array', 'between:2,10'],
+            'matrix_columns.*.label' => ['required', 'string', 'max:255'],
+            'matrix_rows' => ['exclude_unless:type,category_matrix', 'required', 'array', 'between:2,10'],
             'matrix_rows.*.id' => ['nullable', 'uuid', 'distinct'],
-            'matrix_rows.*.statement' => ['required_if:type,category_matrix', 'string', 'max:1000'],
-            'matrix_rows.*.correct_column_index' => ['required_if:type,category_matrix', 'integer', 'between:0,3'],
+            'matrix_rows.*.statement' => ['required', 'string', 'max:1000'],
+            'matrix_rows.*.correct_column_index' => ['required', 'integer', 'between:0,3'],
             'target_assessment_id' => ['nullable', 'integer', 'exists:assessments,id'],
+        ], [
+            'options.*.content.required_with' => 'Pilihan jawaban ke-:position belum diisi.',
+            'options.*.content.max' => 'Pilihan jawaban ke-:position maksimal 3.000 karakter.',
+            'options.*.is_correct.required_with' => 'Status kunci pilihan jawaban ke-:position belum ditentukan.',
+            'stimulus_pie_items.*.label.required' => 'Label kategori diagram ke-:position belum diisi.',
+            'stimulus_pie_items.*.label.max' => 'Label kategori diagram ke-:position maksimal 60 karakter.',
+            'stimulus_pie_items.*.value.required' => 'Nilai kategori diagram ke-:position belum diisi.',
+            'stimulus_pie_items.*.value.numeric' => 'Nilai kategori diagram ke-:position harus berupa angka.',
+            'stimulus_pie_items.*.value.min' => 'Nilai kategori diagram ke-:position tidak boleh negatif.',
         ]);
 
         $data['stimulus_visual_type'] ??= 'none';
@@ -856,6 +918,9 @@ class QuestionController extends Controller
                 'angle_straight' => $angle !== 180.0,
                 'angle_reflex' => $angle <= 180 || $angle >= 360,
                 'intersecting_lines', 'protractor' => $angle >= 180,
+                'protractor_90' => $angle > 90,
+                'protractor_270' => $angle > 270,
+                'protractor_360' => $angle > 360,
                 'rotation' => $angle > 360,
                 default => false,
             };
@@ -863,6 +928,31 @@ class QuestionController extends Controller
                 throw ValidationException::withMessages([
                     'stimulus_svg_dimension_a' => 'Besar sudut tidak sesuai dengan variasi yang dipilih.',
                 ]);
+            }
+            if (str_starts_with((string) $template, 'protractor')) {
+                $angles = $data['stimulus_protractor_angles'] ?? [];
+                $span = match ($template) {
+                    'protractor_90' => 90,
+                    'protractor_270' => 270,
+                    'protractor_360' => 360,
+                    default => 180,
+                };
+                if (count($angles) < 2) {
+                    throw ValidationException::withMessages([
+                        'stimulus_protractor_angles' => 'Busur derajat harus memiliki minimal dua sudut, misalnya x dan y.',
+                    ]);
+                }
+                $totalDegrees = collect($angles)->sum(fn (array $item): float => (float) $item['degrees']);
+                if (abs($totalDegrees - $span) > 0.000001) {
+                    throw ValidationException::withMessages([
+                        'stimulus_protractor_angles' => "Total besar sudut harus sama dengan {$span} derajat.",
+                    ]);
+                }
+                if (collect($angles)->where('asked', true)->count() !== 1) {
+                    throw ValidationException::withMessages([
+                        'stimulus_protractor_angles' => 'Pilih tepat satu sudut yang ditanyakan.',
+                    ]);
+                }
             }
             if ($template === 'clock' && ((float) $data['stimulus_svg_dimension_a'] < 0 || (float) $data['stimulus_svg_dimension_a'] > 23 || (float) $data['stimulus_svg_dimension_b'] < 0 || (float) $data['stimulus_svg_dimension_b'] > 59)) {
                 throw ValidationException::withMessages([
@@ -934,16 +1024,52 @@ class QuestionController extends Controller
         }
 
         if (($data['stimulus_visual_type'] ?? 'none') === 'pie_chart') {
+            $data['stimulus_pie_total_mode'] ??= 'custom';
+            $data['stimulus_pie_total_asked'] = $data['stimulus_pie_total_mode'] === 'custom'
+                && (bool) ($data['stimulus_pie_total_asked'] ?? false);
+            $hasExplicitAutoCategory = collect($data['stimulus_pie_items'])->contains(
+                fn (array $item): bool => array_key_exists('auto_calculate', $item)
+            );
+            $lastPieItemIndex = count($data['stimulus_pie_items']) - 1;
+            $data['stimulus_pie_items'] = collect($data['stimulus_pie_items'])->map(fn (array $item, int $index): array => [
+                ...$item,
+                'asked' => (bool) ($item['asked'] ?? false),
+                'auto_calculate' => $hasExplicitAutoCategory
+                    ? (bool) ($item['auto_calculate'] ?? false)
+                    : $index === $lastPieItemIndex,
+            ])->all();
             $total = collect($data['stimulus_pie_items'])->sum(fn (array $item): float => (float) $item['value']);
             if ($total <= 0) {
                 throw ValidationException::withMessages([
                     'stimulus_pie_items' => 'Diagram lingkaran membutuhkan minimal satu nilai yang lebih besar dari nol.',
                 ]);
             }
+            $targetTotal = match ($data['stimulus_pie_total_mode']) {
+                'percentage' => 100.0,
+                'degrees' => 360.0,
+                default => (float) ($data['stimulus_pie_total'] ?? $total),
+            };
+            $data['stimulus_pie_total'] = $targetTotal;
+            if (abs($total - $targetTotal) > 0.000001) {
+                throw ValidationException::withMessages([
+                    'stimulus_pie_items' => "Total seluruh kategori harus sama dengan {$targetTotal}.",
+                ]);
+            }
+            if (collect($data['stimulus_pie_items'])->where('auto_calculate', true)->count() !== 1) {
+                throw ValidationException::withMessages([
+                    'stimulus_pie_items' => 'Pilih tepat satu kategori yang dihitung otomatis.',
+                ]);
+            }
         }
 
         $subjectExists = Subject::query()
             ->whereKey($data['subject_id'])
+            ->when(
+                ! $request->user()->hasRole(UserRole::Admin),
+                fn ($query) => $query->where(fn ($scope) => $scope
+                    ->whereNull('school_id')
+                    ->orWhere('school_id', $request->user()->school_id)),
+            )
             ->exists();
 
         if (! $subjectExists) {
@@ -954,6 +1080,12 @@ class QuestionController extends Controller
 
         $competency = Competency::query()
             ->whereKey($data['competency_id'])
+            ->when(
+                ! $request->user()->hasRole(UserRole::Admin),
+                fn ($query) => $query->where(fn ($scope) => $scope
+                    ->whereNull('school_id')
+                    ->orWhere('school_id', $request->user()->school_id)),
+            )
             ->firstOrFail();
 
         if ($competency->subject_id !== (int) $data['subject_id']) {
@@ -973,6 +1105,12 @@ class QuestionController extends Controller
             $blueprintExists = QuestionBlueprint::query()
                 ->whereKey($blueprintId)
                 ->where('subject_id', $competency->subject_id)
+                ->when(
+                    ! $request->user()->hasRole(UserRole::Admin),
+                    fn ($query) => $query->where(fn ($scope) => $scope
+                        ->whereNull('school_id')
+                        ->orWhere('school_id', $request->user()->school_id)),
+                )
                 ->exists();
             if (! $blueprintExists) {
                 throw ValidationException::withMessages([
@@ -1152,10 +1290,14 @@ class QuestionController extends Controller
                 'type' => 'pie_chart',
                 'title' => trim($data['stimulus_visual_title'] ?? ''),
                 'unit' => trim($data['stimulus_pie_unit'] ?? ''),
-                'show_percentages' => (bool) $data['stimulus_pie_show_percentages'],
+                'total_mode' => $data['stimulus_pie_total_mode'],
+                'total' => (float) $data['stimulus_pie_total'],
+                'total_asked' => (bool) $data['stimulus_pie_total_asked'],
                 'items' => collect($data['stimulus_pie_items'])->map(fn (array $item): array => [
                     'label' => trim($item['label']),
                     'value' => (float) $item['value'],
+                    'asked' => (bool) $item['asked'],
+                    'auto_calculate' => (bool) $item['auto_calculate'],
                 ])->all(),
             ];
         } else {
@@ -1189,7 +1331,11 @@ class QuestionController extends Controller
                 (float) ($data['stimulus_svg_zoom'] ?? 1),
                 (float) ($data['stimulus_svg_offset_x'] ?? 0),
                 (float) ($data['stimulus_svg_offset_y'] ?? 0),
-                ['fraction_models' => $data['stimulus_fraction_models'] ?? []],
+                [
+                    'fraction_models' => $data['stimulus_fraction_models'] ?? [],
+                    'overlays' => $data['stimulus_svg_overlays'] ?? [],
+                    'protractor_angles' => $data['stimulus_protractor_angles'] ?? [],
+                ],
             );
             $path = 'question-stimuli/'.$request->user()->school_id.'/'.Str::uuid().'.svg';
             Storage::disk('public')->put($path, $svg, ['visibility' => 'public']);
@@ -1209,6 +1355,8 @@ class QuestionController extends Controller
                 'offset_x' => (float) ($data['stimulus_svg_offset_x'] ?? 0),
                 'offset_y' => (float) ($data['stimulus_svg_offset_y'] ?? 0),
                 'fraction_models' => $data['stimulus_fraction_models'] ?? null,
+                'overlays' => $data['stimulus_svg_overlays'] ?? [],
+                'protractor_angles' => $data['stimulus_protractor_angles'] ?? [],
                 'display_width' => (int) ($data['stimulus_image_width'] ?? 800),
                 'display_height' => (int) ($data['stimulus_image_height'] ?? 450),
             ];
@@ -1384,7 +1532,10 @@ class QuestionController extends Controller
             ['value' => 'number_line', 'category' => 'measurement', 'category_label' => 'Pengukuran', 'family' => 'length', 'family_label' => 'Panjang & skala', 'label' => 'Garis bilangan', 'dimension_a_label' => 'Nilai minimum', 'dimension_b_label' => 'Nilai maksimum', 'uses_unit' => false, 'allow_signed_dimensions' => true],
             ['value' => 'scale_bar', 'category' => 'measurement', 'category_label' => 'Pengukuran', 'family' => 'length', 'family_label' => 'Panjang & skala', 'label' => 'Skala batang', 'dimension_a_label' => 'Nilai total', 'dimension_b_label' => 'Jumlah interval'],
             ['value' => 'clock', 'category' => 'measurement', 'category_label' => 'Pengukuran', 'family' => 'time_angle', 'family_label' => 'Waktu & sudut', 'label' => 'Jam analog', 'dimension_a_label' => 'Jam (0–23)', 'dimension_b_label' => 'Menit (0–59)', 'uses_unit' => false, 'allow_signed_dimensions' => true],
-            ['value' => 'protractor', 'category' => 'measurement', 'category_label' => 'Pengukuran', 'family' => 'time_angle', 'family_label' => 'Waktu & sudut', 'label' => 'Busur derajat', 'dimension_a_label' => 'Besar sudut', 'uses_unit' => false],
+            ['value' => 'protractor_90', 'category' => 'measurement', 'category_label' => 'Pengukuran', 'family' => 'time_angle', 'family_label' => 'Waktu & sudut', 'label' => 'Busur derajat 90°', 'dimension_a_label' => 'Besar sudut', 'uses_unit' => false],
+            ['value' => 'protractor', 'category' => 'measurement', 'category_label' => 'Pengukuran', 'family' => 'time_angle', 'family_label' => 'Waktu & sudut', 'label' => 'Busur derajat 180°', 'dimension_a_label' => 'Besar sudut', 'uses_unit' => false],
+            ['value' => 'protractor_270', 'category' => 'measurement', 'category_label' => 'Pengukuran', 'family' => 'time_angle', 'family_label' => 'Waktu & sudut', 'label' => 'Busur derajat 270°', 'dimension_a_label' => 'Besar sudut', 'uses_unit' => false],
+            ['value' => 'protractor_360', 'category' => 'measurement', 'category_label' => 'Pengukuran', 'family' => 'time_angle', 'family_label' => 'Waktu & sudut', 'label' => 'Busur derajat 360°', 'dimension_a_label' => 'Besar sudut', 'uses_unit' => false],
         ];
     }
 
@@ -1404,6 +1555,12 @@ class QuestionController extends Controller
     private function competencies(Request $request)
     {
         return Competency::query()
+            ->when(
+                ! $request->user()->hasRole(UserRole::Admin),
+                fn ($query) => $query->where(fn ($scope) => $scope
+                    ->whereNull('school_id')
+                    ->orWhere('school_id', $request->user()->school_id)),
+            )
             ->orderBy('grade_level')
             ->orderBy('domain')
             ->orderBy('name')
@@ -1413,6 +1570,12 @@ class QuestionController extends Controller
     private function subjects(Request $request)
     {
         return Subject::query()
+            ->when(
+                ! $request->user()->hasRole(UserRole::Admin),
+                fn ($query) => $query->where(fn ($scope) => $scope
+                    ->whereNull('school_id')
+                    ->orWhere('school_id', $request->user()->school_id)),
+            )
             ->orderBy('name')
             ->get(['id', 'code', 'name', 'ai_question_format']);
     }
@@ -1420,6 +1583,12 @@ class QuestionController extends Controller
     private function questionBlueprints(Request $request)
     {
         return QuestionBlueprint::query()
+            ->when(
+                ! $request->user()->hasRole(UserRole::Admin),
+                fn ($query) => $query->where(fn ($scope) => $scope
+                    ->whereNull('school_id')
+                    ->orWhere('school_id', $request->user()->school_id)),
+            )
             ->with('competencies:id')
             ->orderBy('name')
             ->get(['id', 'subject_id', 'code', 'name'])
@@ -1481,10 +1650,12 @@ class QuestionController extends Controller
 
     private function ensureAccessible(Request $request, Question $question): void
     {
-        $isPrivateDraft = data_get($question->metadata, 'verification_locked') === true;
+        $isPrivateDraft = $question->status === QuestionStatus::Draft;
 
         abort_unless(
-            ! $isPrivateDraft || $question->author_id === $request->user()->id,
+            ! $isPrivateDraft
+            || $question->author_id === $request->user()->id
+            || $request->user()->hasRole(UserRole::Admin),
             404,
         );
     }

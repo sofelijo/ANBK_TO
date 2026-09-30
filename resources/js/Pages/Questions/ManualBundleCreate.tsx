@@ -1,6 +1,7 @@
 import InputError from '@/Components/InputError';
 import Modal from '@/Components/Modal';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
+import FormattedText from '@/Components/FormattedText';
 import { Head, Link, useForm } from '@inertiajs/react';
 import { FormEvent, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -271,6 +272,7 @@ export default function ManualBundleCreate({ subject, competencies, bundleDefaul
                         </div>
                         <label className="mt-5 block text-sm font-semibold text-slate-800">Pertanyaan
                             <textarea value={question.prompt} onChange={(event) => updateQuestion(index, { prompt: event.target.value })} rows={3} maxLength={10000} className="mt-2 block w-full rounded-xl border-slate-300 focus:border-emerald-500 focus:ring-emerald-500" />
+                            <span className="mt-1 block text-xs font-normal text-slate-500">Ketik pecahan seperti 1/4; pada tampilan soal akan otomatis menjadi pecahan bertingkat.</span>
                             <InputError message={errors[`questions.${index}.prompt` as keyof typeof errors]} className="mt-1" />
                         </label>
 
@@ -413,7 +415,7 @@ function ManualBundleStudentPreview({ title, story, stimulusImageUrl, stimulusIm
                             <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">Soal {currentIndex + 1}</span>
                             <span className="text-xs font-semibold text-slate-500">{formatLabel}</span>
                         </div>
-                        <h3 className="mt-4 text-lg font-semibold leading-7 text-slate-900">{question?.prompt.trim() || <span className="italic text-slate-400">Pertanyaan belum diisi.</span>}</h3>
+                        <h3 className="mt-4 text-lg font-semibold leading-7 text-slate-900">{question?.prompt.trim() ? <FormattedText text={question.prompt} /> : <span className="italic text-slate-400">Pertanyaan belum diisi.</span>}</h3>
 
                         {slot?.answer_format === 'true_false' ? (
                             <div className="mt-5">
@@ -434,7 +436,7 @@ function ManualBundleStudentPreview({ title, story, stimulusImageUrl, stimulusIm
                                         {slot?.answer_format === 'multiple_choice'
                                             ? <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded border-2 text-sm font-bold ${selected ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-300 text-transparent'}`}>✓</span>
                                             : <span className="w-6 shrink-0 font-semibold text-slate-600">{String.fromCharCode(65 + optionIndex)}.</span>}
-                                        <span className={`text-sm leading-6 ${option.content ? 'text-slate-800' : 'italic text-slate-400'}`}>{option.content || `Pilihan ${optionIndex + 1} belum diisi`}</span>
+                                        {option.content ? <FormattedText text={option.content} className="text-sm leading-6 text-slate-800" /> : <span className="text-sm italic leading-6 text-slate-400">Pilihan {optionIndex + 1} belum diisi</span>}
                                     </button>;
                                 })}
                             </div>

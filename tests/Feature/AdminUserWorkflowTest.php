@@ -22,6 +22,7 @@ class AdminUserWorkflowTest extends TestCase
             'name' => 'Murid Baru',
             'email' => 'murid-baru@example.com',
             'password' => 'password123',
+            'school_id' => $admin->school_id,
             'role' => UserRole::Student->value,
             'student_identifier' => 'S-100',
             'grade_level' => 6,
@@ -58,7 +59,6 @@ class AdminUserWorkflowTest extends TestCase
         $this->actingAs($admin)
             ->get(route('admin.users.index'))
             ->assertInertia(fn (Assert $page) => $page
-                ->where('schoolNpsn', '10000006')
                 ->where('pendingCount', 1)
                 ->where('users.data.0.id', $teacher->id));
 
@@ -117,7 +117,53 @@ class AdminUserWorkflowTest extends TestCase
         $this->assertSame($admin->id, $teacher->approved_by);
     }
 
-    public function test_admin_cannot_approve_operator_from_another_school(): void
+    public function test_approved_teacher_from_another_school_remains_visible_in_global_teacher_list(): void
+    {
+        [$admin] = $this->users();
+        $otherSchool = School::create(['name' => 'Sekolah Lain Aktif', 'npsn' => '10000027']);
+        $teacher = User::create([
+            'school_id' => $otherSchool->id,
+            'name' => 'Guru Lintas Aktif',
+            'email' => 'guru-lintas-aktif@example.com',
+            'password' => 'password',
+            'role' => UserRole::Teacher,
+            'email_verified_at' => now(),
+            'is_active' => true,
+            'approved_at' => now(),
+            'approved_by' => $admin->id,
+        ]);
+
+        $this->actingAs($admin)
+            ->get('/admin/users?role=teacher&search=&status=')
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('users.data', fn ($users) => collect($users)->contains('id', $teacher->id))
+                ->where('users.data', fn ($users) => collect($users)->contains(
+                    fn (array $user): bool => data_get($user, 'school.npsn') === '10000027',
+                )));
+    }
+
+    public function test_admin_can_toggle_user_from_another_school(): void
+    {
+        [$admin] = $this->users();
+        $otherSchool = School::create(['name' => 'Sekolah Lain Kelola', 'npsn' => '10000037']);
+        $teacher = User::create([
+            'school_id' => $otherSchool->id,
+            'name' => 'Guru Lintas Kelola',
+            'email' => 'guru-lintas-kelola@example.com',
+            'password' => 'password',
+            'role' => UserRole::Teacher,
+            'is_active' => true,
+            'approved_at' => now(),
+        ]);
+
+        $this->actingAs($admin)
+            ->patch(route('admin.users.toggle-active', $teacher))
+            ->assertRedirect();
+
+        $this->assertFalse($teacher->fresh()->is_active);
+    }
+
+    public function test_admin_can_approve_operator_from_another_school(): void
     {
         [$admin] = $this->users();
         $otherSchool = School::create(['name' => 'Sekolah Lain', 'npsn' => '10000017']);
@@ -132,9 +178,11 @@ class AdminUserWorkflowTest extends TestCase
 
         $this->actingAs($admin)
             ->patch(route('admin.users.approve', $operator))
-            ->assertNotFound();
+            ->assertRedirect()
+            ->assertSessionHas('success');
 
-        $this->assertFalse($operator->fresh()->is_active);
+        $this->assertTrue($operator->fresh()->is_active);
+        $this->assertSame($admin->id, $operator->fresh()->approved_by);
     }
 
     public function test_admin_can_create_school_operator(): void
@@ -145,6 +193,7 @@ class AdminUserWorkflowTest extends TestCase
             'name' => 'Operator Baru',
             'email' => 'operator-baru@example.com',
             'password' => 'password123',
+            'school_id' => $admin->school_id,
             'role' => UserRole::Operator->value,
         ])->assertRedirect()->assertSessionHasNoErrors();
 

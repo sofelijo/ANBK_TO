@@ -1,9 +1,10 @@
 import InputError from '@/Components/InputError';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
-import { Head, useForm } from '@inertiajs/react';
+import { Head, router, useForm } from '@inertiajs/react';
 import { FormEvent, ReactNode } from 'react';
 
 type School = {
+    id: number;
     name: string;
     npsn: string;
     subdistrict: string | null;
@@ -18,9 +19,10 @@ type School = {
 
 type Timezone = { value: string; label: string };
 
-export default function Edit({ school, timezones, subdistricts }: { school: School; timezones: Timezone[]; subdistricts: string[] }) {
+export default function Edit({ school, schools, canChooseSchool, timezones, subdistricts }: { school: School; schools: { id: number; name: string; npsn: string }[]; canChooseSchool: boolean; timezones: Timezone[]; subdistricts: string[] }) {
     const { data, setData, patch, processing, errors, recentlySuccessful } = useForm({
         ...school,
+        school_id: school.id,
         subdistrict: school.subdistrict ?? '',
         timezone: school.timezone ?? '',
         address: school.address ?? '',
@@ -40,6 +42,7 @@ export default function Edit({ school, timezones, subdistricts }: { school: Scho
         <AuthenticatedLayout header={<div><p className="text-sm font-medium text-emerald-600">Administrasi</p><h1 className="mt-1 text-2xl font-bold text-slate-900">Data Sekolah</h1><p className="mt-1 text-sm text-slate-500">Identitas ini digunakan untuk login siswa dan klaim jadwal try out.</p></div>}>
             <Head title="Data Sekolah" />
             <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
+                {canChooseSchool && <label className="mb-5 block text-sm font-medium text-slate-700">Pilih sekolah<select value={school.id} onChange={(event) => router.get(route('school.edit'), { school_id: Number(event.target.value) })} className="mt-1 block w-full rounded-lg border-slate-300 bg-white">{schools.map((option) => <option key={option.id} value={option.id}>{option.name} ({option.npsn})</option>)}</select></label>}
                 <form onSubmit={submit} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
                     <div className="grid gap-5 sm:grid-cols-2">
                         <Field label="Nama sekolah" error={errors.name}><input value={data.name} onChange={(event) => setData('name', event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300" /></Field>

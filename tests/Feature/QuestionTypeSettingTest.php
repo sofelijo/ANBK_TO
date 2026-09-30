@@ -28,6 +28,7 @@ class QuestionTypeSettingTest extends TestCase
 
         $this->actingAs($admin)
             ->patch(route('admin.question-types.update'), [
+                'school_id' => $school->id,
                 'enabled_question_types' => ['single_choice', 'short_answer'],
             ])
             ->assertRedirect()
@@ -41,11 +42,33 @@ class QuestionTypeSettingTest extends TestCase
 
     public function test_at_least_one_question_type_must_remain_active(): void
     {
-        [, $admin] = $this->schoolAndUser(UserRole::Admin, 'admin-empty-types@example.com');
+        [$school, $admin] = $this->schoolAndUser(UserRole::Admin, 'admin-empty-types@example.com');
 
         $this->actingAs($admin)
-            ->patch(route('admin.question-types.update'), ['enabled_question_types' => []])
+            ->patch(route('admin.question-types.update'), ['school_id' => $school->id, 'enabled_question_types' => []])
             ->assertSessionHasErrors('enabled_question_types');
+    }
+
+    public function test_admin_can_configure_question_types_for_another_school(): void
+    {
+        [$adminSchool, $admin] = $this->schoolAndUser(UserRole::Admin, 'admin-global-types@example.com');
+        $otherSchool = School::create(['name' => 'Sekolah Target', 'npsn' => '10000039']);
+
+        $this->actingAs($admin)
+            ->get(route('admin.question-types.edit', ['school_id' => $otherSchool->id]))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('school.id', $otherSchool->id)
+                ->where('school.npsn', '10000039'));
+
+        $this->actingAs($admin)
+            ->patch(route('admin.question-types.update'), [
+                'school_id' => $otherSchool->id,
+                'enabled_question_types' => ['single_choice'],
+            ])
+            ->assertRedirect();
+
+        $this->assertNull(data_get($adminSchool->fresh()->settings, 'enabled_question_types'));
+        $this->assertSame(['single_choice'], data_get($otherSchool->fresh()->settings, 'enabled_question_types'));
     }
 
     public function test_question_form_and_store_only_allow_active_types_for_new_questions(): void
@@ -68,6 +91,7 @@ class QuestionTypeSettingTest extends TestCase
         ]);
 
         $this->actingAs($admin)->patch(route('admin.question-types.update'), [
+            'school_id' => $school->id,
             'enabled_question_types' => ['single_choice', 'short_answer'],
         ]);
 

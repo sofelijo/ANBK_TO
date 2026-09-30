@@ -25,11 +25,11 @@ type Props = {
         links: { url?: string; label: string; active: boolean }[];
     };
     filters: { search?: string; role?: string; status?: string };
-    schoolNpsn: string;
+    schools: { id: number; name: string; npsn: string }[];
     pendingCount: number;
 };
 
-export default function Index({ users, filters, schoolNpsn, pendingCount }: Props) {
+export default function Index({ users, filters, schools, pendingCount }: Props) {
     const roleLabels = { admin: 'Admin', operator: 'Operator', teacher: 'Guru', student: 'Murid' };
     const [search, setSearch] = useState(filters.search || '');
     const [roleFilter, setRoleFilter] = useState(filters.role || '');
@@ -38,6 +38,7 @@ export default function Index({ users, filters, schoolNpsn, pendingCount }: Prop
         name: '',
         email: '',
         password: '',
+        school_id: schools[0]?.id || 0,
         role: 'student',
         student_identifier: '',
         grade_level: 6,
@@ -57,7 +58,7 @@ export default function Index({ users, filters, schoolNpsn, pendingCount }: Prop
     };
 
     return (
-                <AuthenticatedLayout header={<div><div className="flex flex-wrap items-center gap-3"><div><p className="text-sm font-medium text-emerald-600">Administrasi</p><h1 className="mt-1 text-2xl font-bold text-slate-900">Pengguna Sekolah</h1><p className="mt-1 text-sm text-slate-500">NPSN sekolah: <span className="font-semibold text-slate-700">{schoolNpsn}</span></p></div>{pendingCount > 0 && <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-800">{pendingCount} guru lintas sekolah/operator menunggu persetujuan</span>}</div></div>}>
+                <AuthenticatedLayout header={<div><div className="flex flex-wrap items-center gap-3"><div><p className="text-sm font-medium text-emerald-600">Administrasi Global</p><h1 className="mt-1 text-2xl font-bold text-slate-900">Semua Pengguna</h1><p className="mt-1 text-sm text-slate-500">Admin dapat mengelola pengguna dari seluruh sekolah.</p></div>{pendingCount > 0 && <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-800">{pendingCount} guru/operator menunggu persetujuan</span>}</div></div>}>
             <Head title="Pengguna" />
             <div className="mx-auto grid max-w-7xl gap-6 px-4 py-8 sm:px-6 lg:grid-cols-[320px_minmax(0,1fr)] lg:px-8">
                 <form onSubmit={submit} className="h-fit rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -66,6 +67,7 @@ export default function Index({ users, filters, schoolNpsn, pendingCount }: Prop
                         <label className="block text-sm font-medium text-slate-700">Nama<input value={data.name} onChange={(event) => setData('name', event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300" /><InputError message={errors.name} /></label>
                         <label className="block text-sm font-medium text-slate-700">Email<input type="email" value={data.email} onChange={(event) => setData('email', event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300" /><InputError message={errors.email} /></label>
                         <label className="block text-sm font-medium text-slate-700">Kata sandi awal<input type="password" value={data.password} onChange={(event) => setData('password', event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300" /><InputError message={errors.password} /></label>
+                        <label className="block text-sm font-medium text-slate-700">Sekolah<select value={data.school_id} onChange={(event) => setData('school_id', Number(event.target.value))} className="mt-1 block w-full rounded-lg border-slate-300">{schools.map((school) => <option key={school.id} value={school.id}>{school.name} ({school.npsn})</option>)}</select><InputError message={errors.school_id} /></label>
                         <label className="block text-sm font-medium text-slate-700">Peran<select value={data.role} onChange={(event) => setData('role', event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300"><option value="student">Murid</option><option value="teacher">Guru</option><option value="operator">Operator Sekolah</option></select></label>
                         {data.role === 'student' && <><label className="block text-sm font-medium text-slate-700">Nomor peserta / NIS<input value={data.student_identifier} onChange={(event) => setData('student_identifier', event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300" /><InputError message={errors.student_identifier} /></label><label className="block text-sm font-medium text-slate-700">Kelas<select value={data.grade_level} onChange={(event) => setData('grade_level', Number(event.target.value))} className="mt-1 block w-full rounded-lg border-slate-300"><option value={6}>Kelas 6</option><option value={9}>Kelas 9</option><option value={12}>Kelas 12</option></select></label></>}
                     </div>

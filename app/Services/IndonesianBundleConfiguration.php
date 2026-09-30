@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\School;
 use App\Models\User;
 use Illuminate\Validation\ValidationException;
 
@@ -22,7 +23,12 @@ class IndonesianBundleConfiguration
 
     public function forUser(User $user): array
     {
-        $slots = data_get($user->school?->settings, 'indonesian_bundle_defaults.slots');
+        return $this->forSchool($user->school);
+    }
+
+    public function forSchool(?School $school): array
+    {
+        $slots = data_get($school?->settings, 'indonesian_bundle_defaults.slots');
 
         return $this->isComplete($slots) ? array_values($slots) : $this->defaults();
     }

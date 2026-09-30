@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
+use App\Models\School;
 use App\Models\User;
 use App\Services\AuditLogger;
 use Illuminate\Http\RedirectResponse;
@@ -19,15 +20,6 @@ class UserController extends Controller
     {
         $users = User::query()
             ->with('school:id,name,npsn')
-            ->where(function ($query) use ($request) {
-                $query->where('school_id', $request->user()->school_id)
-                    ->orWhere(function ($pendingTeacher) {
-                        $pendingTeacher
-                            ->where('role', UserRole::Teacher)
-                            ->whereNull('approved_at')
-                            ->where('is_active', false);
-                    });
-            })
             ->when($request->string('search')->toString(), function ($query, string $search) {
                 $query->where(fn ($nested) => $nested
                     ->where('name', 'like', "%{$search}%")
@@ -62,16 +54,11 @@ class UserController extends Controller
         return Inertia::render('Admin/Users/Index', [
             'users' => $users,
             'filters' => $request->only(['search', 'role', 'status']),
-            'schoolNpsn' => $request->user()->school?->npsn,
+            'schools' => School::query()->orderBy('name')->get(['id', 'name', 'npsn']),
             'pendingCount' => User::query()
                 ->whereIn('role', [UserRole::Teacher, UserRole::Operator])
                 ->whereNull('approved_at')
                 ->where('is_active', false)
-                ->where(fn ($query) => $query
-                    ->where('role', UserRole::Teacher)
-                    ->orWhere(fn ($operator) => $operator
-                        ->where('role', UserRole::Operator)
-                        ->where('school_id', $request->user()->school_id)))
                 ->count(),
         ]);
     }
@@ -82,6 +69,7 @@ class UserController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')],
             'password' => ['required', 'string', 'min:8'],
+            'school_id' => ['required', 'integer', Rule::exists('schools', 'id')],
             'role' => ['required', Rule::in([
                 UserRole::Operator->value,
                 UserRole::Teacher->value,
@@ -92,7 +80,7 @@ class UserController extends Controller
                 'nullable',
                 'string',
                 'max:100',
-                Rule::unique('users')->where('school_id', $request->user()->school_id),
+                Rule::unique('users')->where('school_id', $request->integer('school_id')),
             ],
             'grade_level' => [
                 Rule::requiredIf($request->string('role')->toString() === UserRole::Student->value),
@@ -103,7 +91,7 @@ class UserController extends Controller
         ]);
 
         $user = User::create([
-            'school_id' => $request->user()->school_id,
+            'school_id' => $data['school_id'],
             'name' => $data['name'],
             'email' => $data['email'],
             'password' => $data['password'],
@@ -127,8 +115,6 @@ class UserController extends Controller
 
     public function toggleActive(Request $request, User $user, AuditLogger $auditLogger): RedirectResponse
     {
-        abort_unless($user->school_id === $request->user()->school_id, 404);
-
         if ($user->is($request->user())) {
             throw ValidationException::withMessages([
                 'user' => 'Anda tidak dapat menonaktifkan akun sendiri.',
@@ -153,11 +139,6 @@ class UserController extends Controller
 
     public function approve(Request $request, User $user, AuditLogger $auditLogger): RedirectResponse
     {
-        abort_unless(
-            $user->role === UserRole::Teacher || $user->school_id === $request->user()->school_id,
-            404,
-        );
-
         if (! in_array($user->role, [UserRole::Teacher, UserRole::Operator], true) || $user->approved_at !== null || $user->is_active) {
             throw ValidationException::withMessages([
                 'user' => 'Akun ini bukan pendaftaran guru atau operator yang sedang menunggu persetujuan.',

@@ -2,9 +2,9 @@ import ChatThread, { ChatMessage } from '@/Components/ChatThread';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, Link } from '@inertiajs/react';
 
-export default function TeacherShow({ student, room, messages }: { student: { id: number; name: string; student_identifier?: string; grade_level: number }; room: { id: number }; messages: ChatMessage[] }) {
+export default function TeacherShow({ student, room, messages }: { student: { id: number; name: string; student_identifier?: string; grade_level: number; school?: { name: string; npsn: string } }; room: { id: number }; messages: ChatMessage[] }) {
     return (
-        <AuthenticatedLayout header={<div><p className="text-sm font-medium text-emerald-600">Room privat siswa–AI</p><h1 className="mt-1 text-2xl font-bold text-slate-900">{student.name}</h1><p className="mt-1 text-sm text-slate-500">{student.student_identifier || 'Tanpa NIS'} · Kelas {student.grade_level}</p></div>}>
+        <AuthenticatedLayout header={<div><p className="text-sm font-medium text-emerald-600">Room privat siswa–AI</p><h1 className="mt-1 text-2xl font-bold text-slate-900">{student.name}</h1><p className="mt-1 text-sm text-slate-500">{student.student_identifier || 'Tanpa NIS'} · Kelas {student.grade_level}{student.school ? ` · ${student.school.name} (${student.school.npsn})` : ''}</p></div>}>
             <Head title={`Chat ${student.name}`} />
             <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
                 <Link href={route('teacher-chat.index')} className="mb-4 inline-flex text-sm font-semibold text-emerald-700">← Kembali ke daftar siswa</Link>

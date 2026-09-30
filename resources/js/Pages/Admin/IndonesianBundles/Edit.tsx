@@ -1,11 +1,12 @@
 import InputError from '@/Components/InputError';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
-import { Head, useForm } from '@inertiajs/react';
+import { Head, router, useForm } from '@inertiajs/react';
 import { FormEvent } from 'react';
 
 type AnswerFormat = 'single_choice' | 'true_false' | 'multiple_choice';
 type CognitiveLevel = 'textual' | 'inferential' | 'evaluation';
 type Slot = { answer_format: AnswerFormat; cognitive_level: CognitiveLevel };
+type School = { id: number; name: string; npsn: string };
 
 const answerFormats: { value: AnswerFormat; label: string }[] = [
     { value: 'single_choice', label: 'Pilihan Ganda' },
@@ -18,8 +19,8 @@ const cognitiveLevels: { value: CognitiveLevel; label: string }[] = [
     { value: 'evaluation', label: 'Evaluasi dan Apresiasi (Level 3)' },
 ];
 
-export default function Edit({ slots }: { slots: Slot[] }) {
-    const { data, setData, patch, processing, errors, recentlySuccessful } = useForm({ slots });
+export default function Edit({ slots, school, schools }: { slots: Slot[]; school: School; schools: School[] }) {
+    const { data, setData, patch, processing, errors, recentlySuccessful } = useForm({ slots, school_id: school.id });
     const updateSlot = <Key extends keyof Slot>(index: number, key: Key, value: Slot[Key]) => {
         const previousValue = data.slots[index][key];
         const occupiedIndex = data.slots.findIndex((slot, slotIndex) => slotIndex !== index && slot[key] === value);
@@ -38,6 +39,7 @@ export default function Edit({ slots }: { slots: Slot[] }) {
     return <AuthenticatedLayout header={<div><p className="text-sm font-medium text-emerald-600">Administrasi</p><h1 className="mt-1 text-2xl font-bold text-slate-900">Default Bundle Bahasa Indonesia</h1><p className="mt-1 text-sm text-slate-500">Atur pasangan awal format jawaban dan tingkat kognitif untuk satu cerita dengan tiga soal.</p></div>}>
         <Head title="Default Bundle Bahasa Indonesia" />
         <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
+            <label className="mb-5 block text-sm font-medium text-slate-700">Sekolah<select value={school.id} onChange={(event) => router.get(route('admin.indonesian-bundles.edit'), { school_id: Number(event.target.value) })} className="mt-1 block w-full rounded-lg border-slate-300 bg-white">{schools.map((option) => <option key={option.id} value={option.id}>{option.name} ({option.npsn})</option>)}</select></label>
             <form onSubmit={submit} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                 <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
                     <div className="rounded-xl bg-indigo-50 p-3"><span className="text-xs font-semibold text-indigo-600">STIMULUS</span><strong className="mt-1 block text-slate-900">1 cerita</strong></div>

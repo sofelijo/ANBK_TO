@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\AttemptStatus;
+use App\Enums\UserRole;
 use App\Models\Assessment;
 use App\Models\Attempt;
 use App\Models\CompetencyResult;
@@ -37,7 +38,10 @@ class ReportController extends Controller
 
         $attempts = Attempt::query()
             ->where('assessment_id', $assessment->id)
-            ->whereHas('student', fn ($students) => $students->where('school_id', $request->user()->school_id))
+            ->when(
+                ! $request->user()->hasRole(UserRole::Admin),
+                fn ($query) => $query->whereHas('student', fn ($students) => $students->where('school_id', $request->user()->school_id)),
+            )
             ->where('status', AttemptStatus::Submitted)
             ->with(['student:id,name,email,student_identifier,grade_level'])
             ->withCount('events')
@@ -80,7 +84,10 @@ class ReportController extends Controller
             ->findOrFail($request->integer('assessment_id'));
         $attempts = Attempt::query()
             ->where('assessment_id', $assessment->id)
-            ->whereHas('student', fn ($students) => $students->where('school_id', $request->user()->school_id))
+            ->when(
+                ! $request->user()->hasRole(UserRole::Admin),
+                fn ($query) => $query->whereHas('student', fn ($students) => $students->where('school_id', $request->user()->school_id)),
+            )
             ->where('status', AttemptStatus::Submitted)
             ->with('student')
             ->orderBy('user_id')

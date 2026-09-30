@@ -1,7 +1,7 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, Link } from '@inertiajs/react';
 
-type Student = { id: number; name: string; student_identifier?: string; grade_level: number; room_id?: number; last_message?: { content?: string; sender_type: string; created_at: string; needs_attention: boolean } };
+type Student = { id: number; name: string; student_identifier?: string; grade_level: number; school?: { name: string; npsn: string }; room_id?: number; last_message?: { content?: string; sender_type: string; created_at: string; needs_attention: boolean } };
 
 export default function TeacherIndex({ students }: { students: Student[] }) {
     return (
@@ -12,7 +12,7 @@ export default function TeacherIndex({ students }: { students: Student[] }) {
                 <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                     {students.length === 0 ? <p className="p-10 text-center text-sm text-slate-500">Belum ada siswa.</p> : <div className="divide-y divide-slate-100">{students.map((student) => (
                         <Link key={student.id} href={route('teacher-chat.show', student.id)} className="flex items-center justify-between gap-4 p-5 hover:bg-slate-50">
-                            <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="font-semibold text-slate-900">{student.name}</p>{student.last_message?.needs_attention && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">Perlu perhatian</span>}</div><p className="mt-1 text-xs text-slate-500">{student.student_identifier || 'Tanpa NIS'} · Kelas {student.grade_level}</p><p className="mt-2 truncate text-sm text-slate-500">{student.last_message?.content || 'Belum ada percakapan.'}</p></div>
+                            <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="font-semibold text-slate-900">{student.name}</p>{student.last_message?.needs_attention && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">Perlu perhatian</span>}</div><p className="mt-1 text-xs text-slate-500">{student.student_identifier || 'Tanpa NIS'} · Kelas {student.grade_level}{student.school ? ` · ${student.school.name} (${student.school.npsn})` : ''}</p><p className="mt-2 truncate text-sm text-slate-500">{student.last_message?.content || 'Belum ada percakapan.'}</p></div>
                             <span className="shrink-0 text-sm font-semibold text-emerald-700">Buka →</span>
                         </Link>
                     ))}</div>}

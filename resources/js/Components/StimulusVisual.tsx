@@ -29,8 +29,10 @@ export type StimulusPieChartVisual = {
     type: 'pie_chart';
     title?: string;
     unit?: string;
-    show_percentages?: boolean;
-    items: { label: string; value: number }[];
+    total_mode?: 'percentage' | 'degrees' | 'custom';
+    total?: number;
+    total_asked?: boolean;
+    items: { label: string; value: number; asked?: boolean; auto_calculate?: boolean }[];
 };
 
 export type StimulusVisualData = StimulusTableVisual | StimulusBarChartVisual | StimulusPictogramVisual | StimulusPieChartVisual;
@@ -118,8 +120,10 @@ export default function StimulusVisual({ visual, className = '' }: { visual?: St
 
     if (visual.type === 'pie_chart') {
         const items = visual.items.filter((item) => Number(item.value) >= 0);
-        const total = items.reduce((sum, item) => sum + Number(item.value), 0);
+        const itemTotal = items.reduce((sum, item) => sum + Number(item.value), 0);
+        const total = Number(visual.total) > 0 ? Number(visual.total) : itemTotal;
         if (total <= 0) return null;
+        const valueSuffix = visual.total_mode === 'percentage' ? '%' : visual.total_mode === 'degrees' ? '°' : visual.unit ? ` ${visual.unit}` : '';
 
         const centerX = 245;
         const centerY = 190;
@@ -153,9 +157,9 @@ export default function StimulusVisual({ visual, className = '' }: { visual?: St
                                 {path
                                     ? <path d={path} fill={chartColors[index % chartColors.length]} stroke="#fff" strokeWidth="3" />
                                     : <circle cx={centerX} cy={centerY} r={radius} fill={chartColors[index % chartColors.length]} stroke="#fff" strokeWidth="3" />}
-                                {visual.show_percentages && percentage >= 0.04 && (
+                                {percentage >= 0.04 && (
                                     <text x={labelPoint.x} y={labelPoint.y + 5} textAnchor="middle" fontSize="16" fontWeight="800" fill="#0f172a" stroke="#fff" strokeWidth="4" paintOrder="stroke">
-                                        {formatNumber(percentage * 100)}%
+                                        {item.asked ? '?' : `${formatNumber(Number(item.value))}${valueSuffix}`}
                                     </text>
                                 )}
                             </g>
@@ -165,11 +169,17 @@ export default function StimulusVisual({ visual, className = '' }: { visual?: St
                         <g key={`legend-${index}`} transform={`translate(455 ${60 + (index * 29)})`}>
                             <rect width="18" height="18" rx="4" fill={chartColors[index % chartColors.length]} />
                             <text x="28" y="15" fontSize="15" fontWeight="600" fill="var(--toa-chart-text)">
-                                {item.label}{visual.show_percentages ? ` · ${formatNumber((Number(item.value) / total) * 100)}%` : ''}
+                                {item.label}{item.asked
+                                    ? ' · ?'
+                                    : visual.total_mode
+                                        ? ` · ${formatNumber(Number(item.value))}${valueSuffix}`
+                                        : ` · ${formatNumber((Number(item.value) / total) * 100)}%`}
                             </text>
                         </g>
                     ))}
-                    {visual.unit && <text x="600" y={Math.max(370, 80 + items.length * 29)} textAnchor="middle" fontSize="14" fontWeight="600" fill="var(--toa-chart-text)">Satuan data: {visual.unit}</text>}
+                    <text x="600" y={Math.max(370, 80 + items.length * 29)} textAnchor="middle" fontSize="14" fontWeight="600" fill="var(--toa-chart-text)">
+                        Total: {visual.total_mode === 'custom' && visual.total_asked ? '?' : `${formatNumber(total)}${valueSuffix}`}
+                    </text>
                 </svg>
                 </div>
             </figure>

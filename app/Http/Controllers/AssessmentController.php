@@ -829,7 +829,7 @@ class AssessmentController extends Controller
                         ->where('status', QuestionStatus::Published)
                         ->where('competency_id', $row['competency_id'])
                         ->whereNotIn('id', $questions->pluck('id')),
-                    $request->user()->school_id,
+                    $request->user()->hasRole(UserRole::Admin) ? null : $request->user()->school_id,
                 )
                     ->limit($row['count'])
                     ->get();
@@ -860,7 +860,7 @@ class AssessmentController extends Controller
                         ->where('type', $row['type'])
                         ->where('difficulty', $row['difficulty'])
                         ->whereNotIn('id', $questions->pluck('id')),
-                    $request->user()->school_id,
+                    $request->user()->hasRole(UserRole::Admin) ? null : $request->user()->school_id,
                 )
                     ->limit($row['count'])
                     ->get();
@@ -880,7 +880,7 @@ class AssessmentController extends Controller
         } else {
             $questions = $this->prioritizeLeastUsed(
                 $questionQuery->where('status', QuestionStatus::Published),
-                $request->user()->school_id,
+                $request->user()->hasRole(UserRole::Admin) ? null : $request->user()->school_id,
             )
                 ->limit($data['question_count'])
                 ->get();
@@ -899,13 +899,13 @@ class AssessmentController extends Controller
         return $questions;
     }
 
-    private function prioritizeLeastUsed(Builder $query, int $schoolId): Builder
+    private function prioritizeLeastUsed(Builder $query, ?int $schoolId): Builder
     {
         $schoolUsage = DB::table('assessment_question')
             ->join('attempts', 'attempts.assessment_id', '=', 'assessment_question.assessment_id')
             ->join('users', 'users.id', '=', 'attempts.user_id')
             ->whereColumn('assessment_question.question_id', 'questions.id')
-            ->where('users.school_id', $schoolId)
+            ->when($schoolId !== null, fn ($attempts) => $attempts->where('users.school_id', $schoolId))
             ->selectRaw('COUNT(attempts.id)');
 
         return $query

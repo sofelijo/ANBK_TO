@@ -1,4 +1,5 @@
 import InlineQuestionEditor, { InlineEditableQuestion } from '@/Components/InlineQuestionEditor';
+import FormattedText from '@/Components/FormattedText';
 import Modal from '@/Components/Modal';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, Link, router } from '@inertiajs/react';
@@ -164,7 +165,7 @@ function QuestionInteraction({
                                     {option.label}
                                 </span>
                             )}
-                            <span className="text-sm leading-6 text-slate-800">{option.content}</span>
+                            <FormattedText text={option.content} className="text-sm leading-6 text-slate-800" />
                         </button>
                     );
                 })}
@@ -834,7 +835,7 @@ export default function StoryShow({
                                 <div style={{ zoom: textScale / 100 }}>
                                     {!storyMode && previewQuestion.stimulus && (
                                         <div className="mb-5 whitespace-pre-wrap rounded-xl bg-slate-50 p-5 text-sm leading-7 text-slate-700">
-                                            {previewQuestion.stimulus}
+                                            <FormattedText text={previewQuestion.stimulus} />
                                         </div>
                                     )}
                                     {previewQuestion.illustration_url && (!storyMode || !manualBundle) && (
@@ -856,7 +857,7 @@ export default function StoryShow({
                                         </span>
                                     </div>
                                     <h3 className="mt-3 text-lg font-semibold leading-8 text-slate-900">
-                                        {previewQuestion.prompt}
+                                        <FormattedText text={previewQuestion.prompt} />
                                     </h3>
 
                                     <QuestionInteraction
@@ -1067,13 +1068,13 @@ export default function StoryShow({
                             <section className="min-w-0 p-5 lg:p-7 flex flex-col justify-between">
                                 <div style={{ zoom: textScale / 100 }}>
                                     {!storyMode && previewQuestion.stimulus && (
-                                        <div className="mb-5 whitespace-pre-wrap rounded-xl bg-slate-50 p-4 text-sm leading-7 text-slate-700">{previewQuestion.stimulus}</div>
+                                        <FormattedText text={previewQuestion.stimulus} className="mb-5 block whitespace-pre-wrap rounded-xl bg-slate-50 p-4 text-sm leading-7 text-slate-700" />
                                     )}
                                     {previewQuestion.illustration_url && (!storyMode || !manualBundle) && (
                                         <img src={previewQuestion.illustration_url} alt={previewQuestion.metadata?.illustration?.alt || 'Ilustrasi soal'} className="mb-5 max-h-72 w-full rounded-xl border border-slate-200 object-contain" />
                                     )}
                                     <p className="text-sm font-semibold text-emerald-600">Soal {studentPreviewIndex + 1}</p>
-                                    <h3 className="mt-3 text-lg font-semibold leading-8 text-slate-900">{previewQuestion.prompt}</h3>
+                                    <h3 className="mt-3 text-lg font-semibold leading-8 text-slate-900"><FormattedText text={previewQuestion.prompt} /></h3>
 
                                     <QuestionInteraction
                                         question={previewQuestion}
@@ -1148,7 +1149,7 @@ export default function StoryShow({
                                     <h2 className="mt-1 text-xl font-bold text-slate-900">{generation.result_payload.title}</h2>
                                 </div>
                                 <div className="flex flex-wrap items-center gap-2">
-                                    {canVerify && storyMode && !editingStimulus && (
+                                    {(isAuthor || canVerify) && storyMode && !editingStimulus && (
                                         <button
                                             type="button"
                                             onClick={() => setEditingStimulus(true)}
@@ -1443,8 +1444,8 @@ export default function StoryShow({
                                                 </span>
                                             </div>
                                             <p className="mt-2 text-xs text-slate-500">Kelas {question.grade_level} · Kesulitan {question.difficulty} · {question.verification.count}/{question.verification.required} verifikasi</p>
-                                            {!storyMode && question.stimulus && <p className="mt-2 whitespace-pre-wrap rounded-lg bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-700">{question.stimulus}</p>}
-                                            <h3 className="mt-2 text-base font-semibold leading-7 text-slate-900">{question.prompt}</h3>
+                                            {!storyMode && question.stimulus && <FormattedText text={question.stimulus} className="mt-2 block whitespace-pre-wrap rounded-lg bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-700" />}
+                                            <h3 className="mt-2 text-base font-semibold leading-7 text-slate-900"><FormattedText text={question.prompt} /></h3>
                                         </div>
                                         {question.status === 'published' ? (
                                             <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -1621,7 +1622,7 @@ export default function StoryShow({
                                         <div className="mt-3 grid gap-2 sm:grid-cols-2">
                                             {question.options.map((option) => (
                                                 <div key={option.id} className={`rounded-lg border px-3 py-2.5 text-sm ${option.is_correct ? 'border-emerald-300 bg-emerald-50 text-emerald-900' : 'border-slate-200 text-slate-700'}`}>
-                                                    {question.type === 'multiple_choice' ? <span className={`mr-2 inline-flex h-5 w-5 items-center justify-center rounded border text-xs ${option.is_correct ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-300 text-transparent'}`}>✓</span> : <span className="mr-2 font-semibold">{option.label}.</span>}{option.content}
+                                                    {question.type === 'multiple_choice' ? <span className={`mr-2 inline-flex h-5 w-5 items-center justify-center rounded border text-xs ${option.is_correct ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-300 text-transparent'}`}>✓</span> : <span className="mr-2 font-semibold">{option.label}.</span>}<FormattedText text={option.content} />
                                                 </div>
                                             ))}
                                         </div>
@@ -1629,7 +1630,7 @@ export default function StoryShow({
                                         <p className="mt-4 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">Jawaban diterima: {question.metadata?.accepted_answers?.join(', ')}</p>
                                     )}
 
-                                    {question.explanation && <p className="mt-3 border-t border-slate-100 pt-3 text-sm leading-6 text-slate-600"><span className="font-semibold text-slate-800">Pembahasan:</span> {question.explanation}</p>}
+                                    {question.explanation && <p className="mt-3 border-t border-slate-100 pt-3 text-sm leading-6 text-slate-600"><span className="font-semibold text-slate-800">Pembahasan:</span> <FormattedText text={question.explanation} /></p>}
                                     <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3 text-xs text-slate-500">
                                         <span>Pembuat: <strong className="text-slate-700">{question.author.name}</strong></span>
                                         <span>Verifikasi: <strong className="text-slate-700">{question.verification.count}/{question.verification.required}</strong>{question.verification.verifiers.length > 0 ? ` · ${question.verification.verifiers.map((item) => item.name).join(', ')}` : ''}</span>

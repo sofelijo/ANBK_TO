@@ -45,7 +45,10 @@ class QuestionVerificationService
             $lockedQuestion = Question::query()->lockForUpdate()->findOrFail($question->id);
             $required = self::requiredFor($lockedQuestion);
 
-            if ((bool) data_get($lockedQuestion->metadata, 'verification_locked', false)) {
+            if (
+                $lockedQuestion->status === QuestionStatus::Draft
+                && (bool) data_get($lockedQuestion->metadata, 'verification_locked', false)
+            ) {
                 throw ValidationException::withMessages([
                     'verification' => 'Soal masih berupa draft pribadi dan belum diajukan untuk verifikasi.',
                 ]);

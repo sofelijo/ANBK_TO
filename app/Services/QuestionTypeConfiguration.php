@@ -42,6 +42,17 @@ class QuestionTypeConfiguration
         ), fn (array $option): bool => $option['active'] || $option['value'] === $include?->value));
     }
 
+    /** @return array<int, array{value: string, label: string, description: string, active: bool}> */
+    public function allOptions(): array
+    {
+        return array_map(fn (QuestionType $type): array => [
+            'value' => $type->value,
+            'label' => $this->label($type),
+            'description' => $this->description($type),
+            'active' => true,
+        ], QuestionType::cases());
+    }
+
     public function label(QuestionType $type): string
     {
         return match ($type) {

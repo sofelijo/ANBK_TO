@@ -1,4 +1,5 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
+import FormattedText from '@/Components/FormattedText';
 import { Combobox, ComboboxInput, ComboboxOption, ComboboxOptions } from '@headlessui/react';
 import { Head, router } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
@@ -627,7 +628,7 @@ function AiAnalysisPanel({
                                                 </span>
                                             </div>
                                             <p className="mt-4 text-sm font-semibold leading-6 text-slate-900">
-                                                {question.prompt}
+                                                <FormattedText text={question.prompt} />
                                             </p>
                                             <div className="mt-3 grid gap-2 sm:grid-cols-2">
                                                 {question.options.map((option, optionIndex) => (
@@ -640,7 +641,7 @@ function AiAnalysisPanel({
                                                         }`}
                                                     >
                                                         <span className="font-bold">{String.fromCharCode(65 + optionIndex)}.</span>
-                                                        <span>{option.content}</span>
+                                                        <FormattedText text={option.content} />
                                                         {option.is_correct && (
                                                             <span className="ms-auto text-[10px] font-bold uppercase text-emerald-700">Kunci</span>
                                                         )}
@@ -649,7 +650,7 @@ function AiAnalysisPanel({
                                             </div>
                                             <div className="mt-3 rounded-lg bg-slate-100 px-3 py-2 text-xs leading-5 text-slate-600">
                                                 <span className="font-bold text-slate-800">Pembahasan: </span>
-                                                {question.explanation}
+                                                <FormattedText text={question.explanation} />
                                             </div>
                                         </article>
                                     );

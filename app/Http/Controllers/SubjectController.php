@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\UserRole;
 use App\Models\Subject;
 use App\Services\AuditLogger;
 use Illuminate\Http\RedirectResponse;
@@ -17,7 +18,10 @@ class SubjectController extends Controller
     {
         $schoolId = $request->user()->school_id;
         $subjects = Subject::query()
-            ->where(fn ($query) => $query->whereNull('school_id')->orWhere('school_id', $schoolId))
+            ->when(
+                ! $request->user()->hasRole(UserRole::Admin),
+                fn ($query) => $query->where(fn ($scope) => $scope->whereNull('school_id')->orWhere('school_id', $schoolId)),
+            )
             ->when($request->string('search')->toString(), function ($query, string $search): void {
                 $query->where(fn ($subject) => $subject
                     ->where('code', 'like', "%{$search}%")
@@ -35,7 +39,7 @@ class SubjectController extends Controller
                 'ai_question_format' => $subject->ai_question_format,
                 'competencies_count' => $subject->competencies_count,
                 'questions_count' => $subject->questions_count,
-                'can_manage' => $subject->school_id === $schoolId,
+                'can_manage' => $request->user()->hasRole(UserRole::Admin) || $subject->school_id === $schoolId,
             ]);
 
         return Inertia::render('Subjects/Index', [
@@ -52,7 +56,7 @@ class SubjectController extends Controller
     public function store(Request $request, AuditLogger $auditLogger): RedirectResponse
     {
         $subject = Subject::create([
-            'school_id' => $request->user()->school_id,
+            'school_id' => $request->user()->hasRole(UserRole::Admin) ? null : $request->user()->school_id,
             ...$this->validatedData($request),
         ]);
         $auditLogger->log($request, 'subject.created', $subject);
@@ -92,6 +96,7 @@ class SubjectController extends Controller
 
     private function validatedData(Request $request, ?Subject $subject = null): array
     {
+        $schoolId = $request->user()->hasRole(UserRole::Admin) ? null : $request->user()->school_id;
         $request->merge([
             'code' => Str::upper(trim($request->string('code')->toString())),
             'name' => Str::squish($request->string('name')->toString()),
@@ -100,7 +105,7 @@ class SubjectController extends Controller
         return $request->validate([
             'code' => [
                 'required', 'string', 'max:30', 'regex:/^[A-Z0-9][A-Z0-9._-]*$/',
-                Rule::unique('subjects', 'code')->where('school_id', $request->user()->school_id)->ignore($subject),
+                Rule::unique('subjects', 'code')->where('school_id', $schoolId)->ignore($subject),
             ],
             'name' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:2000'],
@@ -112,6 +117,9 @@ class SubjectController extends Controller
 
     private function ensureManageable(Request $request, Subject $subject): void
     {
-        abort_unless($subject->school_id === $request->user()->school_id, 404);
+        abort_unless(
+            $request->user()->hasRole(UserRole::Admin) || $subject->school_id === $request->user()->school_id,
+            404,
+        );
     }
 }

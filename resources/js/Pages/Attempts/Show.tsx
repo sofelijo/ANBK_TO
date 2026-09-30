@@ -1,6 +1,7 @@
 import ThemeToggle from '@/Components/ThemeToggle';
 import StimulusVisual, { StimulusVisualData } from '@/Components/StimulusVisual';
 import PositionedImage from '@/Components/PositionedImage';
+import FormattedText from '@/Components/FormattedText';
 import { Head, router } from '@inertiajs/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
@@ -526,7 +527,7 @@ export default function Show({ attempt, preview = false }: { attempt: Attempt; p
                                     <p className="text-xs font-semibold uppercase tracking-wider text-indigo-600">Stimulus</p>
                                     {current.illustration_url && <PositionedImage src={current.illustration_url} alt={`Ilustrasi untuk soal ${currentIndex + 1}`} width={current.illustration_display?.width || 800} height={current.illustration_display?.height || 450} zoom={current.illustration_display?.zoom || 1} offsetX={current.illustration_display?.offset_x || 0} offsetY={current.illustration_display?.offset_y || 0} className="mt-3" />}
                                     {current.stimulus_visual && <StimulusVisual visual={current.stimulus_visual} className="mt-3" />}
-                                    {current.stimulus && <div className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">{current.stimulus}</div>}
+                                    {current.stimulus && <FormattedText text={current.stimulus} className="mt-3 block whitespace-pre-wrap text-sm leading-6 text-slate-700" />}
                                 </div>
                             </aside>
                         )}
@@ -534,7 +535,7 @@ export default function Show({ attempt, preview = false }: { attempt: Attempt; p
                         <section aria-labelledby={`question-heading-${current.id}`} className={`flex min-h-0 min-w-0 flex-col p-4 lg:h-full lg:p-5 ${hasStimulus ? '' : 'mx-auto w-full max-w-4xl'}`}>
                             <div className="min-h-0 flex-1 pr-1 lg:overflow-y-auto" style={{ zoom: textScale / 100 }}>
                             <p className="text-xs font-semibold text-emerald-600">Soal {currentIndex + 1} dari {attempt.questions.length}</p>
-                            <h2 ref={questionHeading} id={`question-heading-${current.id}`} tabIndex={-1} className="mt-2 text-base font-semibold leading-6 text-slate-900 lg:text-lg">{current.prompt}</h2>
+                            <h2 ref={questionHeading} id={`question-heading-${current.id}`} tabIndex={-1} className="mt-2 text-base font-semibold leading-6 text-slate-900 lg:text-lg"><FormattedText text={current.prompt} /></h2>
 
                             {current.type === 'category_matrix' && current.matrix ? (
                                 <div className="mt-3">
@@ -542,7 +543,7 @@ export default function Show({ attempt, preview = false }: { attempt: Attempt; p
                                     <div className="overflow-x-auto rounded-lg border border-slate-300">
                                         <table className="w-full min-w-[430px] table-fixed text-sm">
                                             <thead className="border-b-2 border-slate-700 bg-slate-50"><tr><th className="w-12 p-2.5 text-center">#</th><th className="p-2.5 text-left">Pernyataan</th>{current.matrix.columns.map((column) => <th key={column.id} className="w-20 break-words p-2 text-center font-semibold">{column.label}</th>)}</tr></thead>
-                                            <tbody>{current.matrix.rows.map((row, rowIndex) => <tr key={row.id} className="border-t border-slate-200"><td className="p-3 text-center font-semibold text-slate-600">{String.fromCharCode(65 + rowIndex)}.</td><td className="p-3 leading-6 text-slate-800">{row.statement}</td>{current.matrix?.columns.map((column) => {
+                                            <tbody>{current.matrix.rows.map((row, rowIndex) => <tr key={row.id} className="border-t border-slate-200"><td className="p-3 text-center font-semibold text-slate-600">{String.fromCharCode(65 + rowIndex)}.</td><td className="p-3 leading-6 text-slate-800"><FormattedText text={row.statement} /></td>{current.matrix?.columns.map((column) => {
                                                 const selected = responses[current.id]?.matrix_answers?.[row.id] === column.id;
                                                 return <td key={column.id} className="p-3 text-center"><button type="button" role="radio" aria-checked={selected} aria-label={`${row.statement}: ${column.label}`} onClick={() => chooseMatrixAnswer(current, row.id, column.id)} className={`inline-flex h-11 w-11 items-center justify-center rounded-full border-2 text-xs font-bold transition ${selected ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-400 bg-white text-transparent hover:border-blue-500'}`}>✓</button></td>;
                                             })}</tr>)}</tbody>
@@ -564,7 +565,7 @@ export default function Show({ attempt, preview = false }: { attempt: Attempt; p
                                             const matched = Boolean(responses[current.id]?.matches?.[item.id]);
                                             const selected = selectedLeft[current.id] === item.id;
                                             const style = matchingStyles[index % matchingStyles.length];
-                                            return <button key={item.id} type="button" aria-pressed={selected} aria-label={`Pernyataan ${index + 1}: ${item.content}${matched ? ', sudah dipasangkan' : ''}`} onClick={() => setSelectedLeft((values) => ({ ...values, [current.id]: item.id }))} className={`flex min-h-11 w-full items-start gap-3 rounded-xl border-2 p-4 text-left transition ${matched ? style.card : selected ? 'border-indigo-500 bg-indigo-50 ring-2 ring-indigo-200' : 'border-slate-200 hover:border-indigo-300'}`}><span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${matched ? style.badge : 'bg-slate-100 text-slate-500'}`}>{index + 1}</span><span className="leading-6 text-slate-800">{item.content}</span></button>;
+                                            return <button key={item.id} type="button" aria-pressed={selected} aria-label={`Pernyataan ${index + 1}: ${item.content}${matched ? ', sudah dipasangkan' : ''}`} onClick={() => setSelectedLeft((values) => ({ ...values, [current.id]: item.id }))} className={`flex min-h-11 w-full items-start gap-3 rounded-xl border-2 p-4 text-left transition ${matched ? style.card : selected ? 'border-indigo-500 bg-indigo-50 ring-2 ring-indigo-200' : 'border-slate-200 hover:border-indigo-300'}`}><span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${matched ? style.badge : 'bg-slate-100 text-slate-500'}`}>{index + 1}</span><FormattedText text={item.content} className="leading-6 text-slate-800" /></button>;
                                         })}
                                     </div>
                                 </section>
@@ -575,7 +576,7 @@ export default function Show({ attempt, preview = false }: { attempt: Attempt; p
                                             const matchedLeftId = Object.entries(responses[current.id]?.matches || {}).find(([, rightId]) => rightId === item.id)?.[0];
                                             const matchedIndex = current.matching?.left_items.findIndex((leftItem) => leftItem.id === matchedLeftId) ?? -1;
                                             const style = matchedIndex >= 0 ? matchingStyles[matchedIndex % matchingStyles.length] : null;
-                                            return <button key={item.id} type="button" aria-label={`Pilihan pasangan: ${item.content}${matchedIndex >= 0 ? `, terpasang dengan pernyataan ${matchedIndex + 1}` : ''}`} onClick={() => chooseMatch(current, item.id)} className={`flex min-h-11 w-full items-start gap-3 rounded-xl border-2 p-4 text-left transition ${style ? style.card : selectedLeft[current.id] ? 'border-slate-200 hover:border-indigo-400 hover:bg-indigo-50' : 'border-slate-200'}`}><span className={`flex h-7 min-w-7 shrink-0 items-center justify-center rounded-full px-2 text-xs font-bold ${style ? style.badge : 'bg-slate-100 text-slate-400'}`}>{matchedIndex >= 0 ? matchedIndex + 1 : '○'}</span><span className="leading-6 text-slate-800">{item.content}</span></button>;
+                                            return <button key={item.id} type="button" aria-label={`Pilihan pasangan: ${item.content}${matchedIndex >= 0 ? `, terpasang dengan pernyataan ${matchedIndex + 1}` : ''}`} onClick={() => chooseMatch(current, item.id)} className={`flex min-h-11 w-full items-start gap-3 rounded-xl border-2 p-4 text-left transition ${style ? style.card : selectedLeft[current.id] ? 'border-slate-200 hover:border-indigo-400 hover:bg-indigo-50' : 'border-slate-200'}`}><span className={`flex h-7 min-w-7 shrink-0 items-center justify-center rounded-full px-2 text-xs font-bold ${style ? style.badge : 'bg-slate-100 text-slate-400'}`}>{matchedIndex >= 0 ? matchedIndex + 1 : '○'}</span><FormattedText text={item.content} className="leading-6 text-slate-800" /></button>;
                                         })}
                                     </div>
                                 </section>
@@ -597,7 +598,7 @@ export default function Show({ attempt, preview = false }: { attempt: Attempt; p
                             {current.options.map((option, optionIndex) => {
                                 const selected = responses[current.id]?.option_ids?.includes(option.id);
                                 const noSingleChoiceSelected = current.type === 'single_choice' && !(responses[current.id]?.option_ids?.length);
-                                return <button id={`question-${current.id}-option-${optionIndex}`} key={option.id} type="button" role={current.type === 'single_choice' ? 'radio' : 'checkbox'} aria-checked={Boolean(selected)} aria-label={`Pilihan ${option.label}: ${option.content}`} tabIndex={current.type === 'single_choice' ? (selected || (noSingleChoiceSelected && optionIndex === 0) ? 0 : -1) : 0} onKeyDown={(event) => navigateSingleChoice(event, current, optionIndex)} onClick={() => chooseOption(current, option.id)} className={`flex min-h-11 w-full items-center gap-3 rounded-xl border p-3 text-left transition ${selected ? 'border-emerald-500 bg-emerald-50 ring-1 ring-emerald-500' : 'border-slate-200 hover:border-slate-300'}`}>{current.type === 'multiple_choice' ? <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded border-2 text-sm font-bold ${selected ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-300 bg-white text-transparent'}`}>✓</span> : <span className="font-semibold text-slate-600">{option.label}</span>}<span className="text-slate-800">{option.content}</span></button>;
+                                return <button id={`question-${current.id}-option-${optionIndex}`} key={option.id} type="button" role={current.type === 'single_choice' ? 'radio' : 'checkbox'} aria-checked={Boolean(selected)} aria-label={`Pilihan ${option.label}: ${option.content}`} tabIndex={current.type === 'single_choice' ? (selected || (noSingleChoiceSelected && optionIndex === 0) ? 0 : -1) : 0} onKeyDown={(event) => navigateSingleChoice(event, current, optionIndex)} onClick={() => chooseOption(current, option.id)} className={`flex min-h-11 w-full items-center gap-3 rounded-xl border p-3 text-left transition ${selected ? 'border-emerald-500 bg-emerald-50 ring-1 ring-emerald-500' : 'border-slate-200 hover:border-slate-300'}`}>{current.type === 'multiple_choice' ? <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded border-2 text-sm font-bold ${selected ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-300 bg-white text-transparent'}`}>✓</span> : <span className="font-semibold text-slate-600">{option.label}</span>}<FormattedText text={option.content} className="text-slate-800" /></button>;
                             })}
                         </div>
                             )}

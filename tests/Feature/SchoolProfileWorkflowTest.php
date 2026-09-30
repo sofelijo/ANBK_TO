@@ -166,6 +166,74 @@ class SchoolProfileWorkflowTest extends TestCase
         $this->assertNull($student->approved_by);
     }
 
+    public function test_admin_can_view_and_approve_students_from_all_schools(): void
+    {
+        [, $admin] = $this->scenario();
+        $otherSchool = School::create(['name' => 'Sekolah Global', 'npsn' => '77777777']);
+        $student = User::create([
+            'school_id' => $otherSchool->id,
+            'name' => 'Siswa Global Menunggu',
+            'email' => 'student.'.$otherSchool->id.'.1234567893@toa.local',
+            'parent_email' => 'orang-tua-global@example.com',
+            'password' => 'password',
+            'role' => UserRole::Student,
+            'student_identifier' => '1234567893',
+            'grade_level' => 6,
+            'is_active' => false,
+            'approved_at' => null,
+        ]);
+
+        $this->actingAs($admin)
+            ->get(route('school.students.index', ['search' => 'Siswa Global']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('canChooseSchool', true)
+                ->where('students.data.0.id', $student->id)
+                ->where('students.data.0.school.npsn', '77777777'));
+
+        $this->actingAs($admin)
+            ->patch(route('school.students.approve', $student))
+            ->assertRedirect();
+
+        $this->assertTrue($student->fresh()->is_active);
+        $this->assertSame($admin->id, $student->fresh()->approved_by);
+    }
+
+    public function test_admin_can_select_and_update_any_school_profile(): void
+    {
+        [, $admin] = $this->scenario();
+        $otherSchool = School::create([
+            'name' => 'Sekolah Dipilih',
+            'npsn' => '88888888',
+            'subdistrict' => School::SUBDISTRICTS[0],
+            'timezone' => 'Asia/Jakarta',
+        ]);
+
+        $this->actingAs($admin)
+            ->get(route('school.edit', ['school_id' => $otherSchool->id]))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('canChooseSchool', true)
+                ->where('school.id', $otherSchool->id));
+
+        $this->actingAs($admin)
+            ->patch(route('school.update'), [
+                'school_id' => $otherSchool->id,
+                'name' => 'Sekolah Diperbarui Admin',
+                'npsn' => '88888888',
+                'subdistrict' => School::SUBDISTRICTS[0],
+                'timezone' => 'Asia/Jakarta',
+                'address' => '',
+                'province' => '',
+                'city' => '',
+                'principal_name' => '',
+                'phone' => '',
+                'admin_whatsapp' => '',
+            ])
+            ->assertRedirect()
+            ->assertSessionHasNoErrors();
+
+        $this->assertSame('Sekolah Diperbarui Admin', $otherSchool->fresh()->name);
+    }
+
     private function scenario(): array
     {
         $school = School::create(['name' => 'Sekolah Operator', 'npsn' => '44444444']);

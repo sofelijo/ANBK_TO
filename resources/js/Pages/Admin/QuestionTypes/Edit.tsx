@@ -1,6 +1,6 @@
 import InputError from '@/Components/InputError';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
-import { Head, useForm } from '@inertiajs/react';
+import { Head, router, useForm } from '@inertiajs/react';
 import { FormEvent } from 'react';
 
 type QuestionTypeOption = {
@@ -9,8 +9,11 @@ type QuestionTypeOption = {
     description: string;
 };
 
-export default function Edit({ questionTypes, allQuestionTypes }: { questionTypes: QuestionTypeOption[]; allQuestionTypes: QuestionTypeOption[] }) {
+type School = { id: number; name: string; npsn: string };
+
+export default function Edit({ questionTypes, allQuestionTypes, school, schools }: { questionTypes: QuestionTypeOption[]; allQuestionTypes: QuestionTypeOption[]; school: School; schools: School[] }) {
     const { data, setData, patch, processing, errors, recentlySuccessful } = useForm({
+        school_id: school.id,
         enabled_question_types: questionTypes.map((type) => type.value),
     });
 
@@ -29,6 +32,7 @@ export default function Edit({ questionTypes, allQuestionTypes }: { questionType
         <AuthenticatedLayout header={<div><p className="text-sm font-medium text-emerald-600">Administrasi</p><h1 className="mt-1 text-2xl font-bold text-slate-900">Bentuk Soal Aktif</h1><p className="mt-1 text-sm text-slate-500">Tentukan bentuk soal yang dapat dipilih saat membuat soal baru di sekolah ini.</p></div>}>
             <Head title="Bentuk Soal Aktif" />
             <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 lg:px-8">
+                <label className="mb-5 block text-sm font-medium text-slate-700">Sekolah<select value={school.id} onChange={(event) => router.get(route('admin.question-types.edit'), { school_id: Number(event.target.value) })} className="mt-1 block w-full rounded-lg border-slate-300 bg-white">{schools.map((option) => <option key={option.id} value={option.id}>{option.name} ({option.npsn})</option>)}</select></label>
                 <form onSubmit={submit} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
                     <div className="space-y-3">
                         {allQuestionTypes.map((type) => {
