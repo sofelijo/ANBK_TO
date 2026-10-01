@@ -18,4 +18,15 @@ export type PageProps<
         success?: string;
         error?: string;
     };
+    notifications: {
+        unread_count: number;
+        items: Array<{
+            id: string;
+            title: string;
+            message: string;
+            kind: string;
+            read_at?: string;
+            created_at?: string;
+        }>;
+    };
 };

@@ -78,7 +78,16 @@ class RegistrationTest extends TestCase
 
     public function test_teacher_registration_waits_for_admin_approval(): void
     {
-        School::create(['name' => 'Sekolah Uji', 'npsn' => '10000005']);
+        $school = School::create(['name' => 'Sekolah Uji', 'npsn' => '10000005']);
+        $admin = User::create([
+            'name' => 'Admin Persetujuan',
+            'email' => 'admin-persetujuan@example.com',
+            'password' => 'password',
+            'role' => UserRole::Admin,
+            'is_active' => true,
+            'approved_at' => now(),
+            'email_verified_at' => now(),
+        ]);
 
         $response = $this->post('/register', [
             'name' => 'Guru Pendaftar',
@@ -97,6 +106,8 @@ class RegistrationTest extends TestCase
         $this->assertFalse($teacher->is_active);
         $this->assertNull($teacher->approved_at);
         $this->assertNull($teacher->student_identifier);
+        $this->assertSame(1, $admin->notifications()->count());
+        $this->assertSame('Pendaftaran baru menunggu persetujuan', $admin->notifications()->firstOrFail()->data['title']);
 
         $this->post('/login', [
             'email' => 'guru-pendaftar@example.com',

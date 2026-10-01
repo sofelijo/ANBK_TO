@@ -247,7 +247,7 @@ class AssessmentScheduleWorkflowTest extends TestCase
 
     public function test_admin_can_change_session_duration_and_future_schedules_are_recalculated(): void
     {
-        [$operator, $assessment] = $this->scenario();
+        [$operator, $assessment, $student] = $this->scenario();
         $admin = User::create([
             'school_id' => null,
             'name' => 'Admin Durasi',
@@ -278,6 +278,9 @@ class AssessmentScheduleWorkflowTest extends TestCase
         $schedule = AssessmentSchedule::firstOrFail();
         $this->assertSame('2026-08-11 12:30', $schedule->starts_at->format('Y-m-d H:i'));
         $this->assertSame('2026-08-11 14:30', $schedule->ends_at->format('Y-m-d H:i'));
+        $this->assertTrue($student->notifications()->get()->contains(
+            fn ($notification): bool => $notification->data['title'] === 'Jadwal try out berubah',
+        ));
 
         $this->actingAs($admin)->get(route('schedules.index'))
             ->assertInertia(fn (Assert $page) => $page
@@ -465,6 +468,29 @@ class AssessmentScheduleWorkflowTest extends TestCase
             'session_number' => 1,
             'student_count' => 1,
         ])->assertForbidden();
+    }
+
+    public function test_upcoming_schedule_reminder_is_sent_only_once(): void
+    {
+        [$operator, $assessment, $student, $otherStudent] = $this->scenario();
+        $this->travelTo(CarbonImmutable::parse('2026-08-10 07:00'));
+        AssessmentSchedule::create([
+            'assessment_id' => $assessment->id,
+            'school_npsn' => $operator->school->npsn,
+            'scheduled_date' => '2026-08-10',
+            'session_number' => 1,
+            'student_count' => 20,
+            'starts_at' => now()->addHour(),
+            'ends_at' => now()->addHours(3),
+            'created_by' => $operator->id,
+        ]);
+
+        $this->artisan('schedules:send-reminders')->assertSuccessful();
+        $this->artisan('schedules:send-reminders')->assertSuccessful();
+
+        $this->assertSame(1, $student->notifications()->count());
+        $this->assertSame('Try out segera dimulai', $student->notifications()->firstOrFail()->data['title']);
+        $this->assertSame(0, $otherStudent->notifications()->count());
     }
 
     private function scenario(): array

@@ -10,3 +10,4 @@ Artisan::command('inspire', function () {
 
 Schedule::command('ai:poll-image-batches')->everyFiveMinutes()->withoutOverlapping();
 Schedule::command('attempts:submit-expired')->everyMinute()->withoutOverlapping(5);
+Schedule::command('schedules:send-reminders')->everyFiveMinutes()->withoutOverlapping();

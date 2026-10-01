@@ -6,6 +6,8 @@ use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Models\School;
 use App\Models\User;
+use App\Notifications\ActionNotification;
+use App\Services\NotificationAudience;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -38,7 +40,7 @@ class RegisteredUserController extends Controller
      *
      * @throws ValidationException
      */
-    public function store(Request $request): RedirectResponse
+    public function store(Request $request, NotificationAudience $audience): RedirectResponse
     {
         $data = $request->validate([
             'name' => 'required|string|max:255',
@@ -111,6 +113,24 @@ class RegisteredUserController extends Controller
         ]);
 
         event(new Registered($user));
+
+        $roleLabel = match ($role) {
+            UserRole::Student => 'siswa',
+            UserRole::Operator => 'operator',
+            default => 'guru',
+        };
+        $audience->send(
+            $audience->approversForRegistration($role, $school->id),
+            new ActionNotification(
+                'Pendaftaran baru menunggu persetujuan',
+                "{$user->name} mendaftar sebagai {$roleLabel} di {$school->name}.",
+                $role === UserRole::Student
+                    ? route('school.students.index', ['status' => 'pending'], absolute: false)
+                    : route('admin.users.index', ['status' => 'pending'], absolute: false),
+                'warning',
+                "registration:{$user->id}",
+            ),
+        );
 
         $status = match ($role) {
             UserRole::Student => 'Pendaftaran murid berhasil. Akun Anda menunggu persetujuan operator sekolah.',

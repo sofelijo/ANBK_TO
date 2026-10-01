@@ -8,8 +8,11 @@ use App\Models\ApplicationSetting;
 use App\Models\Assessment;
 use App\Models\AssessmentSchedule;
 use App\Models\School;
+use App\Models\User;
+use App\Notifications\ActionNotification;
 use App\Services\AssessmentScheduleCapacityService;
 use App\Services\AuditLogger;
+use App\Services\NotificationAudience;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -180,7 +183,7 @@ class AssessmentScheduleController extends Controller
             ]);
         }
 
-        DB::transaction(function () use ($capacityService, $data, $date, $startsAt, $endsAt, $request): void {
+        $schedule = DB::transaction(function () use ($capacityService, $data, $date, $startsAt, $endsAt, $request): AssessmentSchedule {
             $used = (int) AssessmentSchedule::query()
                 ->whereDate('scheduled_date', $date)
                 ->where('session_number', $data['session_number'])
@@ -195,7 +198,7 @@ class AssessmentScheduleController extends Controller
                 ]);
             }
 
-            AssessmentSchedule::create([
+            return AssessmentSchedule::create([
                 ...$data,
                 'starts_at' => $startsAt,
                 'ends_at' => $endsAt,
@@ -203,6 +206,22 @@ class AssessmentScheduleController extends Controller
             ]);
         });
         $request->session()->put('schedule_student_count', (int) $data['student_count']);
+
+        User::query()
+            ->where('role', UserRole::Student)
+            ->where('grade_level', $assessment->grade_level)
+            ->where('is_active', true)
+            ->whereHas('school', fn ($school) => $school->where('npsn', $data['school_npsn']))
+            ->chunkById(200, function ($students) use ($assessment, $schedule): void {
+                foreach ($students as $student) {
+                    $student->notify(new ActionNotification(
+                        'Jadwal try out tersedia',
+                        "{$assessment->title} dijadwalkan pada {$schedule->starts_at->format('d/m/Y H:i')}.",
+                        route('assessments.show', $assessment, absolute: false),
+                        'info',
+                    ));
+                }
+            });
 
         return back()->with('success', "Jadwal NPSN {$data['school_npsn']} untuk {$data['student_count']} siswa berhasil dibuat.");
     }
@@ -234,6 +253,7 @@ class AssessmentScheduleController extends Controller
         Request $request,
         AssessmentScheduleCapacityService $capacityService,
         AuditLogger $auditLogger,
+        NotificationAudience $audience,
     ): RedirectResponse {
         $data = $request->validate([
             'session_duration_minutes' => ['required', 'integer', 'min:30', 'max:600'],
@@ -253,15 +273,21 @@ class AssessmentScheduleController extends Controller
             ]);
         }
 
-        $setting = DB::transaction(function () use ($duration, $slots): ApplicationSetting {
+        $affectedSchedules = AssessmentSchedule::query()
+            ->where('starts_at', '>', now())
+            ->with('assessment:id,title,grade_level')
+            ->get();
+        $previousStartsAt = $affectedSchedules->mapWithKeys(fn (AssessmentSchedule $schedule): array => [
+            $schedule->id => $schedule->starts_at?->toISOString(),
+        ]);
+
+        $setting = DB::transaction(function () use ($duration, $slots, $affectedSchedules): ApplicationSetting {
             $setting = ApplicationSetting::query()->updateOrCreate(
                 ['key' => AssessmentScheduleCapacityService::DURATION_SETTINGS_KEY],
                 ['value' => (string) $duration],
             );
 
-            AssessmentSchedule::query()
-                ->where('starts_at', '>', now())
-                ->get()
+            $affectedSchedules
                 ->each(function (AssessmentSchedule $schedule) use ($slots): void {
                     $slot = $slots[$schedule->session_number];
                     $date = CarbonImmutable::parse($schedule->scheduled_date)->startOfDay();
@@ -277,6 +303,23 @@ class AssessmentScheduleController extends Controller
         $auditLogger->log($request, 'assessment_schedule_duration.updated', $setting, [
             'session_duration_minutes' => $duration,
         ]);
+
+        foreach ($affectedSchedules as $schedule) {
+            if ($previousStartsAt->get($schedule->id) === $schedule->starts_at?->toISOString()) {
+                continue;
+            }
+
+            $audience->send(
+                $audience->studentsForSchedule($schedule),
+                new ActionNotification(
+                    'Jadwal try out berubah',
+                    "Jadwal {$schedule->assessment->title} diperbarui menjadi {$schedule->starts_at->format('d/m/Y H:i')}.",
+                    route('assessments.show', $schedule->assessment_id, absolute: false),
+                    'warning',
+                    "schedule-updated:{$schedule->id}:{$schedule->updated_at?->timestamp}",
+                ),
+            );
+        }
 
         return back()->with('success', "Durasi diperbarui menjadi {$duration} menit per sesi.");
     }
@@ -314,14 +357,29 @@ class AssessmentScheduleController extends Controller
         return back()->with('success', 'Ambang warna kapasitas tanggal berhasil diperbarui.');
     }
 
-    public function destroy(Request $request, AssessmentSchedule $schedule): RedirectResponse
+    public function destroy(Request $request, AssessmentSchedule $schedule, NotificationAudience $audience): RedirectResponse
     {
         abort_unless(
             $request->user()->hasRole(UserRole::Admin)
             || $schedule->school_npsn === $request->user()->school()->value('npsn'),
             404,
         );
+        $schedule->loadMissing('assessment:id,title,grade_level');
+        $students = $audience->studentsForSchedule($schedule);
+        $assessmentTitle = $schedule->assessment->title;
+        $scheduleId = $schedule->id;
         $schedule->delete();
+
+        $audience->send(
+            $students,
+            new ActionNotification(
+                'Jadwal try out dibatalkan',
+                "Jadwal {$assessmentTitle} telah dibatalkan oleh pengelola sekolah.",
+                route('assessments.index', absolute: false),
+                'warning',
+                "schedule-cancelled:{$scheduleId}",
+            ),
+        );
 
         return back()->with('success', 'Jadwal berhasil dihapus.');
     }

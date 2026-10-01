@@ -136,6 +136,11 @@ class Question extends Model
         return $this->hasMany(QuestionVerification::class)->latest('verified_at');
     }
 
+    public function reviewComments(): HasMany
+    {
+        return $this->hasMany(QuestionReviewComment::class)->latest();
+    }
+
     public function assessments(): BelongsToMany
     {
         return $this->belongsToMany(Assessment::class)

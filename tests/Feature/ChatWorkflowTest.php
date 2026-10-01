@@ -137,7 +137,7 @@ class ChatWorkflowTest extends TestCase
     public function test_sensitive_message_uses_fixed_safety_response_without_calling_ai(): void
     {
         config()->set('ai.driver', 'fake');
-        [, $student] = $this->users();
+        [$teacher, $student] = $this->users();
 
         $this->actingAs($student)
             ->post(route('student-chat.messages.store'), ['content' => 'Aku berpikir untuk menyakiti diri.'])
@@ -148,6 +148,8 @@ class ChatWorkflowTest extends TestCase
         $this->assertTrue($message->metadata['needs_teacher_attention']);
         $this->assertStringContainsString('orang dewasa yang kamu percaya', $message->content);
         $this->assertDatabaseCount('ai_generations', 0);
+        $this->assertSame(1, $teacher->notifications()->count());
+        $this->assertSame('Chat siswa perlu perhatian', $teacher->notifications()->firstOrFail()->data['title']);
     }
 
     private function users(): array

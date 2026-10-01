@@ -11,6 +11,9 @@ use App\Models\Assessment;
 use App\Models\Competency;
 use App\Models\Question;
 use App\Models\Subject;
+use App\Models\User;
+use App\Notifications\ActionNotification;
+use App\Services\NotificationAudience;
 use App\Services\QuestionSnapshotService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -651,9 +654,10 @@ class AssessmentController extends Controller
         ]);
     }
 
-    public function update(Request $request, Assessment $assessment): RedirectResponse
+    public function update(Request $request, Assessment $assessment, NotificationAudience $audience): RedirectResponse
     {
         $this->ensureEditable($request, $assessment);
+        $wasPublished = $assessment->status === AssessmentStatus::Published;
         $data = $this->validatedData($request);
         $questions = $this->resolveQuestions($request, $data, $assessment);
         $candidateQuestionIds = $this->candidateQuestionIds($request, $data, $assessment);
@@ -665,6 +669,19 @@ class AssessmentController extends Controller
             ]);
             $this->syncQuestions($assessment, $questions);
         });
+
+        if ($wasPublished) {
+            $audience->send(
+                $audience->studentsForAssessment($assessment),
+                new ActionNotification(
+                    'Paket try out sedang diperbarui',
+                    "Paket {$assessment->title} diperbarui dan sementara kembali menjadi draft sampai diterbitkan ulang.",
+                    route('assessments.index', absolute: false),
+                    'warning',
+                    "assessment-updated:{$assessment->id}:{$assessment->updated_at?->timestamp}",
+                ),
+            );
+        }
 
         return to_route('assessments.index')
             ->with('success', 'Perubahan paket disimpan sebagai draft dan perlu diterbitkan ulang.');
@@ -689,6 +706,23 @@ class AssessmentController extends Controller
 
         $snapshotService->snapshotAssessment($assessment);
         $assessment->update(['status' => AssessmentStatus::Published]);
+
+        if (! $assessment->requiresSchoolSchedule()) {
+            User::query()
+                ->where('role', UserRole::Student)
+                ->where('grade_level', $assessment->grade_level)
+                ->where('is_active', true)
+                ->chunkById(200, function ($students) use ($assessment): void {
+                    foreach ($students as $student) {
+                        $student->notify(new ActionNotification(
+                            'Try out baru tersedia',
+                            "Paket {$assessment->title} sudah diterbitkan dan dapat dikerjakan.",
+                            route('assessments.show', $assessment, absolute: false),
+                            'info',
+                        ));
+                    }
+                });
+        }
 
         return back()->with('success', 'Paket try out telah diterbitkan.');
     }

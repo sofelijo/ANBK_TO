@@ -21,6 +21,7 @@ use App\Http\Controllers\CompetencyController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\ManualIndonesianBundleController;
 use App\Http\Controllers\MonitoringAiAnalysisController;
+use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\QuestionBlueprintController;
 use App\Http\Controllers\QuestionController;
@@ -50,6 +51,9 @@ Route::get('/dashboard', DashboardController::class)
     ->name('dashboard');
 
 Route::middleware(['auth', 'verified'])->group(function () {
+    Route::get('/notifications', [NotificationController::class, 'index'])->name('notifications.index');
+    Route::get('/notifications/{notification}', [NotificationController::class, 'open'])->name('notifications.open');
+    Route::post('/notifications/read-all', [NotificationController::class, 'readAll'])->name('notifications.read-all');
     Route::get('/assessments', [AssessmentController::class, 'index'])->name('assessments.index');
 
     Route::middleware('role:admin,teacher')->group(function () {
@@ -99,6 +103,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/story-questions/{generation}/illustration', [AiStoryIllustrationController::class, 'store'])->name('story-questions.illustration.store');
         Route::post('/ai-questions/{generation}/illustration', [AiStoryIllustrationController::class, 'store'])->name('ai-questions.illustration.store');
         Route::post('/questions/{question}/update-status', [QuestionController::class, 'updateStatus'])->name('questions.update-status');
+        Route::post('/questions/{question}/request-revision', [QuestionController::class, 'requestRevision'])->name('questions.request-revision');
+        Route::patch('/questions/{question}/review-comments/{comment}/resolve', [QuestionController::class, 'resolveReviewComment'])->name('questions.review-comments.resolve');
         Route::put('/generated-questions/{generation}/questions/{question}', [QuestionController::class, 'inlineUpdate'])->name('generated-questions.inline-update');
         Route::delete('/generated-questions/{generation}/questions/{question}', [QuestionController::class, 'destroyGenerated'])->name('generated-questions.destroy');
         Route::resource('questions', QuestionController::class)->only(['index', 'create', 'store', 'show', 'edit', 'update']);

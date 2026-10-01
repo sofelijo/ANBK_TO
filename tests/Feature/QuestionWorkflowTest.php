@@ -57,7 +57,7 @@ class QuestionWorkflowTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page
                 ->component('Questions/Show')
                 ->where('studentPreview', true));
-        $this->actingAs($otherTeacher)->get(route('questions.edit', $question))->assertOk();
+        $this->actingAs($otherTeacher)->get(route('questions.edit', $question))->assertForbidden();
     }
 
     public function test_draft_is_private_until_submitted_for_review(): void
@@ -331,6 +331,61 @@ class QuestionWorkflowTest extends TestCase
 
         $this->actingAs($fourthTeacher)->post(route('questions.approve', $question))->assertRedirect();
         $this->assertDatabaseCount('question_verifications', 4);
+    }
+
+    public function test_reviewer_can_request_revision_and_only_continue_after_author_resolves_it(): void
+    {
+        [$author, $competency] = $this->teacherAndCompetency();
+        $question = $this->question($author, $competency);
+        $question->update([
+            'status' => QuestionStatus::Draft,
+            'approved_by' => null,
+            'approved_at' => null,
+            'metadata' => ['verification_locked' => true],
+        ]);
+        $reviewer = $this->verificationTeacher($author, 2);
+
+        $this->actingAs($author)
+            ->post(route('questions.update-status', $question), ['status' => 'review'])
+            ->assertRedirect();
+        $this->assertSame(1, $question->verifications()->count());
+
+        $this->actingAs($reviewer)
+            ->post(route('questions.request-revision', $question), [
+                'comment' => 'Perjelas satuan pada pilihan jawaban kedua.',
+            ])
+            ->assertRedirect()
+            ->assertSessionHas('success');
+
+        $comment = $question->reviewComments()->sole();
+        $this->assertNull($comment->resolved_at);
+        $this->assertDatabaseHas('notifications', [
+            'notifiable_id' => $author->id,
+            'notifiable_type' => $author->getMorphClass(),
+        ]);
+
+        $this->actingAs($reviewer)
+            ->post(route('questions.approve', $question))
+            ->assertSessionHasErrors('verification');
+        $this->assertSame(1, $question->verifications()->count());
+
+        $this->actingAs($author)
+            ->patch(route('questions.review-comments.resolve', [$question, $comment]))
+            ->assertRedirect()
+            ->assertSessionHas('success');
+
+        $this->assertNotNull($comment->fresh()->resolved_at);
+        $this->assertSame($author->id, $comment->fresh()->resolved_by);
+        $this->assertDatabaseHas('notifications', [
+            'notifiable_id' => $reviewer->id,
+            'notifiable_type' => $reviewer->getMorphClass(),
+        ]);
+
+        $this->actingAs($reviewer)
+            ->post(route('questions.approve', $question))
+            ->assertRedirect()
+            ->assertSessionHas('success');
+        $this->assertSame(2, $question->verifications()->count());
     }
 
     public function test_question_form_requires_matching_subject_and_competency(): void

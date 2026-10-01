@@ -13,9 +13,11 @@ use App\Models\Assessment;
 use App\Models\Competency;
 use App\Models\Question;
 use App\Models\QuestionBlueprint;
+use App\Models\QuestionReviewComment;
 use App\Models\QuestionVerification;
 use App\Models\Subject;
 use App\Models\User;
+use App\Notifications\ActionNotification;
 use App\Services\AuditLogger;
 use App\Services\EducationalGeometryTemplateSvgRenderer;
 use App\Services\QuestionDuplicateDetector;
@@ -82,11 +84,16 @@ class QuestionController extends Controller
             ->withCount([
                 'variants',
                 'verifications',
+                'reviewComments as open_review_comments_count' => fn ($query) => $query->whereNull('resolved_at'),
                 'bundleQuestions as bundle_question_count',
                 'bundleQuestions as bundle_draft_count' => fn ($query) => $query->where('status', QuestionStatus::Draft),
-                'bundleQuestions as bundle_review_count' => fn ($query) => $query->where('status', QuestionStatus::Review),
+                'bundleQuestions as bundle_review_count' => fn ($query) => $query
+                    ->where('status', QuestionStatus::Review)
+                    ->whereDoesntHave('reviewComments', fn ($comments) => $comments->whereNull('resolved_at')),
                 'bundleQuestions as bundle_published_count' => fn ($query) => $query->where('status', QuestionStatus::Published),
                 'bundleQuestions as bundle_archived_count' => fn ($query) => $query->where('status', QuestionStatus::Archived),
+                'bundleQuestions as bundle_revision_count' => fn ($query) => $query
+                    ->whereHas('reviewComments', fn ($comments) => $comments->whereNull('resolved_at')),
             ])
             ->addSelect([
                 // Total verifikasi dari semua soal dalam bundle yang sama
@@ -234,6 +241,8 @@ class QuestionController extends Controller
             'approver:id,name',
             'options',
             'verifications.verifier:id,name',
+            'reviewComments.reviewer:id,name',
+            'reviewComments.resolver:id,name',
             'variants' => fn ($query) => $query->with('competency:id,code,name')->latest(),
             'revisionOf:id,title,version,status',
             'supersededBy:id,title,version,status',
@@ -272,8 +281,20 @@ class QuestionController extends Controller
         return Inertia::render('Questions/Show', [
             'question' => $question,
             'studentPreview' => $request->boolean('student_preview'),
-            'canManageStatus' => $question->author_id === $request->user()->id || $request->user()->hasRole(UserRole::Admin),
+            'canManageStatus' => $question->author_id === $request->user()->id,
             'isAuthor' => $question->author_id === $request->user()->id,
+            'reviewComments' => $question->reviewComments->map(fn (QuestionReviewComment $comment): array => [
+                'id' => $comment->id,
+                'comment' => $comment->comment,
+                'reviewer' => $comment->reviewer?->name ?? 'Guru tidak aktif',
+                'reviewer_id' => $comment->reviewer_id,
+                'created_at' => $comment->created_at?->toISOString(),
+                'resolved_at' => $comment->resolved_at?->toISOString(),
+                'resolved_by' => $comment->resolver?->name,
+            ])->values(),
+            'canRequestRevision' => $request->user()->hasRole(UserRole::Teacher)
+                && $question->author_id !== $request->user()->id
+                && $question->status === QuestionStatus::Review,
             'packageUsage' => $packageUsage,
             'availablePackages' => $availablePackages,
             'stimulusSvgTemplates' => $this->stimulusSvgTemplates(),
@@ -294,6 +315,7 @@ class QuestionController extends Controller
     public function edit(Request $request, Question $question): Response
     {
         $this->ensureAccessible($request, $question);
+        abort_unless($question->author_id === $request->user()->id, 403, 'Hanya pembuat soal yang dapat mengedit soal ini.');
         abort_if($question->superseded_by_id !== null, 409, 'Versi soal ini sudah digantikan oleh revisi yang lebih baru.');
         $question->load('options');
         $returnGeneration = $this->returnGeneration($request, $question);
@@ -318,6 +340,7 @@ class QuestionController extends Controller
     public function update(Request $request, Question $question, AuditLogger $auditLogger, StimulusImageService $imageService): RedirectResponse
     {
         $this->ensureAccessible($request, $question);
+        abort_unless($question->author_id === $request->user()->id, 403, 'Hanya pembuat soal yang dapat mengedit soal ini.');
         abort_if($question->superseded_by_id !== null, 409, 'Versi soal ini sudah digantikan oleh revisi yang lebih baru.');
         $returnGeneration = $this->returnGeneration($request, $question);
         $data = $this->validatedData($request, $question);
@@ -402,6 +425,7 @@ class QuestionController extends Controller
         AuditLogger $auditLogger,
     ): RedirectResponse {
         $this->ensureAccessible($request, $question);
+        abort_unless($question->author_id === $request->user()->id, 403, 'Hanya pembuat soal yang dapat mengedit soal ini.');
         abort_unless(
             $generation->type === AiGenerationType::StoryQuestions
             && $question->story_generation_id === $generation->id
@@ -533,6 +557,7 @@ class QuestionController extends Controller
     public function archive(Request $request, Question $question, AuditLogger $auditLogger): RedirectResponse
     {
         $this->ensureAccessible($request, $question);
+        abort_unless($question->author_id === $request->user()->id, 403, 'Hanya pembuat soal yang dapat mengarsipkan soal ini.');
         $question->update(['status' => QuestionStatus::Archived]);
         $auditLogger->log($request, 'question.archived', $question);
 
@@ -561,6 +586,16 @@ class QuestionController extends Controller
                 'verification_count' => $result['count'],
                 'published' => $result['published'],
             ]);
+            if ($question->author_id !== $request->user()->id) {
+                $question->author?->notify(new ActionNotification(
+                    $result['published'] ? 'Soal sudah terbit' : 'Verifikasi baru',
+                    $result['published']
+                        ? "Soal #{$question->id} sudah memperoleh verifikasi yang cukup dan diterbitkan."
+                        : "{$request->user()->name} memverifikasi soal #{$question->id} ({$result['count']}/".QuestionVerificationService::requiredFor($question).').',
+                    route('questions.show', $question, absolute: false),
+                    $result['published'] ? 'success' : 'info',
+                ));
+            }
         }
 
         if ($result['published']) {
@@ -592,6 +627,53 @@ class QuestionController extends Controller
         );
     }
 
+    public function requestRevision(Request $request, Question $question, AuditLogger $auditLogger): RedirectResponse
+    {
+        $this->ensureAccessible($request, $question);
+        abort_unless($request->user()->hasRole(UserRole::Teacher), 403);
+        abort_if($question->author_id === $request->user()->id, 422, 'Pembuat soal tidak dapat meminta perbaikan pada soalnya sendiri.');
+        abort_unless($question->status === QuestionStatus::Review, 409, 'Permintaan perbaikan hanya dapat diberikan saat soal menunggu verifikasi.');
+
+        $data = $request->validate([
+            'comment' => ['required', 'string', 'min:5', 'max:3000'],
+        ], ['comment.required' => 'Komentar perbaikan wajib diisi.', 'comment.min' => 'Komentar perbaikan minimal 5 karakter.']);
+
+        $comment = $question->reviewComments()->create([
+            'reviewer_id' => $request->user()->id,
+            'comment' => trim($data['comment']),
+        ]);
+        $question->verifications()->where('verifier_id', $request->user()->id)->delete();
+
+        $question->author?->notify(new ActionNotification(
+            'Soal perlu diperbaiki',
+            "{$request->user()->name} memberikan komentar perbaikan pada soal #{$question->id}.",
+            route('questions.show', $question, absolute: false),
+            'warning',
+        ));
+        $auditLogger->log($request, 'question.revision_requested', $question, ['comment_id' => $comment->id]);
+
+        return back()->with('success', 'Status soal menjadi Perlu perbaikan. Pembuat soal sudah diberi notifikasi.');
+    }
+
+    public function resolveReviewComment(Request $request, Question $question, QuestionReviewComment $comment, AuditLogger $auditLogger): RedirectResponse
+    {
+        $this->ensureAccessible($request, $question);
+        abort_unless($question->author_id === $request->user()->id, 403, 'Hanya pembuat soal yang dapat menindaklanjuti komentar.');
+        abort_unless($comment->question_id === $question->id, 404);
+        abort_if($comment->resolved_at !== null, 409, 'Komentar ini sudah ditindaklanjuti.');
+
+        $comment->update(['resolved_at' => now(), 'resolved_by' => $request->user()->id]);
+        $comment->reviewer?->notify(new ActionNotification(
+            'Perbaikan soal ditindaklanjuti',
+            "{$request->user()->name} menandai komentar Anda pada soal #{$question->id} sudah ditindaklanjuti. Verifikasi dapat dilanjutkan setelah semua komentar selesai.",
+            route('questions.show', $question, absolute: false),
+            'success',
+        ));
+        $auditLogger->log($request, 'question.review_comment_resolved', $question, ['comment_id' => $comment->id]);
+
+        return back()->with('success', 'Komentar ditandai sudah ditindaklanjuti.');
+    }
+
     public function updateStatus(
         Request $request,
         Question $question,
@@ -600,10 +682,7 @@ class QuestionController extends Controller
         QuestionVerificationService $verificationService,
     ): RedirectResponse {
         $this->ensureAccessible($request, $question);
-        abort_unless(
-            $question->author_id === $request->user()->id || $request->user()->hasRole(UserRole::Admin),
-            403,
-        );
+        abort_unless($question->author_id === $request->user()->id, 403, 'Hanya pembuat soal yang dapat mengubah status soal ini.');
         abort_if($question->status === QuestionStatus::Published, 409, 'Soal yang sudah terbit tidak dapat diubah statusnya.');
 
         $targetStatus = $request->input('status') === 'review' ? QuestionStatus::Review : QuestionStatus::Draft;
@@ -655,6 +734,7 @@ class QuestionController extends Controller
     {
         $count = $question->verifications->count();
         $required = QuestionVerificationService::requiredFor($question);
+        $hasOpenComments = $question->reviewComments->contains(fn (QuestionReviewComment $comment): bool => $comment->resolved_at === null);
 
         return [
             'required' => $required,
@@ -662,9 +742,11 @@ class QuestionController extends Controller
             'remaining' => max(0, $required - $count),
             'currentUserVerified' => $question->verifications->contains('verifier_id', $user->id),
             'canVerify' => $user->hasRole(UserRole::Teacher)
-                && $question->status !== QuestionStatus::Archived
+                && in_array($question->status, [QuestionStatus::Review, QuestionStatus::Published], true)
                 && $question->superseded_by_id === null
+                && ! $hasOpenComments
                 && ! (bool) data_get($question->metadata, 'verification_locked', false),
+            'hasOpenComments' => $hasOpenComments,
             'verifiers' => $question->verifications->map(fn ($verification): array => [
                 'id' => $verification->verifier_id,
                 'name' => $verification->verifier?->name ?? 'Guru tidak aktif',

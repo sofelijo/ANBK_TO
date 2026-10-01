@@ -821,7 +821,7 @@ class AttemptWorkflowTest extends TestCase
 
     public function test_teacher_can_edit_an_assessment_before_any_attempt_exists(): void
     {
-        [, $assessment, $informationQuestion, , , $teacher] = $this->scenario();
+        [$student, $assessment, $informationQuestion, , , $teacher] = $this->scenario();
 
         $this->actingAs($teacher)
             ->get(route('assessments.edit', $assessment))
@@ -852,6 +852,7 @@ class AttemptWorkflowTest extends TestCase
         $this->assertSame(AssessmentStatus::Draft, $assessment->status);
         $this->assertSame('Try Out Reguler', $assessment->settings['type_label']);
         $this->assertCount(1, $assessment->questions);
+        $this->assertSame('Paket try out sedang diperbarui', $student->notifications()->firstOrFail()->data['title']);
     }
 
     public function test_teacher_can_edit_assessment_even_after_student_starts_it(): void

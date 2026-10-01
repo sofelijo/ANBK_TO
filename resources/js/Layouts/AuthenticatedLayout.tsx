@@ -13,7 +13,7 @@ export default function AuthenticatedLayout({
     header,
     children,
 }: PropsWithChildren<{ header?: ReactNode }>) {
-    const { auth, flash } = usePage().props;
+    const { auth, flash, notifications } = usePage().props;
     const [showingNavigationDropdown, setShowingNavigationDropdown] =
         useState(false);
     const isStudent = auth.user.role === 'student';
@@ -130,6 +130,28 @@ export default function AuthenticatedLayout({
                         </div>
 
                         <div className="flex items-center gap-2 sm:ms-6">
+                            <Dropdown>
+                                <Dropdown.Trigger>
+                                    <button type="button" aria-label={`Notifikasi${notifications.unread_count ? `, ${notifications.unread_count} belum dibaca` : ''}`} className="relative flex h-11 w-11 items-center justify-center rounded-lg text-xl text-slate-600 hover:bg-slate-100">
+                                        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 17H9m9-6a6 6 0 0 0-12 0c0 3-1.5 4-2 5h16c-.5-1-2-2-2-5ZM13.7 20a2 2 0 0 1-3.4 0" />
+                                        </svg>
+                                        {notifications.unread_count > 0 && <span className="absolute right-0.5 top-0.5 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white">{notifications.unread_count > 99 ? '99+' : notifications.unread_count}</span>}
+                                    </button>
+                                </Dropdown.Trigger>
+                                <Dropdown.Content width="80" contentClasses="bg-white">
+                                    <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+                                        <div><p className="text-sm font-bold text-slate-900">Notifikasi</p><p className="text-[11px] text-slate-500">{notifications.unread_count} belum dibaca</p></div>
+                                        {notifications.unread_count > 0 && <Link href={route('notifications.read-all')} method="post" as="button" className="text-xs font-semibold text-indigo-700">Baca semua</Link>}
+                                    </div>
+                                    {notifications.items.length === 0 ? <p className="px-4 py-6 text-center text-sm text-slate-500">Belum ada notifikasi.</p> : notifications.items.map((item) => (
+                                        <Link key={item.id} href={route('notifications.open', item.id)} className={`block border-b border-slate-100 px-4 py-3 last:border-b-0 hover:bg-slate-50 ${item.read_at ? '' : 'bg-indigo-50/60'}`}>
+                                            <div className="flex gap-2"><span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${item.read_at ? 'bg-slate-200' : item.kind === 'warning' ? 'bg-amber-500' : item.kind === 'success' ? 'bg-emerald-500' : 'bg-indigo-500'}`} /><div className="min-w-0"><p className="text-sm font-bold text-slate-900">{item.title}</p><p className="mt-0.5 line-clamp-2 text-xs leading-5 text-slate-600">{item.message}</p>{item.created_at && <p className="mt-1 text-[10px] text-slate-400">{new Intl.DateTimeFormat('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(item.created_at))}</p>}</div></div>
+                                        </Link>
+                                    ))}
+                                    <Link href={route('notifications.index')} className="block px-4 py-3 text-center text-xs font-bold text-indigo-700 hover:bg-indigo-50">Lihat semua notifikasi</Link>
+                                </Dropdown.Content>
+                            </Dropdown>
                             <ThemeToggle showLabel={false} />
 
                             <div className="hidden xl:flex xl:items-center">

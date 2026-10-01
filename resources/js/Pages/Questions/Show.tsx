@@ -50,6 +50,7 @@ type VerificationSummary = {
     remaining: number;
     currentUserVerified: boolean;
     canVerify: boolean;
+    hasOpenComments: boolean;
     verifiers: { id: number | null; name: string; verifiedAt: string }[];
 };
 
@@ -62,6 +63,8 @@ type PackageUsage = {
     questionsCount?: number;
 };
 
+type ReviewComment = { id: number; comment: string; reviewer: string; reviewer_id: number; created_at?: string; resolved_at?: string; resolved_by?: string };
+
 export default function Show({
     question,
     verification,
@@ -71,6 +74,8 @@ export default function Show({
     studentPreview = false,
     canManageStatus = false,
     isAuthor = false,
+    reviewComments = [],
+    canRequestRevision = false,
 }: {
     question: Question;
     verification: VerificationSummary;
@@ -80,15 +85,22 @@ export default function Show({
     studentPreview?: boolean;
     canManageStatus?: boolean;
     isAuthor?: boolean;
+    reviewComments?: ReviewComment[];
+    canRequestRevision?: boolean;
 }) {
     const [isVerifying, setIsVerifying] = useState(false);
     const [selectedPackageId, setSelectedPackageId] = useState<number | ''>(availablePackages[0]?.id ?? '');
     const [isUpdatingPackage, setIsUpdatingPackage] = useState(false);
     const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+    const [revisionComment, setRevisionComment] = useState('');
+    const [isRequestingRevision, setIsRequestingRevision] = useState(false);
 
     if (studentPreview) return <QuestionStudentPreview question={question} />;
 
-    const status = questionStatusPresentation(question.status);
+    const openReviewComments = reviewComments.filter((comment) => !comment.resolved_at);
+    const status = openReviewComments.length > 0
+        ? { label: 'Perlu perbaikan', className: 'bg-rose-100 text-rose-800' }
+        : questionStatusPresentation(question.status);
 
     const submitForReview = () => {
         if (isUpdatingStatus) return;
@@ -96,6 +108,16 @@ export default function Show({
         router.post(route('questions.update-status', question.id), { status: 'review' }, {
             preserveScroll: true,
             onFinish: () => setIsUpdatingStatus(false),
+        });
+    };
+
+    const requestRevision = () => {
+        if (revisionComment.trim().length < 5 || isRequestingRevision) return;
+        setIsRequestingRevision(true);
+        router.post(route('questions.request-revision', question.id), { comment: revisionComment }, {
+            preserveScroll: true,
+            onSuccess: () => setRevisionComment(''),
+            onFinish: () => setIsRequestingRevision(false),
         });
     };
 
@@ -141,7 +163,7 @@ export default function Show({
                     <div className="flex flex-wrap gap-2">
                         <Link href={route('questions.index')} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">← Bank soal</Link>
                         <a href={`${route('questions.show', question.id)}?student_preview=1`} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-indigo-300 bg-white px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50">Preview Siswa ↗</a>
-                        <Link href={route('questions.edit', question.id)} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800">Edit soal</Link>
+                        {isAuthor && <Link href={route('questions.edit', question.id)} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800">Edit soal</Link>}
                     </div>
                 </div>
             }
@@ -149,16 +171,18 @@ export default function Show({
             <Head title={question.title || 'Detail Soal'} />
             <div className="mx-auto grid max-w-7xl gap-6 px-4 py-8 sm:px-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:px-8">
                 <div className="space-y-6">
-                    <section className={`overflow-hidden rounded-2xl border shadow-sm ${verification.currentUserVerified ? 'border-emerald-200 bg-emerald-50' : 'border-blue-200 bg-white'}`}>
+                    <section className={`overflow-hidden rounded-2xl border shadow-sm ${verification.hasOpenComments ? 'border-rose-200 bg-rose-50/40' : verification.currentUserVerified ? 'border-emerald-200 bg-emerald-50' : 'border-blue-200 bg-white'}`}>
                         <div className="p-5 sm:p-6">
                             <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
                                 <div className="max-w-2xl">
                                     <p className={`text-xs font-bold uppercase tracking-wide ${verification.currentUserVerified ? 'text-emerald-700' : 'text-blue-700'}`}>Langkah verifikasi guru</p>
                                     <h2 className="mt-1 text-xl font-bold text-slate-900">
-                                        {question.status === 'draft' ? 'Soal masih berstatus Draft' : verification.currentUserVerified ? 'Verifikasi Anda sudah tercatat' : 'Periksa soal, lalu catat verifikasi Anda'}
+                                        {question.status === 'draft' ? 'Soal masih berstatus Draft' : verification.hasOpenComments ? 'Soal menunggu perbaikan' : verification.currentUserVerified ? 'Verifikasi Anda sudah tercatat' : 'Periksa soal, lalu catat verifikasi Anda'}
                                     </h2>
                                     {question.status === 'draft' ? (
-                                        <p className="mt-2 text-sm leading-6 text-slate-600">Ajukan verifikasi melalui tombol di bagian atas agar guru lain dapat memeriksa soal ini.</p>
+                                        <p className="mt-2 text-sm leading-6 text-slate-600">Gunakan tombol Ajukan dan verifikasi pada panel ini agar guru lain dapat memeriksa soal.</p>
+                                    ) : verification.hasOpenComments ? (
+                                        <p className="mt-2 text-sm leading-6 text-rose-700">Verifikasi dihentikan sementara sampai semua komentar perbaikan ditindaklanjuti oleh pembuat soal.</p>
                                     ) : verification.currentUserVerified ? (
                                         <p className="mt-2 text-sm leading-6 text-slate-600">
                                             Tidak perlu melakukan apa pun lagi. {verification.remaining > 0 ? `Soal ini masih menunggu ${verification.remaining} guru lain.` : 'Syarat verifikasi sudah terpenuhi.'}
@@ -212,6 +236,20 @@ export default function Show({
                                 </div>
                             </div>
                         )}
+
+                        {(reviewComments.length > 0 || canRequestRevision) && <div className="border-t border-slate-200 bg-slate-50/70 px-5 py-4 sm:px-6">
+                            {reviewComments.length > 0 && <div className="space-y-2">
+                                <p className="text-xs font-bold uppercase tracking-wide text-slate-600">Komentar peninjauan</p>
+                                {reviewComments.map((comment) => <div key={comment.id} className={`rounded-xl border p-3 ${comment.resolved_at ? 'border-emerald-200 bg-emerald-50/60' : 'border-rose-200 bg-white'}`}>
+                                    <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="text-xs font-bold text-slate-700">{comment.reviewer}</p><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-800">{comment.comment}</p></div><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${comment.resolved_at ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>{comment.resolved_at ? 'Selesai' : 'Belum ditindaklanjuti'}</span></div>
+                                    {!comment.resolved_at && isAuthor && <button type="button" onClick={() => router.patch(route('questions.review-comments.resolve', [question.id, comment.id]), {}, { preserveScroll: true })} className="mt-3 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-500">Tandai sudah diperbaiki</button>}
+                                </div>)}
+                            </div>}
+                            {canRequestRevision && <div className={reviewComments.length ? 'mt-4 border-t border-slate-200 pt-4' : ''}>
+                                <label className="text-xs font-bold uppercase tracking-wide text-slate-600">Minta perbaikan<textarea value={revisionComment} onChange={(event) => setRevisionComment(event.target.value)} rows={3} maxLength={3000} placeholder="Jelaskan bagian yang perlu diperbaiki secara spesifik…" className="mt-2 block w-full rounded-xl border-slate-300 bg-white text-sm normal-case tracking-normal focus:border-rose-400 focus:ring-rose-400" /></label>
+                                <button type="button" disabled={revisionComment.trim().length < 5 || isRequestingRevision} onClick={requestRevision} className="mt-2 rounded-lg border border-rose-300 bg-white px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-50 disabled:opacity-40">{isRequestingRevision ? 'Mengirim…' : 'Beri status Perlu perbaikan'}</button>
+                            </div>}
+                        </div>}
                     </section>
 
                     <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -366,7 +404,7 @@ export default function Show({
                         <div className="mt-4 grid gap-2">
                             {!['matching', 'category_matrix'].includes(question.type) && <button onClick={() => router.post(route('questions.ai-variants.store', question.id))} className="rounded-lg border border-slate-200 px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50">Buat 3 variasi AI</button>}
                             <button onClick={() => router.post(route('questions.duplicate', question.id))} className="rounded-lg border border-slate-200 px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50">Duplikasi soal</button>
-                            {question.status !== 'archived' && <button onClick={() => window.confirm('Arsipkan soal ini?') && router.post(route('questions.archive', question.id))} className="rounded-lg border border-rose-100 px-3 py-2 text-left text-sm font-semibold text-rose-700 hover:bg-rose-50">Arsipkan soal</button>}
+                            {isAuthor && question.status !== 'archived' && <button onClick={() => window.confirm('Arsipkan soal ini?') && router.post(route('questions.archive', question.id))} className="rounded-lg border border-rose-100 px-3 py-2 text-left text-sm font-semibold text-rose-700 hover:bg-rose-50">Arsipkan soal</button>}
                         </div>
                     </section>
                 </aside>

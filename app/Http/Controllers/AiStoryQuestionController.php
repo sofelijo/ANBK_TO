@@ -604,8 +604,7 @@ class AiStoryQuestionController extends Controller
             ->get()
             ->sortBy(fn (Question $question) => array_search($question->id, $questionIds, true))
             ->values();
-        $ownsBundle = $generation->requested_by === $request->user()->id
-            || $request->user()->hasRole(UserRole::Admin);
+        $ownsBundle = $generation->requested_by === $request->user()->id;
 
         $hasDraftQuestions = $questions->contains(fn (Question $q): bool => $q->status === QuestionStatus::Draft);
         $hasReviewQuestions = $questions->contains(fn (Question $q): bool => $q->status === QuestionStatus::Review);
@@ -613,8 +612,6 @@ class AiStoryQuestionController extends Controller
 
         $isExplicitDraftMode = data_get($generation->request_payload, 'submission_mode') === 'draft';
         $isExplicitReviewMode = data_get($generation->request_payload, 'submission_mode') === 'review';
-        $canManageBundle = ! $isExplicitDraftMode || $ownsBundle;
-
         $isDraft = ! $allPublished && (
             $isExplicitDraftMode
             || (! $isExplicitReviewMode && ($hasDraftQuestions || $questions->contains(fn (Question $question): bool => (bool) data_get($question->metadata, 'verification_locked', false))))
@@ -675,7 +672,7 @@ class AiStoryQuestionController extends Controller
             'verificationLocked' => $verificationLocked,
             'canSubmitForReview' => $canSubmitForReview,
             'canRevertToDraft' => $canRevertToDraft,
-            'isAuthor' => $canManageBundle,
+            'isAuthor' => $ownsBundle,
             'canDeleteBundle' => $canDeleteBundle,
             'availableCompetencies' => $availableCompetencies,
             'availableBlueprints' => $availableBlueprints,
@@ -728,7 +725,7 @@ class AiStoryQuestionController extends Controller
     ): RedirectResponse {
         $this->ensureAccessible($request, $generation);
         abort_unless(
-            $generation->requested_by === $request->user()->id || $request->user()->hasRole(UserRole::Admin),
+            $generation->requested_by === $request->user()->id,
             403,
         );
         if (data_get($generation->request_payload, 'draft_complete', true) === false) {
@@ -807,7 +804,7 @@ class AiStoryQuestionController extends Controller
     {
         $this->ensureAccessible($request, $generation);
         abort_unless(
-            $generation->requested_by === $request->user()->id || $request->user()->hasRole(UserRole::Admin),
+            $generation->requested_by === $request->user()->id,
             403,
         );
 
@@ -854,9 +851,9 @@ class AiStoryQuestionController extends Controller
         $this->ensureAccessible($request, $generation);
 
         abort_unless(
-            $request->user()->hasRole(UserRole::Teacher) || $request->user()->hasRole(UserRole::Admin),
+            $generation->requested_by === $request->user()->id,
             403,
-            'Hanya guru atau admin yang dapat mengubah stimulus.',
+            'Hanya pembuat bundle yang dapat mengubah stimulus.',
         );
 
         $validated = $request->validate([
@@ -899,7 +896,7 @@ class AiStoryQuestionController extends Controller
     {
         $this->ensureAccessible($request, $generation);
         abort_unless(
-            $generation->requested_by === $request->user()->id || $request->user()->hasRole(UserRole::Admin),
+            $generation->requested_by === $request->user()->id,
             403,
             'Hanya pembuat bundle atau admin yang dapat menghapus bundle.',
         );

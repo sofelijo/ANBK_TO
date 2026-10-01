@@ -6,6 +6,7 @@ use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Models\School;
 use App\Models\User;
+use App\Notifications\ActionNotification;
 use App\Services\AuditLogger;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -133,6 +134,15 @@ class UserController extends Controller
             'approved_by' => $user->approved_by ?? $request->user()->id,
         ]);
         $auditLogger->log($request, 'user.status_changed', $user, ['is_active' => $user->is_active]);
+        $user->notify(new ActionNotification(
+            $user->is_active ? 'Akun diaktifkan kembali' : 'Akun dinonaktifkan',
+            $user->is_active
+                ? 'Akun TOA Anda telah diaktifkan kembali oleh administrator.'
+                : 'Akun TOA Anda dinonaktifkan oleh administrator. Hubungi pengelola sekolah bila memerlukan bantuan.',
+            route('dashboard', absolute: false),
+            $user->is_active ? 'success' : 'warning',
+            "account-status:{$user->id}:{$user->updated_at?->timestamp}",
+        ));
 
         return back()->with('success', $user->is_active ? 'Akun diaktifkan.' : 'Akun dinonaktifkan.');
     }
@@ -152,6 +162,12 @@ class UserController extends Controller
             'email_verified_at' => $user->email_verified_at ?? now(),
         ]);
         $auditLogger->log($request, 'user.approved', $user, ['role' => $user->role->value]);
+        $user->notify(new ActionNotification(
+            'Akun disetujui',
+            'Akun TOA Anda telah disetujui dan sekarang dapat digunakan.',
+            route('dashboard', absolute: false),
+            'success',
+        ));
 
         return back()->with('success', 'Akun guru atau operator disetujui dan sekarang dapat login.');
     }

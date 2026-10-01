@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\UserRole;
 use App\Models\School;
 use App\Models\User;
+use App\Notifications\ActionNotification;
 use App\Services\AuditLogger;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -106,6 +107,12 @@ class SchoolStudentController extends Controller
             'email_verified_at' => $student->email_verified_at ?? now(),
         ]);
         $auditLogger->log($request, 'student.approved', $student, ['role' => $student->role->value]);
+        $student->notify(new ActionNotification(
+            'Akun siswa disetujui',
+            'Akun TOA Anda telah disetujui. Anda sekarang dapat mengikuti try out yang tersedia.',
+            route('dashboard', absolute: false),
+            'success',
+        ));
 
         return back()->with('success', 'Akun murid disetujui dan sekarang dapat login.');
     }

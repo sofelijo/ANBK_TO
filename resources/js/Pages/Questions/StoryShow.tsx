@@ -1149,7 +1149,7 @@ export default function StoryShow({
                                     <h2 className="mt-1 text-xl font-bold text-slate-900">{generation.result_payload.title}</h2>
                                 </div>
                                 <div className="flex flex-wrap items-center gap-2">
-                                    {(isAuthor || canVerify) && storyMode && !editingStimulus && (
+                                    {isAuthor && storyMode && !editingStimulus && (
                                         <button
                                             type="button"
                                             onClick={() => setEditingStimulus(true)}

@@ -79,6 +79,12 @@ class QuestionVerificationService
                 ]);
             }
 
+            if ($lockedQuestion->reviewComments()->whereNull('resolved_at')->exists()) {
+                throw ValidationException::withMessages([
+                    'verification' => 'Verifikasi belum dapat dilanjutkan karena masih ada komentar perbaikan yang belum ditindaklanjuti.',
+                ]);
+            }
+
             $verification = QuestionVerification::query()->firstOrCreate(
                 [
                     'question_id' => $lockedQuestion->id,

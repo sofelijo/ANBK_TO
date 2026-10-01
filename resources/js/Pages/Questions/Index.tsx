@@ -16,6 +16,7 @@ type Question = {
     difficulty: number;
     variants_count: number;
     verifications_count: number;
+    open_review_comments_count: number;
     story_generation_id?: number;
     story_generation?: {
         id: number;
@@ -26,6 +27,7 @@ type Question = {
     bundle_draft_count: number;
     bundle_review_count: number;
     bundle_published_count: number;
+    bundle_revision_count: number;
     bundle_archived_count: number;
     bundle_verifications_count: number;
     bundle_questions: { id: number }[];
@@ -257,6 +259,7 @@ export default function Index({ questions, subjects, filters }: Props) {
                                                     <span>Kelas {question.grade_level}</span>
                                                     {question.bundle_draft_count > 0 && <span className="text-amber-700">{question.bundle_draft_count} draft</span>}
                                                     {question.bundle_review_count > 0 && <span className="text-blue-700">{question.bundle_review_count} menunggu</span>}
+                                                    {question.bundle_revision_count > 0 && <span className="font-semibold text-rose-700">{question.bundle_revision_count} perlu perbaikan</span>}
                                                     {question.bundle_published_count > 0 && <span className="text-emerald-700">{question.bundle_published_count} terbit</span>}
                                                     <span className="ml-auto font-semibold text-indigo-700">Buka bundel →</span>
                                                 </div>
@@ -271,8 +274,8 @@ export default function Index({ questions, subjects, filters }: Props) {
                                                         <span className="text-xs font-semibold text-slate-400">ID #{question.id}</span>
                                                     </div>
                                                     <div className="flex items-center gap-2 text-xs">
-                                                        <span className={`rounded-full px-2 py-0.5 font-semibold ${question.status === 'published' ? 'bg-emerald-50 text-emerald-700' : question.status === 'review' ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>
-                                                            {question.status === 'review' ? 'Menunggu verifikasi' : question.status}
+                                                        <span className={`rounded-full px-2 py-0.5 font-semibold ${question.status === 'published' ? 'bg-emerald-50 text-emerald-700' : question.open_review_comments_count > 0 ? 'bg-rose-50 text-rose-700' : question.status === 'review' ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>
+                                                            {question.open_review_comments_count > 0 ? 'Perlu perbaikan' : question.status === 'review' ? 'Menunggu verifikasi' : question.status}
                                                         </span>
                                                         <span className="font-semibold text-blue-600">{question.verifications_count}{question.status === 'published' ? '' : '/3'}</span>
                                                     </div>

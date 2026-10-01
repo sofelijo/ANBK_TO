@@ -7,7 +7,9 @@ use App\Enums\AiGenerationType;
 use App\Jobs\GenerateStudentChatReply;
 use App\Models\AiGeneration;
 use App\Models\ChatMessage;
+use App\Notifications\ActionNotification;
 use App\Services\AI\AiManager;
+use App\Services\NotificationAudience;
 use App\Services\StudentChatService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -35,6 +37,7 @@ class StudentChatController extends Controller
         Request $request,
         StudentChatService $chatService,
         AiManager $manager,
+        NotificationAudience $audience,
     ): RedirectResponse {
         $data = $request->validate(['content' => ['required', 'string', 'max:2000']]);
         if ($chatService->hasActiveAttempt($request->user())) {
@@ -51,7 +54,7 @@ class StudentChatController extends Controller
         $room = $chatService->roomFor($request->user());
         $sensitiveResponse = $chatService->sensitiveResponse($data['content'], $request->user());
 
-        DB::transaction(function () use ($room, $request, $data, $sensitiveResponse, $manager): void {
+        $needsAttention = DB::transaction(function () use ($room, $request, $data, $sensitiveResponse, $manager): bool {
             $room->messages()->create([
                 'sender_id' => $request->user()->id,
                 'sender_type' => 'student',
@@ -70,7 +73,7 @@ class StudentChatController extends Controller
                 ]);
                 $room->update(['last_message_at' => now()]);
 
-                return;
+                return true;
             }
 
             $provider = $manager->provider();
@@ -92,7 +95,23 @@ class StudentChatController extends Controller
             ]);
             $room->update(['last_message_at' => now()]);
             GenerateStudentChatReply::dispatchAfterResponse($generation->id, $assistantMessage->id);
+
+            return false;
         });
+
+        if ($needsAttention) {
+            $student = $request->user();
+            $audience->send(
+                $audience->staffForSchool($student->school_id),
+                new ActionNotification(
+                    'Chat siswa perlu perhatian',
+                    "Percakapan {$student->name} ditandai oleh sistem keselamatan dan perlu segera ditinjau.",
+                    route('teacher-chat.show', $student, absolute: false),
+                    'warning',
+                    "chat-attention:{$room->id}:{$room->last_message_at?->timestamp}",
+                ),
+            );
+        }
 
         return back();
     }
