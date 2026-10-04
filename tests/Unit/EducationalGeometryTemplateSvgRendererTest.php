@@ -107,4 +107,37 @@ class EducationalGeometryTemplateSvgRendererTest extends TestCase
         $this->assertStringNotContainsString('4/8', $fractions);
         $this->assertStringNotContainsString('1/2', $fractions);
     }
+
+    public function test_asked_dimensions_keep_geometry_but_hide_their_values(): void
+    {
+        $svg = (new EducationalGeometryTemplateSvgRenderer)->render('circle_sector', 7, 120, 'cm', null, 1, 0, 0, [
+            'dimension_asked' => ['a' => true, 'b' => true, 'c' => false],
+        ]);
+
+        $this->assertStringContainsString('r = ?', $svg);
+        $this->assertStringContainsString('?°', $svg);
+        $this->assertStringNotContainsString('r = 7 cm', $svg);
+        $this->assertStringNotContainsString('120°', $svg);
+        $this->assertStringContainsString('A220 220 0 0 1', $svg);
+    }
+
+    public function test_area_and_perimeter_can_be_shown_or_asked_on_two_dimensional_templates(): void
+    {
+        $renderer = new EducationalGeometryTemplateSvgRenderer;
+        $shown = $renderer->render('rectangle', 12, 8, 'cm', null, 1, 0, 0, [
+            'show_area' => true,
+            'show_perimeter' => true,
+        ]);
+        $asked = $renderer->render('rectangle', 12, 8, 'cm', null, 1, 0, 0, [
+            'area_asked' => true,
+            'perimeter_asked' => true,
+        ]);
+
+        $this->assertStringContainsString('Luas = 96 cm²', $shown);
+        $this->assertStringContainsString('Keliling = 40 cm', $shown);
+        $this->assertStringContainsString('Luas = ?', $asked);
+        $this->assertStringContainsString('Keliling = ?', $asked);
+        $this->assertStringNotContainsString('Luas = 96 cm²', $asked);
+        $this->assertStringNotContainsString('Keliling = 40 cm', $asked);
+    }
 }

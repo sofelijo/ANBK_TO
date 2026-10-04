@@ -1,5 +1,6 @@
 import { useRef } from 'react';
 import type { MouseEvent, PointerEvent as ReactPointerEvent } from 'react';
+import { formatGeometryValue, geometryCalculations } from '@/Components/GeometryCalculationInfo';
 
 export type GeometryTemplate =
     | 'square' | 'rectangle' | 'parallelogram' | 'trapezoid' | 'trapezoid_right' | 'trapezoid_isosceles' | 'rhombus' | 'kite'
@@ -30,10 +31,10 @@ const side = { fill: '#2563eb', stroke: '#1e40af', strokeWidth: 5 };
 type CanvasOverlay = { id: string; type: 'text' | 'symbol'; content: string; x: number; y: number; font_size: number; color: string; rotation: number };
 type ProtractorAngle = { id: string; label: string; degrees: string; asked: boolean };
 
-export default function GeometryTemplatePreview({ template, dimensionA, dimensionB, dimensionC = '', unit, fractionModels = [], protractorAngles = [], onToggleFractionPart, overlays = [], selectedOverlayId = null, onSelectOverlay, onMoveOverlay, zoom = 1, offsetX = 0, offsetY = 0, className = '' }: { template: GeometryTemplate; dimensionA: string; dimensionB: string; dimensionC?: string; unit: string; fractionModels?: { numerator: string; denominator: string; shaded_parts?: number[] }[]; protractorAngles?: ProtractorAngle[]; onToggleFractionPart?: (modelIndex: number, partIndex: number) => void; overlays?: CanvasOverlay[]; selectedOverlayId?: string | null; onSelectOverlay?: (id: string) => void; onMoveOverlay?: (id: string, x: number, y: number) => void; zoom?: number; offsetX?: number; offsetY?: number; className?: string }) {
-    const a = formatted(dimensionA, unit);
-    const b = formatted(dimensionB, unit);
-    const c = formatted(dimensionC, unit);
+export default function GeometryTemplatePreview({ template, dimensionA, dimensionB, dimensionC = '', dimensionAAsked = false, dimensionBAsked = false, dimensionCAsked = false, showArea = false, areaAsked = false, showPerimeter = false, perimeterAsked = false, unit, fractionModels = [], protractorAngles = [], onToggleFractionPart, overlays = [], selectedOverlayId = null, onSelectOverlay, onMoveOverlay, zoom = 1, offsetX = 0, offsetY = 0, className = '' }: { template: GeometryTemplate; dimensionA: string; dimensionB: string; dimensionC?: string; dimensionAAsked?: boolean; dimensionBAsked?: boolean; dimensionCAsked?: boolean; showArea?: boolean; areaAsked?: boolean; showPerimeter?: boolean; perimeterAsked?: boolean; unit: string; fractionModels?: { numerator: string; denominator: string; shaded_parts?: number[] }[]; protractorAngles?: ProtractorAngle[]; onToggleFractionPart?: (modelIndex: number, partIndex: number) => void; overlays?: CanvasOverlay[]; selectedOverlayId?: string | null; onSelectOverlay?: (id: string) => void; onMoveOverlay?: (id: string, x: number, y: number) => void; zoom?: number; offsetX?: number; offsetY?: number; className?: string }) {
+    const a = dimensionAAsked ? '?' : formatted(dimensionA, unit);
+    const b = dimensionBAsked ? '?' : formatted(dimensionB, unit);
+    const c = dimensionCAsked ? '?' : formatted(dimensionC, unit);
     const overlayDrag = useRef<{ id: string; clientX: number; clientY: number; x: number; y: number } | null>(null);
     const startOverlayDrag = (event: ReactPointerEvent<SVGTextElement>, overlay: CanvasOverlay) => {
         event.stopPropagation();
@@ -80,7 +81,7 @@ export default function GeometryTemplatePreview({ template, dimensionA, dimensio
             {template === 'circle_diameter' && <><circle cx="500" cy="290" r="190" {...shape} /><DimensionLine x1={310} y1={290} x2={690} y2={290} /><circle cx="500" cy="290" r="7" fill="#0f172a" /><Label x={500} y={270} text={`diameter = ${a}`} /></>}
             {template === 'semicircle' && <><path d="M260 420a240 240 0 0 1 480 0Z" {...shape} /><DimensionLine x1={260} y1={465} x2={740} y2={465} /><Label x={500} y={515} text={`diameter = ${a}`} /></>}
             {template === 'quarter_circle' && <><path d="M300 455V115a340 340 0 0 1 340 340Z" {...shape} /><DimensionLine x1={300} y1={455} x2={640} y2={455} /><Label x={470} y={510} text={`r = ${a}`} /></>}
-            {template === 'circle_sector' && <CircleSector radiusLabel={a} angle={dimensionB} />}
+            {template === 'circle_sector' && <CircleSector radiusLabel={a} angle={dimensionB} angleLabel={dimensionBAsked ? '?' : dimensionB} />}
             {template === 'annulus' && <Annulus outerLabel={a} innerLabel={b} outerValue={dimensionA} innerValue={dimensionB} />}
             {template === 'pentagon' && <><polygon points="500,80 790,290 680,505 320,505 210,290" {...shape} /><Label x={500} y={555} text={`sisi = ${a}`} /></>}
             {template === 'hexagon' && <><polygon points="320,100 680,100 840,300 680,500 320,500 160,300" {...shape} /><Label x={500} y={555} text={`sisi = ${a}`} /></>}
@@ -102,7 +103,8 @@ export default function GeometryTemplatePreview({ template, dimensionA, dimensio
             {template === 'cone' && <><path d="M500 70 270 440a230 70 0 0 0 460 0Z" {...front} /><ellipse cx="500" cy="440" rx="230" ry="70" {...side} /><Guide x1={500} y1={70} x2={500} y2={440} /><DimensionLine x1={500} y1={440} x2={730} y2={440} /><Label x={615} y={420} text={`r = ${a}`} /><Label x={630} y={260} text={`tinggi = ${b}`} /></>}
             {template === 'sphere' && <><circle cx="500" cy="290" r="210" {...shape} /><ellipse cx="500" cy="290" rx="210" ry="75" fill="none" stroke="#1e40af" strokeWidth="5" strokeDasharray="12 10" /><DimensionLine x1={500} y1={290} x2={710} y2={290} /><Label x={605} y={270} text={`r = ${a}`} /></>}
             {template === 'hemisphere' && <><path d="M270 300a230 230 0 0 0 460 0Z" {...shape} /><ellipse cx="500" cy="300" rx="230" ry="75" {...top} /><DimensionLine x1={500} y1={300} x2={730} y2={300} /><Label x={615} y={280} text={`r = ${a}`} /></>}
-            <ExtendedTemplate template={template} dimensionA={dimensionA} dimensionB={dimensionB} dimensionC={dimensionC} a={a} b={b} c={c} unit={unit} fractionModels={fractionModels} protractorAngles={protractorAngles} onToggleFractionPart={onToggleFractionPart} />
+            <ExtendedTemplate template={template} dimensionA={dimensionA} dimensionB={dimensionB} dimensionC={dimensionC} dimensionAAsked={dimensionAAsked} dimensionBAsked={dimensionBAsked} a={a} b={b} c={c} unit={unit} fractionModels={fractionModels} protractorAngles={protractorAngles} onToggleFractionPart={onToggleFractionPart} />
+            <GeometryResultLabels template={template} dimensionA={dimensionA} dimensionB={dimensionB} dimensionC={dimensionC} unit={unit} showArea={showArea} areaAsked={areaAsked} showPerimeter={showPerimeter} perimeterAsked={perimeterAsked} />
             </g>
             {overlays.map((overlay) => <g key={overlay.id} data-canvas-overlay="true">
                 {selectedOverlayId === overlay.id && <rect x={overlay.x - Math.max(30, overlay.content.length * overlay.font_size * 0.3)} y={overlay.y - overlay.font_size} width={Math.max(60, overlay.content.length * overlay.font_size * 0.6)} height={overlay.font_size * 1.35} rx="8" fill="none" stroke="#7c3aed" strokeWidth="3" strokeDasharray="8 6" transform={`rotate(${overlay.rotation} ${overlay.x} ${overlay.y})`} />}
@@ -112,9 +114,23 @@ export default function GeometryTemplatePreview({ template, dimensionA, dimensio
     );
 }
 
-function ExtendedTemplate({ template, dimensionA, dimensionB, dimensionC, a, b, c, unit, fractionModels, protractorAngles, onToggleFractionPart }: { template: GeometryTemplate; dimensionA: string; dimensionB: string; dimensionC: string; a: string; b: string; c: string; unit: string; fractionModels: { numerator: string; denominator: string; shaded_parts?: number[] }[]; protractorAngles: ProtractorAngle[]; onToggleFractionPart?: (modelIndex: number, partIndex: number) => void }) {
-    const rawA = dimensionA || '?';
-    const rawB = dimensionB || '?';
+function GeometryResultLabels({ template, dimensionA, dimensionB, dimensionC, unit, showArea, areaAsked, showPerimeter, perimeterAsked }: { template: GeometryTemplate; dimensionA: string; dimensionB: string; dimensionC: string; unit: string; showArea: boolean; areaAsked: boolean; showPerimeter: boolean; perimeterAsked: boolean }) {
+    const calculations = geometryCalculations(template, Number(dimensionA), Number(dimensionB), Number(dimensionC));
+    const area = calculations.find((item) => item.power === 2);
+    const perimeter = calculations.find((item) => item.power === 1 && item.label.startsWith('Keliling'));
+    const rows = [
+        showArea && area ? `Luas = ${areaAsked ? '?' : `${formatGeometryValue(area.value)} ${unit || 'cm'}²`}` : null,
+        showPerimeter && perimeter ? `Keliling = ${perimeterAsked ? '?' : `${formatGeometryValue(perimeter.value)} ${unit || 'cm'}`}` : null,
+    ].filter((row): row is string => Boolean(row));
+
+    if (rows.length === 0) return null;
+
+    return <g><rect x={24} y={20} width={360} height={rows.length === 2 ? 86 : 52} rx={14} fill="#fff" fillOpacity={0.94} stroke="#c7d2fe" strokeWidth={3} />{rows.map((row, index) => <text key={row} x={44} y={54 + (index * 34)} fontSize={24} fontWeight={700} fill="#312e81">{row}</text>)}</g>;
+}
+
+function ExtendedTemplate({ template, dimensionA, dimensionB, dimensionC, dimensionAAsked, dimensionBAsked, a, b, c, unit, fractionModels, protractorAngles, onToggleFractionPart }: { template: GeometryTemplate; dimensionA: string; dimensionB: string; dimensionC: string; dimensionAAsked: boolean; dimensionBAsked: boolean; a: string; b: string; c: string; unit: string; fractionModels: { numerator: string; denominator: string; shaded_parts?: number[] }[]; protractorAngles: ProtractorAngle[]; onToggleFractionPart?: (modelIndex: number, partIndex: number) => void }) {
+    const rawA = dimensionAAsked ? '?' : dimensionA || '?';
+    const rawB = dimensionBAsked ? '?' : dimensionB || '?';
     const numericA = Number(dimensionA);
     const numericB = Number(dimensionB);
     const squareCircleRadius = numericA > 0 && numericB > 0 ? Math.min(230, 460 * numericB / numericA) : 230;
@@ -133,7 +149,7 @@ function ExtendedTemplate({ template, dimensionA, dimensionB, dimensionC, a, b, 
     if (template === 'parallel_lines') return <><DimensionLine x1={180} y1={190} x2={820} y2={190} /><DimensionLine x1={180} y1={410} x2={820} y2={410} /><Guide x1={500} y1={205} x2={500} y2={395} /><Label x={650} y={310} text={`jarak = ${a}`} /></>;
     if (template === 'perpendicular_lines') return <><DimensionLine x1={170} y1={340} x2={830} y2={340} /><DimensionLine x1={500} y1={80} x2={500} y2={520} /><RightAngle x={500} y={300} /><Label x={570} y={295} text="90°" /><Label x={500} y={570} text={`panjang acuan = ${a}`} /></>;
     if (template === 'intersecting_lines') return <><line x1={170} y1={300} x2={830} y2={300} stroke="#334155" strokeWidth="4" /><line x1={500 - referenceDx} y1={300 + referenceDy} x2={500 + referenceDx} y2={300 - referenceDy} stroke="#334155" strokeWidth="4" /><path d={`M590 300A90 90 0 0 0 ${500 + (90 * Math.cos(referenceRadians))} ${300 - (90 * Math.sin(referenceRadians))}`} fill="none" stroke="#f59e0b" strokeWidth="4" /><Label x={600} y={240} text={`${rawA}°`} /></>;
-    if (template.startsWith('angle_')) return <AngleTemplate template={template} degrees={rawA} />;
+    if (template.startsWith('angle_')) return <AngleTemplate template={template} degrees={dimensionA} label={rawA} />;
     if (template === 'circle_chord') return <><circle cx="500" cy="285" r="210" {...shape} /><line x1={500 - chordHalf} y1={chordY} x2={500 + chordHalf} y2={chordY} stroke="#334155" strokeWidth="5" /><Label x={500} y={chordY - 20} text={`tali busur = ${b}`} /><Guide x1={500} y1={285} x2={710} y2={285} /><Label x={610} y={270} text={`r = ${a}`} /></>;
     if (template === 'circle_segment') return <><circle cx="500" cy="285" r="210" {...shape} /><path d="M320 390Q500 530 680 390Z" fill="#fbbf24" fillOpacity="0.65" stroke="#1e40af" strokeWidth="5" /><Label x={500} y={450} text="tembereng" /><Label x={620} y={270} text={`r = ${a}`} /></>;
     if (template === 'circle_tangent') return <><circle cx="440" cy="300" r="180" {...shape} /><DimensionLine x1={620} y1={90} x2={620} y2={510} /><Guide x1={440} y1={300} x2={620} y2={300} /><RightAngle x={580} y={300} /><Label x={515} y={280} text={`r = ${a}`} /><RotatedLabel x={670} y={300} text={`garis singgung = ${b}`} /></>;
@@ -179,14 +195,14 @@ function ExtendedTemplate({ template, dimensionA, dimensionB, dimensionC, a, b, 
     return null;
 }
 
-function AngleTemplate({ template, degrees }: { template: GeometryTemplate; degrees: string }) {
+function AngleTemplate({ template, degrees, label }: { template: GeometryTemplate; degrees: string; label: string }) {
     const angle = Number.isFinite(Number(degrees)) ? Number(degrees) : template === 'angle_right' ? 90 : template === 'angle_straight' ? 180 : 45;
     const radians = (angle * Math.PI) / 180;
     const endX = 500 + (220 * Math.cos(radians));
     const endY = 360 - (220 * Math.sin(radians));
     const arcX = 500 + (110 * Math.cos(radians));
     const arcY = 360 - (110 * Math.sin(radians));
-    return <><DimensionLine x1={500} y1={360} x2={780} y2={360} /><DimensionLine x1={500} y1={360} x2={endX} y2={endY} />{template === 'angle_right' ? <RightAngle x={500} y={320} /> : <path d={`M610 360A110 110 0 ${angle > 180 ? 1 : 0} 0 ${arcX} ${arcY}`} fill="none" stroke="#f59e0b" strokeWidth="4" />}<circle cx="500" cy="360" r="7" fill="#0f172a" /><Label x={650} y={300} text={`${degrees}°`} /></>;
+    return <><DimensionLine x1={500} y1={360} x2={780} y2={360} /><DimensionLine x1={500} y1={360} x2={endX} y2={endY} />{template === 'angle_right' ? <RightAngle x={500} y={320} /> : <path d={`M610 360A110 110 0 ${angle > 180 ? 1 : 0} 0 ${arcX} ${arcY}`} fill="none" stroke="#f59e0b" strokeWidth="4" />}<circle cx="500" cy="360" r="7" fill="#0f172a" /><Label x={650} y={300} text={`${label}°`} /></>;
 }
 
 function Protractor({ span, degrees, angles }: { span: 90 | 180 | 270 | 360; degrees: number; angles: ProtractorAngle[] }) {
@@ -229,12 +245,12 @@ function Protractor({ span, degrees, angles }: { span: 90 | 180 | 270 | 360; deg
     })}<circle cx={500} cy={300} r={7} fill="#0f172a" /></>;
 }
 
-function CircleSector({ radiusLabel, angle }: { radiusLabel: string; angle: string }) {
+function CircleSector({ radiusLabel, angle, angleLabel }: { radiusLabel: string; angle: string; angleLabel: string }) {
     const degrees = Number(angle) > 0 ? Math.min(360, Number(angle)) : 90;
     const radians = (degrees * Math.PI) / 180;
     const endX = 500 + (220 * Math.sin(radians));
     const endY = 300 - (220 * Math.cos(radians));
-    return <>{degrees >= 360 ? <circle cx="500" cy="300" r="220" {...shape} /> : <path d={`M500 300L500 80A220 220 0 ${degrees > 180 ? 1 : 0} 1 ${endX} ${endY}Z`} {...shape} />}<Label x={585} y={220} text={`${angle || '?'}°`} /><Label x={650} y={350} text={`r = ${radiusLabel}`} /></>;
+    return <>{degrees >= 360 ? <circle cx="500" cy="300" r="220" {...shape} /> : <path d={`M500 300L500 80A220 220 0 ${degrees > 180 ? 1 : 0} 1 ${endX} ${endY}Z`} {...shape} />}<Label x={585} y={220} text={`${angleLabel || '?'}°`} /><Label x={650} y={350} text={`r = ${radiusLabel}`} /></>;
 }
 
 function Annulus({ outerLabel, innerLabel, outerValue, innerValue }: { outerLabel: string; innerLabel: string; outerValue: string; innerValue: string }) {

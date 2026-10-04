@@ -131,6 +131,13 @@ type QuestionForm = {
     stimulus_svg_dimension_a: string;
     stimulus_svg_dimension_b: string;
     stimulus_svg_dimension_c: string;
+    stimulus_svg_dimension_a_asked: boolean;
+    stimulus_svg_dimension_b_asked: boolean;
+    stimulus_svg_dimension_c_asked: boolean;
+    stimulus_svg_show_area: boolean;
+    stimulus_svg_area_asked: boolean;
+    stimulus_svg_show_perimeter: boolean;
+    stimulus_svg_perimeter_asked: boolean;
     stimulus_svg_unit: string;
     stimulus_svg_zoom: number;
     stimulus_svg_offset_x: number;
@@ -269,7 +276,7 @@ type ExistingQuestion = {
     options: { content: string; is_correct: boolean }[];
     metadata?: {
         accepted_answers?: string[];
-        illustration?: { alt?: string; path?: string; source?: string; display_width?: number; display_height?: number; display_zoom?: number; display_offset_x?: number; display_offset_y?: number; template?: GeometryTemplate; dimension_a?: number; dimension_b?: number; dimension_c?: number; unit?: string; zoom?: number; offset_x?: number; offset_y?: number; fraction_models?: { numerator: number; denominator: number; shaded_parts?: number[] }[]; overlays?: CanvasOverlay[]; protractor_angles?: { id: string; label: string; degrees: number; asked: boolean }[] };
+        illustration?: { alt?: string; path?: string; source?: string; display_width?: number; display_height?: number; display_zoom?: number; display_offset_x?: number; display_offset_y?: number; template?: GeometryTemplate; dimension_a?: number; dimension_b?: number; dimension_c?: number; dimension_a_asked?: boolean; dimension_b_asked?: boolean; dimension_c_asked?: boolean; show_area?: boolean; area_asked?: boolean; show_perimeter?: boolean; perimeter_asked?: boolean; unit?: string; zoom?: number; offset_x?: number; offset_y?: number; fraction_models?: { numerator: number; denominator: number; shaded_parts?: number[] }[]; overlays?: CanvasOverlay[]; protractor_angles?: { id: string; label: string; degrees: number; asked: boolean }[] };
         explanation_illustration?: { alt?: string };
         stimulus_visual?: StimulusVisualData;
         matching_pairs?: MatchingPair[];
@@ -376,6 +383,13 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
         stimulus_svg_dimension_a: question?.metadata?.illustration?.dimension_a != null ? String(question.metadata.illustration.dimension_a) : '',
         stimulus_svg_dimension_b: question?.metadata?.illustration?.dimension_b != null ? String(question.metadata.illustration.dimension_b) : '',
         stimulus_svg_dimension_c: question?.metadata?.illustration?.dimension_c != null ? String(question.metadata.illustration.dimension_c) : '',
+        stimulus_svg_dimension_a_asked: Boolean(question?.metadata?.illustration?.dimension_a_asked),
+        stimulus_svg_dimension_b_asked: Boolean(question?.metadata?.illustration?.dimension_b_asked),
+        stimulus_svg_dimension_c_asked: Boolean(question?.metadata?.illustration?.dimension_c_asked),
+        stimulus_svg_show_area: Boolean(question?.metadata?.illustration?.show_area),
+        stimulus_svg_area_asked: Boolean(question?.metadata?.illustration?.area_asked),
+        stimulus_svg_show_perimeter: Boolean(question?.metadata?.illustration?.show_perimeter),
+        stimulus_svg_perimeter_asked: Boolean(question?.metadata?.illustration?.perimeter_asked),
         stimulus_svg_unit: question?.metadata?.illustration?.unit || 'cm',
         stimulus_svg_zoom: question?.metadata?.illustration?.zoom || 1,
         stimulus_svg_offset_x: question?.metadata?.illustration?.offset_x || 0,
@@ -473,6 +487,13 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
             stimulus_svg_dimension_a: current.stimulus_svg_template === template.value ? current.stimulus_svg_dimension_a : defaults[0],
             stimulus_svg_dimension_b: template.dimension_b_label ? (current.stimulus_svg_template === template.value ? current.stimulus_svg_dimension_b : defaults[1] || '') : '',
             stimulus_svg_dimension_c: template.dimension_c_label ? (current.stimulus_svg_template === template.value ? current.stimulus_svg_dimension_c : defaults[2] || '') : '',
+            stimulus_svg_dimension_a_asked: current.stimulus_svg_template === template.value ? current.stimulus_svg_dimension_a_asked : false,
+            stimulus_svg_dimension_b_asked: current.stimulus_svg_template === template.value && Boolean(template.dimension_b_label) ? current.stimulus_svg_dimension_b_asked : false,
+            stimulus_svg_dimension_c_asked: current.stimulus_svg_template === template.value && Boolean(template.dimension_c_label) ? current.stimulus_svg_dimension_c_asked : false,
+            stimulus_svg_show_area: current.stimulus_svg_template === template.value ? current.stimulus_svg_show_area : false,
+            stimulus_svg_area_asked: current.stimulus_svg_template === template.value ? current.stimulus_svg_area_asked : false,
+            stimulus_svg_show_perimeter: current.stimulus_svg_template === template.value ? current.stimulus_svg_show_perimeter : false,
+            stimulus_svg_perimeter_asked: current.stimulus_svg_template === template.value ? current.stimulus_svg_perimeter_asked : false,
             stimulus_svg_zoom: current.stimulus_svg_template === template.value ? current.stimulus_svg_zoom : 1,
             stimulus_svg_offset_x: current.stimulus_svg_template === template.value ? current.stimulus_svg_offset_x : 0,
             stimulus_svg_offset_y: current.stimulus_svg_template === template.value ? current.stimulus_svg_offset_y : 0,
@@ -701,7 +722,7 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
                 }}
                 className={`flex h-full min-h-[420px] touch-none select-none items-center justify-center px-3 pb-16 pt-16 outline-none focus:ring-2 focus:ring-inset focus:ring-violet-400 ${draggingSvgPreview ? 'cursor-grabbing' : 'cursor-grab'}`}
             >
-                <GeometryTemplatePreview template={data.stimulus_svg_template} dimensionA={data.stimulus_svg_dimension_a} dimensionB={data.stimulus_svg_dimension_b} dimensionC={data.stimulus_svg_dimension_c} unit={data.stimulus_svg_unit} fractionModels={data.stimulus_fraction_models} protractorAngles={data.stimulus_protractor_angles} onToggleFractionPart={usesCustomFractionModels ? toggleFractionPart : undefined} overlays={data.stimulus_svg_overlays} selectedOverlayId={selectedOverlayId} onSelectOverlay={setSelectedOverlayId} onMoveOverlay={(id, x, y) => updateOverlay(id, { x, y })} zoom={data.stimulus_svg_zoom} offsetX={data.stimulus_svg_offset_x} offsetY={data.stimulus_svg_offset_y} className={`mx-auto h-auto w-full ${fullscreen ? 'max-h-[calc(100vh-11rem)] max-w-6xl' : ''}`} />
+                <GeometryTemplatePreview template={data.stimulus_svg_template} dimensionA={data.stimulus_svg_dimension_a} dimensionB={data.stimulus_svg_dimension_b} dimensionC={data.stimulus_svg_dimension_c} dimensionAAsked={data.stimulus_svg_dimension_a_asked} dimensionBAsked={data.stimulus_svg_dimension_b_asked} dimensionCAsked={data.stimulus_svg_dimension_c_asked} showArea={data.stimulus_svg_show_area} areaAsked={data.stimulus_svg_area_asked} showPerimeter={data.stimulus_svg_show_perimeter} perimeterAsked={data.stimulus_svg_perimeter_asked} unit={data.stimulus_svg_unit} fractionModels={data.stimulus_fraction_models} protractorAngles={data.stimulus_protractor_angles} onToggleFractionPart={usesCustomFractionModels ? toggleFractionPart : undefined} overlays={data.stimulus_svg_overlays} selectedOverlayId={selectedOverlayId} onSelectOverlay={setSelectedOverlayId} onMoveOverlay={(id, x, y) => updateOverlay(id, { x, y })} zoom={data.stimulus_svg_zoom} offsetX={data.stimulus_svg_offset_x} offsetY={data.stimulus_svg_offset_y} className={`mx-auto h-auto w-full ${fullscreen ? 'max-h-[calc(100vh-11rem)] max-w-6xl' : ''}`} />
             </div>
             <div className="absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-xl border border-slate-200 bg-white/95 p-1 shadow-lg backdrop-blur">
                 <button type="button" aria-label="Perkecil gambar" onClick={() => changeCanvasZoom(-0.1)} className="h-8 w-9 rounded-lg text-sm font-bold text-slate-700 hover:bg-slate-100">−</button>
@@ -1340,10 +1361,11 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
                                     <InputError message={errors.stimulus_protractor_angles} className="mt-2" />
                                 </div>}
                                 {!usesCustomFractionModels && !isProtractorTemplate && <div className="grid gap-3 sm:grid-cols-2">
-                                    <label className="text-sm font-medium text-slate-700">{selectedSvgTemplate?.dimension_a_label || 'Ukuran'}<input type="number" min={selectedSvgTemplate?.allow_signed_dimensions ? undefined : selectedSvgTemplate?.integer_dimensions ? 1 : 0.01} step={selectedSvgTemplate?.integer_dimensions ? 1 : 'any'} value={data.stimulus_svg_dimension_a} onChange={(event) => setData('stimulus_svg_dimension_a', event.target.value)} placeholder="Contoh: 8" className="mt-1 block w-full rounded-lg border-slate-300 focus:border-indigo-500 focus:ring-indigo-500" /></label>
-                                    {selectedSvgTemplate?.dimension_b_label && <label className="text-sm font-medium text-slate-700">{selectedSvgTemplate.dimension_b_label}<input type="number" min={selectedSvgTemplate.allow_signed_dimensions ? undefined : selectedSvgTemplate.integer_dimensions ? 1 : 0.01} step={selectedSvgTemplate.integer_dimensions ? 1 : 'any'} value={data.stimulus_svg_dimension_b} onChange={(event) => setData('stimulus_svg_dimension_b', event.target.value)} placeholder="Contoh: 5" className="mt-1 block w-full rounded-lg border-slate-300 focus:border-indigo-500 focus:ring-indigo-500" /></label>}
-                                    {selectedSvgTemplate?.dimension_c_label && <label className="text-sm font-medium text-slate-700">{selectedSvgTemplate.dimension_c_label}<input type="number" min={selectedSvgTemplate.allow_signed_dimensions ? undefined : selectedSvgTemplate.integer_dimensions ? 1 : 0.01} step={selectedSvgTemplate.integer_dimensions ? 1 : 'any'} value={data.stimulus_svg_dimension_c} onChange={(event) => setData('stimulus_svg_dimension_c', event.target.value)} placeholder="Contoh: 4" className="mt-1 block w-full rounded-lg border-slate-300 focus:border-indigo-500 focus:ring-indigo-500" /></label>}
+                                    <label className="text-sm font-medium text-slate-700"><span className="flex items-center justify-between gap-2"><span>{selectedSvgTemplate?.dimension_a_label || 'Ukuran'}</span>{selectedSvgCategory === '2d' && <span className="flex items-center gap-1.5 text-xs font-semibold text-violet-700"><input type="checkbox" checked={data.stimulus_svg_dimension_a_asked} onChange={(event) => setData('stimulus_svg_dimension_a_asked', event.target.checked)} className="rounded border-slate-300 text-violet-600 focus:ring-violet-500" />Ditanya</span>}</span><input type="number" min={selectedSvgTemplate?.allow_signed_dimensions ? undefined : selectedSvgTemplate?.integer_dimensions ? 1 : 0.01} step={selectedSvgTemplate?.integer_dimensions ? 1 : 'any'} value={data.stimulus_svg_dimension_a} onChange={(event) => setData('stimulus_svg_dimension_a', event.target.value)} placeholder="Contoh: 8" className="mt-1 block w-full rounded-lg border-slate-300 focus:border-indigo-500 focus:ring-indigo-500" /></label>
+                                    {selectedSvgTemplate?.dimension_b_label && <label className="text-sm font-medium text-slate-700"><span className="flex items-center justify-between gap-2"><span>{selectedSvgTemplate.dimension_b_label}</span>{selectedSvgCategory === '2d' && <span className="flex items-center gap-1.5 text-xs font-semibold text-violet-700"><input type="checkbox" checked={data.stimulus_svg_dimension_b_asked} onChange={(event) => setData('stimulus_svg_dimension_b_asked', event.target.checked)} className="rounded border-slate-300 text-violet-600 focus:ring-violet-500" />Ditanya</span>}</span><input type="number" min={selectedSvgTemplate.allow_signed_dimensions ? undefined : selectedSvgTemplate.integer_dimensions ? 1 : 0.01} step={selectedSvgTemplate.integer_dimensions ? 1 : 'any'} value={data.stimulus_svg_dimension_b} onChange={(event) => setData('stimulus_svg_dimension_b', event.target.value)} placeholder="Contoh: 5" className="mt-1 block w-full rounded-lg border-slate-300 focus:border-indigo-500 focus:ring-indigo-500" /></label>}
+                                    {selectedSvgTemplate?.dimension_c_label && <label className="text-sm font-medium text-slate-700"><span className="flex items-center justify-between gap-2"><span>{selectedSvgTemplate.dimension_c_label}</span>{selectedSvgCategory === '2d' && <span className="flex items-center gap-1.5 text-xs font-semibold text-violet-700"><input type="checkbox" checked={data.stimulus_svg_dimension_c_asked} onChange={(event) => setData('stimulus_svg_dimension_c_asked', event.target.checked)} className="rounded border-slate-300 text-violet-600 focus:ring-violet-500" />Ditanya</span>}</span><input type="number" min={selectedSvgTemplate.allow_signed_dimensions ? undefined : selectedSvgTemplate.integer_dimensions ? 1 : 0.01} step={selectedSvgTemplate.integer_dimensions ? 1 : 'any'} value={data.stimulus_svg_dimension_c} onChange={(event) => setData('stimulus_svg_dimension_c', event.target.value)} placeholder="Contoh: 4" className="mt-1 block w-full rounded-lg border-slate-300 focus:border-indigo-500 focus:ring-indigo-500" /></label>}
                                     {selectedSvgTemplate?.uses_unit !== false && <label className="text-sm font-medium text-slate-700">Satuan<input value={data.stimulus_svg_unit} onChange={(event) => setData('stimulus_svg_unit', event.target.value)} placeholder="cm" className="mt-1 block w-full rounded-lg border-slate-300 focus:border-indigo-500 focus:ring-indigo-500" /></label>}
+                                    {selectedSvgCategory === '2d' && <p className="text-xs text-slate-500 sm:col-span-2">Ukuran yang ditandai “Ditanya” tetap dipakai untuk membentuk gambar, tetapi nilainya diganti tanda tanya pada tampilan siswa.</p>}
                                 </div>}
                                 <InputError message={errors.stimulus_svg_template || errors.stimulus_svg_dimension_a || errors.stimulus_svg_dimension_b || errors.stimulus_svg_dimension_c} />
                                 <GeometryCalculationInfo
@@ -1353,6 +1375,15 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
                                     dimensionC={data.stimulus_svg_dimension_c}
                                     unit={data.stimulus_svg_unit}
                                     answerCandidates={data.type === 'short_answer' ? data.accepted_answers : data.options.filter((option) => option.is_correct).map((option) => option.content)}
+                                    showResultControls={selectedSvgCategory === '2d'}
+                                    resultOptions={{ showArea: data.stimulus_svg_show_area, areaAsked: data.stimulus_svg_area_asked, showPerimeter: data.stimulus_svg_show_perimeter, perimeterAsked: data.stimulus_svg_perimeter_asked }}
+                                    onResultOptionsChange={(changes) => setData((current) => ({
+                                        ...current,
+                                        stimulus_svg_show_area: changes.showArea ?? current.stimulus_svg_show_area,
+                                        stimulus_svg_area_asked: changes.areaAsked ?? current.stimulus_svg_area_asked,
+                                        stimulus_svg_show_perimeter: changes.showPerimeter ?? current.stimulus_svg_show_perimeter,
+                                        stimulus_svg_perimeter_asked: changes.perimeterAsked ?? current.stimulus_svg_perimeter_asked,
+                                    }))}
                                 />
                                 {renderCanvasEditor()}
                                 <p className="mt-2 text-center text-xs text-slate-500">Tarik kanvas untuk menggeser · tarik elemen untuk memindahkan · tombol panah untuk presisi · Ctrl/⌘ + scroll untuk zoom</p>
@@ -1780,7 +1811,7 @@ function StudentQuestionPreview({ data, existingIllustrationUrl, uploadedIllustr
                         <aside className="border-b border-slate-200 bg-slate-50/60 p-5 lg:border-b-0 lg:border-r">
                             <p className="text-xs font-semibold uppercase tracking-wider text-indigo-600">Stimulus</p>
                             {illustrationUrl && <PositionedImage src={illustrationUrl} alt={data.stimulus_image_alt || 'Ilustrasi soal'} width={data.stimulus_image_width} height={data.stimulus_image_height} zoom={data.stimulus_upload_zoom} offsetX={data.stimulus_upload_offset_x} offsetY={data.stimulus_upload_offset_y} className="mt-3" />}
-                            {usesGeometryTemplate && <GeometryTemplatePreview template={data.stimulus_svg_template} dimensionA={data.stimulus_svg_dimension_a} dimensionB={data.stimulus_svg_dimension_b} dimensionC={data.stimulus_svg_dimension_c} unit={data.stimulus_svg_unit} fractionModels={data.stimulus_fraction_models} protractorAngles={data.stimulus_protractor_angles} overlays={data.stimulus_svg_overlays} zoom={data.stimulus_svg_zoom} offsetX={data.stimulus_svg_offset_x} offsetY={data.stimulus_svg_offset_y} className="mx-auto mt-3 h-auto w-full rounded-lg border border-slate-200 bg-white" />}
+                            {usesGeometryTemplate && <GeometryTemplatePreview template={data.stimulus_svg_template} dimensionA={data.stimulus_svg_dimension_a} dimensionB={data.stimulus_svg_dimension_b} dimensionC={data.stimulus_svg_dimension_c} dimensionAAsked={data.stimulus_svg_dimension_a_asked} dimensionBAsked={data.stimulus_svg_dimension_b_asked} dimensionCAsked={data.stimulus_svg_dimension_c_asked} showArea={data.stimulus_svg_show_area} areaAsked={data.stimulus_svg_area_asked} showPerimeter={data.stimulus_svg_show_perimeter} perimeterAsked={data.stimulus_svg_perimeter_asked} unit={data.stimulus_svg_unit} fractionModels={data.stimulus_fraction_models} protractorAngles={data.stimulus_protractor_angles} overlays={data.stimulus_svg_overlays} zoom={data.stimulus_svg_zoom} offsetX={data.stimulus_svg_offset_x} offsetY={data.stimulus_svg_offset_y} className="mx-auto mt-3 h-auto w-full rounded-lg border border-slate-200 bg-white" />}
                             {stimulusVisual && <StimulusVisual visual={stimulusVisual} className="mt-3" />}
                             {data.stimulus.trim() && <FormattedText text={data.stimulus} className="mt-3 block whitespace-pre-wrap text-sm leading-7 text-slate-700" />}
                         </aside>

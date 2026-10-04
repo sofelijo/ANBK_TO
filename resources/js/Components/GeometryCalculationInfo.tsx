@@ -1,12 +1,13 @@
-import { GeometryTemplate } from '@/Components/GeometryTemplatePreview';
+import type { GeometryTemplate } from '@/Components/GeometryTemplatePreview';
 
-type Calculation = { label: string; formula: string; value: number; power: 1 | 2 | 3 };
+export type GeometryCalculation = { label: string; formula: string; value: number; power: 1 | 2 | 3 };
+type GeometryResultOptions = { showArea: boolean; areaAsked: boolean; showPerimeter: boolean; perimeterAsked: boolean };
 const PI = 22 / 7;
 
 const valid = (...values: number[]) => values.every((value) => Number.isFinite(value) && value > 0);
 const polygonArea = (sides: number, side: number) => (sides * side * side) / (4 * Math.tan(Math.PI / sides));
 const polygonApothem = (sides: number, side: number) => side / (2 * Math.tan(Math.PI / sides));
-const format = (value: number) => new Intl.NumberFormat('id-ID', { maximumFractionDigits: 4 }).format(value);
+export const formatGeometryValue = (value: number) => new Intl.NumberFormat('id-ID', { maximumFractionDigits: 4 }).format(value);
 const parseAnswerNumber = (answer: string): number | null => {
     const match = answer.match(/-?[\d.,]+/);
     if (!match) return null;
@@ -18,10 +19,10 @@ const parseAnswerNumber = (answer: string): number | null => {
     return Number.isFinite(value) ? value : null;
 };
 
-function calculations(template: GeometryTemplate, a: number, b: number, c: number): Calculation[] {
-    const area = (label: string, formula: string, value: number): Calculation => ({ label, formula, value, power: 2 });
-    const volume = (label: string, formula: string, value: number): Calculation => ({ label, formula, value, power: 3 });
-    const length = (label: string, formula: string, value: number): Calculation => ({ label, formula, value, power: 1 });
+export function geometryCalculations(template: GeometryTemplate, a: number, b: number, c: number): GeometryCalculation[] {
+    const area = (label: string, formula: string, value: number): GeometryCalculation => ({ label, formula, value, power: 2 });
+    const volume = (label: string, formula: string, value: number): GeometryCalculation => ({ label, formula, value, power: 3 });
+    const length = (label: string, formula: string, value: number): GeometryCalculation => ({ label, formula, value, power: 1 });
 
     if (template === 'square' && valid(a)) return [area('Luas', `s² = ${a}²`, a * a), length('Keliling', `4s = 4 × ${a}`, 4 * a)];
     if (template === 'rectangle' && valid(a, b)) return [area('Luas', `p × l = ${a} × ${b}`, a * b), length('Keliling', `2(p + l) = 2(${a} + ${b})`, 2 * (a + b))];
@@ -50,7 +51,7 @@ function calculations(template: GeometryTemplate, a: number, b: number, c: numbe
     if (['pentagonal_prism', 'hexagonal_prism'].includes(template) && valid(a, b, c)) {
         const n = template === 'pentagonal_prism' ? 5 : 6;
         const base = (n * a * b) / 2;
-        return [area('Luas alas', `½ × keliling alas × apotema`, base), volume('Volume', `luas alas × panjang = ${format(base)} × ${c}`, base * c), area('Luas permukaan', `2 × luas alas + keliling × panjang`, (2 * base) + (n * a * c))];
+        return [area('Luas alas', `½ × keliling alas × apotema`, base), volume('Volume', `luas alas × panjang = ${formatGeometryValue(base)} × ${c}`, base * c), area('Luas permukaan', `2 × luas alas + keliling × panjang`, (2 * base) + (n * a * c))];
     }
     if (template === 'square_pyramid' && valid(a, b)) {
         const base = a * a;
@@ -91,28 +92,41 @@ function calculations(template: GeometryTemplate, a: number, b: number, c: numbe
     return [];
 }
 
-export default function GeometryCalculationInfo({ template, dimensionA, dimensionB, dimensionC, unit, answerCandidates = [] }: { template: GeometryTemplate; dimensionA: string; dimensionB: string; dimensionC: string; unit: string; answerCandidates?: string[] }) {
-    const items = calculations(template, Number(dimensionA), Number(dimensionB), Number(dimensionC));
+export default function GeometryCalculationInfo({ template, dimensionA, dimensionB, dimensionC, unit, answerCandidates = [], showResultControls = false, resultOptions = { showArea: false, areaAsked: false, showPerimeter: false, perimeterAsked: false }, onResultOptionsChange }: { template: GeometryTemplate; dimensionA: string; dimensionB: string; dimensionC: string; unit: string; answerCandidates?: string[]; showResultControls?: boolean; resultOptions?: GeometryResultOptions; onResultOptionsChange?: (changes: Partial<GeometryResultOptions>) => void }) {
+    const items = geometryCalculations(template, Number(dimensionA), Number(dimensionB), Number(dimensionC));
     if (items.length === 0) return null;
     const answerNumbers = answerCandidates.map(parseAnswerNumber).filter((value): value is number => value !== null);
+    const canShowArea = items.some((item) => item.power === 2);
+    const canShowPerimeter = items.some((item) => item.power === 1 && item.label.startsWith('Keliling'));
 
     return (
-        <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-950">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                    <h4 className="text-sm font-bold">Kalkulasi untuk guru</h4>
-                    <p className="mt-0.5 text-xs text-amber-800">Referensi otomatis untuk cross-check kunci jawaban. Tidak ditampilkan kepada siswa.</p>
-                </div>
-                <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-amber-800">π = 22/7</span>
+        <section className="rounded-lg border border-amber-200 bg-amber-50/70 p-2.5 text-amber-950">
+            <div className="flex flex-wrap items-center gap-2">
+                <h4 className="text-xs font-bold uppercase tracking-wide">Kalkulasi guru</h4>
+                <span className="text-[11px] text-amber-800">Referensi kunci · tidak tampil ke siswa</span>
+                {showResultControls && (canShowArea || canShowPerimeter) && <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-amber-200 bg-white px-2 py-1" title="Centang hasil untuk menampilkannya pada gambar. Ditanya mengganti nilainya dengan tanda tanya.">
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-amber-700">Tampil</span>
+                    {canShowArea && <div className="flex items-center gap-2 border-l border-amber-200 pl-2">
+                        <label className="flex items-center gap-1 text-xs font-semibold text-slate-700"><input type="checkbox" checked={resultOptions.showArea} onChange={(event) => onResultOptionsChange?.({ showArea: event.target.checked, areaAsked: event.target.checked ? resultOptions.areaAsked : false })} className="rounded border-slate-300 text-violet-600 focus:ring-violet-500" />Luas</label>
+                        <label className="flex items-center gap-1 text-[11px] font-semibold text-violet-700"><input type="checkbox" checked={resultOptions.areaAsked} onChange={(event) => onResultOptionsChange?.({ areaAsked: event.target.checked, showArea: event.target.checked || resultOptions.showArea })} className="rounded border-slate-300 text-violet-600 focus:ring-violet-500" />Ditanya</label>
+                    </div>}
+                    {canShowPerimeter && <div className="flex items-center gap-2 border-l border-amber-200 pl-2">
+                        <label className="flex items-center gap-1 text-xs font-semibold text-slate-700"><input type="checkbox" checked={resultOptions.showPerimeter} onChange={(event) => onResultOptionsChange?.({ showPerimeter: event.target.checked, perimeterAsked: event.target.checked ? resultOptions.perimeterAsked : false })} className="rounded border-slate-300 text-violet-600 focus:ring-violet-500" />Keliling</label>
+                        <label className="flex items-center gap-1 text-[11px] font-semibold text-violet-700"><input type="checkbox" checked={resultOptions.perimeterAsked} onChange={(event) => onResultOptionsChange?.({ perimeterAsked: event.target.checked, showPerimeter: event.target.checked || resultOptions.showPerimeter })} className="rounded border-slate-300 text-violet-600 focus:ring-violet-500" />Ditanya</label>
+                    </div>}
+                </div>}
+                <span className={`${showResultControls && (canShowArea || canShowPerimeter) ? '' : 'ml-auto'} rounded-md bg-white px-2 py-0.5 text-[11px] font-semibold text-amber-800`}>π = 22/7</span>
             </div>
-            <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="mt-2 grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
                 {items.map((item) => {
                     const matchesAnswer = answerNumbers.some((answer) => Math.abs(answer - item.value) <= Math.max(0.01, Math.abs(item.value) * 0.001));
-                    return <div key={item.label} className="rounded-lg border border-amber-200 bg-white p-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">{item.label}</p>
-                    <p className="mt-1 break-words text-xs text-slate-600">{item.formula}</p>
-                    <p className="mt-2 text-base font-bold text-slate-900">≈ {format(item.value)} {unit || 'cm'}{item.power > 1 && <sup>{item.power}</sup>}</p>
-                    {answerNumbers.length > 0 && <p className={`mt-2 text-xs font-bold ${matchesAnswer ? 'text-emerald-700' : 'text-rose-700'}`}>{matchesAnswer ? '✓ Cocok dengan jawaban benar' : 'Belum cocok dengan jawaban benar'}</p>}
+                    return <div key={item.label} className="rounded-md border border-amber-200 bg-white px-2.5 py-2">
+                    <div className="flex items-baseline justify-between gap-2">
+                        <p className="text-[11px] font-bold uppercase tracking-wide text-amber-700">{item.label}</p>
+                        <p className="whitespace-nowrap text-sm font-bold text-slate-900">≈ {formatGeometryValue(item.value)} {unit || 'cm'}{item.power > 1 && <sup>{item.power}</sup>}</p>
+                    </div>
+                    <p className="mt-0.5 truncate text-[11px] text-slate-600" title={item.formula}>{item.formula}</p>
+                    {answerNumbers.length > 0 && <p className={`mt-1 text-[11px] font-bold ${matchesAnswer ? 'text-emerald-700' : 'text-rose-700'}`}>{matchesAnswer ? '✓ Kunci cocok' : 'Kunci belum cocok'}</p>}
                 </div>})}
             </div>
         </section>

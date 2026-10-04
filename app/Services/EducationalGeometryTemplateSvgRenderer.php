@@ -36,12 +36,18 @@ class EducationalGeometryTemplateSvgRenderer
         }
 
         $unit = $this->escape(trim($unit) ?: 'cm');
-        $a = $this->measurement($dimensionA, $unit);
-        $b = $this->measurement((float) $dimensionB, $unit);
-        $c = $this->measurement((float) $dimensionC, $unit);
+        $dimensionAsked = $options['dimension_asked'] ?? [];
+        $aAsked = (bool) ($dimensionAsked['a'] ?? false);
+        $bAsked = (bool) ($dimensionAsked['b'] ?? false);
+        $cAsked = (bool) ($dimensionAsked['c'] ?? false);
+        $a = $aAsked ? '?' : $this->measurement($dimensionA, $unit);
+        $b = $bAsked ? '?' : $this->measurement((float) $dimensionB, $unit);
+        $c = $cAsked ? '?' : $this->measurement((float) $dimensionC, $unit);
         $aNumber = $this->number($dimensionA);
         $bNumber = $this->number((float) $dimensionB);
         $cNumber = $this->number((float) $dimensionC);
+        $aDisplayNumber = $aAsked ? '?' : $aNumber;
+        $bDisplayNumber = $bAsked ? '?' : $bNumber;
         $squareCircleRadius = $dimensionB > 0 ? min(230, 460 * $dimensionB / $dimensionA) : 230;
         $squareQuarterRadius = $dimensionB > 0 ? min(460, 460 * $dimensionB / $dimensionA) : 230;
         $sectorAngle = $dimensionB > 0 ? min(360, $dimensionB) : 90;
@@ -80,7 +86,7 @@ class EducationalGeometryTemplateSvgRenderer
             'circle_diameter' => '<circle cx="500" cy="290" r="190" class="shape"/><line x1="310" y1="290" x2="690" y2="290" class="dimension"/><circle cx="500" cy="290" r="7" fill="#0f172a"/><text x="500" y="270" class="label" text-anchor="middle">diameter = '.$a.'</text>',
             'semicircle' => '<path d="M260 420a240 240 0 0 1 480 0Z" class="shape"/><line x1="260" y1="465" x2="740" y2="465" class="dimension"/><text x="500" y="515" class="label" text-anchor="middle">diameter = '.$a.'</text>',
             'quarter_circle' => '<path d="M300 455V115a340 340 0 0 1 340 340Z" class="shape"/><line x1="300" y1="455" x2="640" y2="455" class="dimension"/><text x="470" y="510" class="label" text-anchor="middle">r = '.$a.'</text>',
-            'circle_sector' => $circleSector.'<text x="585" y="220" class="label">'.$bNumber.'°</text><text x="650" y="350" class="label">r = '.$a.'</text>',
+            'circle_sector' => $circleSector.'<text x="585" y="220" class="label">'.$bDisplayNumber.'°</text><text x="650" y="350" class="label">r = '.$a.'</text>',
             'annulus' => '<circle cx="500" cy="290" r="220" fill="#dbeafe" stroke="#1e40af" stroke-width="6"/><circle cx="500" cy="290" r="'.$this->number($annulusInnerRadius).'" fill="#fff" stroke="#1e40af" stroke-width="6"/><line x1="500" y1="290" x2="720" y2="290" class="dimension"/><line x1="500" y1="290" x2="'.$this->number(500 + $annulusInnerRadius).'" y2="290" class="dimension"/><text x="670" y="270" class="label">R = '.$a.'</text><text x="555" y="340" class="label">r = '.$b.'</text>',
             'pentagon' => '<polygon points="500,80 790,290 680,505 320,505 210,290" class="shape"/><text x="500" y="555" class="label" text-anchor="middle">sisi = '.$a.'</text>',
             'hexagon' => '<polygon points="320,100 680,100 840,300 680,500 320,500 160,300" class="shape"/><text x="500" y="555" class="label" text-anchor="middle">sisi = '.$a.'</text>',
@@ -104,8 +110,8 @@ class EducationalGeometryTemplateSvgRenderer
             'hemisphere' => '<path d="M270 300a230 230 0 0 0 460 0Z" class="shape"/><ellipse cx="500" cy="300" rx="230" ry="75" class="top"/><line x1="500" y1="300" x2="730" y2="300" class="dimension"/><text x="615" y="280" class="label" text-anchor="middle">r = '.$a.'</text>',
             'parallel_lines' => '<line x1="180" y1="190" x2="820" y2="190" class="dimension"/><line x1="180" y1="410" x2="820" y2="410" class="dimension"/><line x1="500" y1="205" x2="500" y2="395" class="guide"/><text x="540" y="310" class="label">jarak = '.$a.'</text>',
             'perpendicular_lines' => '<line x1="170" y1="340" x2="830" y2="340" class="dimension"/><line x1="500" y1="80" x2="500" y2="520" class="dimension"/><path d="M500 300h40v40" class="angle"/><text x="570" y="295" class="label">90°</text><text x="500" y="570" class="label" text-anchor="middle">panjang acuan = '.$a.'</text>',
-            'intersecting_lines' => $this->intersectingLines((float) $dimensionA),
-            'angle_acute', 'angle_right', 'angle_obtuse', 'angle_straight', 'angle_reflex' => $this->angle($template, (float) $dimensionA),
+            'intersecting_lines' => $this->intersectingLines((float) $dimensionA, $aDisplayNumber),
+            'angle_acute', 'angle_right', 'angle_obtuse', 'angle_straight', 'angle_reflex' => $this->angle($template, (float) $dimensionA, $aDisplayNumber),
             'circle_chord' => '<circle cx="500" cy="285" r="210" class="shape"/><line x1="'.$this->number(500 - $chordHalf).'" y1="'.$this->number($chordY).'" x2="'.$this->number(500 + $chordHalf).'" y2="'.$this->number($chordY).'" stroke="#334155" stroke-width="5"/><text x="500" y="'.$this->number($chordY - 20).'" class="label" text-anchor="middle">tali busur = '.$b.'</text><line x1="500" y1="285" x2="710" y2="285" class="guide"/><text x="610" y="270" class="label">r = '.$a.'</text>',
             'circle_segment' => '<circle cx="500" cy="285" r="210" class="shape"/><path d="M320 390Q500 530 680 390Z" fill="#fbbf24" fill-opacity="0.65" stroke="#1e40af" stroke-width="5"/><text x="500" y="450" class="label" text-anchor="middle">tembereng</text><text x="600" y="270" class="label">r = '.$a.'</text>',
             'circle_tangent' => '<circle cx="440" cy="300" r="180" class="shape"/><line x1="620" y1="90" x2="620" y2="510" class="dimension"/><line x1="440" y1="300" x2="620" y2="300" class="guide"/><path d="M580 300v40h40" class="angle"/><text x="515" y="280" class="label">r = '.$a.'</text><text x="660" y="300" class="label" transform="rotate(-90 660 300)" text-anchor="middle">garis singgung = '.$b.'</text>',
@@ -123,7 +129,7 @@ class EducationalGeometryTemplateSvgRenderer
             'composite_triangle_rectangle' => '<rect x="260" y="300" width="480" height="220" class="shape"/><polygon points="260,300 740,300 500,70" class="top"/><text x="500" y="570" class="label" text-anchor="middle">lebar = '.$a.'; t▭ = '.$b.'; t△ = '.$c.'</text>',
             'shaded_triangle_midsegment' => '<polygon points="230,500 770,500 500,70" class="shape"/><polygon points="365,285 635,285 500,70" fill="#fbbf24" stroke="#1e40af" stroke-width="5"/><text x="500" y="550" class="label" text-anchor="middle">alas = '.$a.'; tinggi = '.$b.'</text>',
             'shaded_circle_square' => '<circle cx="500" cy="290" r="230" fill="#fbbf24" stroke="#1e40af" stroke-width="6"/><rect x="337" y="127" width="326" height="326" fill="#fff" stroke="#1e40af" stroke-width="6"/><text x="500" y="570" class="label" text-anchor="middle">r = '.$a.'</text>',
-            'shaded_circle_sector' => '<circle cx="500" cy="290" r="220" class="shape"/>'.$shadedSector.'<text x="590" y="220" class="label">'.$bNumber.'°</text><text x="500" y="560" class="label" text-anchor="middle">r = '.$a.'</text>',
+            'shaded_circle_sector' => '<circle cx="500" cy="290" r="220" class="shape"/>'.$shadedSector.'<text x="590" y="220" class="label">'.$bDisplayNumber.'°</text><text x="500" y="560" class="label" text-anchor="middle">r = '.$a.'</text>',
             'shaded_annulus' => '<path d="M500 70a220 220 0 1 1 0 440 220 220 0 1 1 0-440m0 90a130 130 0 1 0 0 260 130 130 0 1 0 0-260" fill="#fbbf24" fill-rule="evenodd" stroke="#1e40af" stroke-width="6"/><text x="500" y="570" class="label" text-anchor="middle">R = '.$a.'; r = '.$b.'</text>',
             'fraction_circle' => '<text x="500" y="70" class="label" text-anchor="middle">Bagian yang diarsir</text>'.$this->fractionCircle(500, 320, 205, (int) $dimensionA, (int) $dimensionB),
             'fraction_bar' => '<text x="500" y="120" class="label" text-anchor="middle">Bagian yang diarsir</text>'.$this->fractionBar(170, 220, 660, 210, (int) $dimensionA, (int) $dimensionB),
@@ -166,11 +172,109 @@ class EducationalGeometryTemplateSvgRenderer
 
             return '<text x="'.$this->number($x).'" y="'.$this->number($y).'" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif" font-size="'.$this->number($fontSize).'" font-weight="'.$weight.'" fill="'.$color.'" transform="rotate('.$this->number($rotation).' '.$this->number($x).' '.$this->number($y).')">'.$content.'</text>';
         })->implode('');
+        $resultLabels = $this->twoDimensionalResultLabels($template, $dimensionA, $dimensionB, $dimensionC, $unit, $options);
 
-        return '<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="600" viewBox="0 0 1000 600" role="img" aria-label="Template geometri"><defs><marker id="arrow-start" markerWidth="10" markerHeight="10" refX="2" refY="5" orient="auto"><path d="M10 0L0 5l10 5" fill="#334155"/></marker><marker id="arrow-end" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0l10 5-10 5" fill="#334155"/></marker></defs><style>.shape{fill:#dbeafe;stroke:#1e40af;stroke-width:6}.dimension{stroke:#334155;stroke-width:4;marker-start:url(#arrow-start);marker-end:url(#arrow-end)}.guide{stroke:#f59e0b;stroke-width:4;stroke-dasharray:12 10}.angle{fill:none;stroke:#f59e0b;stroke-width:4}.label{font:700 26px sans-serif;fill:#0f172a}.top{fill:#bfdbfe;stroke:#1e40af;stroke-width:5}.front{fill:#60a5fa;stroke:#1e40af;stroke-width:5}.side{fill:#2563eb;stroke:#1e40af;stroke-width:5}</style><rect width="1000" height="600" fill="#fff"/><g transform="'.$transform.'">'.$content.'</g>'.$overlays.'</svg>';
+        return '<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="600" viewBox="0 0 1000 600" role="img" aria-label="Template geometri"><defs><marker id="arrow-start" markerWidth="10" markerHeight="10" refX="2" refY="5" orient="auto"><path d="M10 0L0 5l10 5" fill="#334155"/></marker><marker id="arrow-end" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0l10 5-10 5" fill="#334155"/></marker></defs><style>.shape{fill:#dbeafe;stroke:#1e40af;stroke-width:6}.dimension{stroke:#334155;stroke-width:4;marker-start:url(#arrow-start);marker-end:url(#arrow-end)}.guide{stroke:#f59e0b;stroke-width:4;stroke-dasharray:12 10}.angle{fill:none;stroke:#f59e0b;stroke-width:4}.label{font:700 26px sans-serif;fill:#0f172a}.top{fill:#bfdbfe;stroke:#1e40af;stroke-width:5}.front{fill:#60a5fa;stroke:#1e40af;stroke-width:5}.side{fill:#2563eb;stroke:#1e40af;stroke-width:5}</style><rect width="1000" height="600" fill="#fff"/><g transform="'.$transform.'">'.$content.$resultLabels.'</g>'.$overlays.'</svg>';
     }
 
-    private function angle(string $template, float $degrees): string
+    private function twoDimensionalResultLabels(string $template, float $a, ?float $b, ?float $c, string $unit, array $options): string
+    {
+        $pi = 22 / 7;
+        $b = (float) $b;
+        $c = (float) $c;
+        $area = null;
+        $perimeter = null;
+
+        if ($template === 'square') {
+            $area = $a ** 2;
+            $perimeter = 4 * $a;
+        } elseif ($template === 'rectangle') {
+            $area = $a * $b;
+            $perimeter = 2 * ($a + $b);
+        } elseif ($template === 'parallelogram') {
+            $area = $a * $b;
+        } elseif (in_array($template, ['trapezoid', 'trapezoid_right', 'trapezoid_isosceles'], true)) {
+            $area = (($a + $b) * $c) / 2;
+        } elseif (in_array($template, ['rhombus', 'kite'], true)) {
+            $area = ($a * $b) / 2;
+        } elseif (in_array($template, ['triangle', 'triangle_right', 'triangle_isosceles', 'triangle_scalene', 'triangle_acute', 'triangle_obtuse'], true)) {
+            $area = ($a * $b) / 2;
+        } elseif ($template === 'triangle_equilateral') {
+            $area = (sqrt(3) * $a * $a) / 4;
+            $perimeter = 3 * $a;
+        } elseif ($template === 'circle') {
+            $area = $pi * $a * $a;
+            $perimeter = 2 * $pi * $a;
+        } elseif ($template === 'circle_diameter') {
+            $area = $pi * ($a / 2) ** 2;
+            $perimeter = $pi * $a;
+        } elseif ($template === 'semicircle') {
+            $area = 0.5 * $pi * ($a / 2) ** 2;
+            $perimeter = (0.5 * $pi * $a) + $a;
+        } elseif ($template === 'quarter_circle') {
+            $area = 0.25 * $pi * $a * $a;
+            $perimeter = (0.5 * $pi * $a) + (2 * $a);
+        } elseif ($template === 'circle_sector') {
+            $area = ($b / 360) * $pi * $a * $a;
+        } elseif (in_array($template, ['annulus', 'shaded_annulus'], true) && $a > $b) {
+            $area = $pi * (($a * $a) - ($b * $b));
+        } elseif (in_array($template, ['pentagon', 'hexagon', 'heptagon', 'octagon', 'nonagon', 'decagon', 'dodecagon'], true)) {
+            $sides = ['pentagon' => 5, 'hexagon' => 6, 'heptagon' => 7, 'octagon' => 8, 'nonagon' => 9, 'decagon' => 10, 'dodecagon' => 12][$template];
+            $area = ($sides * $a * $a) / (4 * tan(M_PI / $sides));
+            $perimeter = $sides * $a;
+        } elseif ($template === 'composite_rectangle_semicircle') {
+            $area = ($a * $b) + (0.5 * $pi * ($a / 2) ** 2);
+            $perimeter = $a + (2 * $b) + (0.5 * $pi * $a);
+        } elseif ($template === 'shaded_square_circle' && $a >= 2 * $b) {
+            $area = ($a * $a) - ($pi * $b * $b);
+        } elseif ($template === 'composite_l_shape' && $c < $a && $c < $b) {
+            $area = ($a * $b) - ($c * $c);
+        } elseif ($template === 'composite_square_semicircle') {
+            $area = ($a * $a) + (0.5 * $pi * ($a / 2) ** 2);
+            $perimeter = (3 * $a) + (0.5 * $pi * $a);
+        } elseif ($template === 'composite_square_quarter_circle' && $b <= $a) {
+            $area = ($a * $a) - (0.25 * $pi * $b * $b);
+        } elseif ($template === 'composite_square_four_quarters') {
+            $area = ($a * $a) - ($pi * ($a / 2) ** 2);
+        } elseif ($template === 'shaded_square_diagonal') {
+            $area = 0.5 * $a * $a;
+        } elseif ($template === 'composite_stadium') {
+            $area = ($a * $b) + ($pi * ($b / 2) ** 2);
+            $perimeter = (2 * $a) + ($pi * $b);
+        } elseif ($template === 'composite_rectangle_two_quarters') {
+            $area = ($a * $b) - (0.5 * $pi * ($b / 2) ** 2);
+        } elseif ($template === 'shaded_rectangle_circle' && 2 * $c <= min($a, $b)) {
+            $area = ($a * $b) - ($pi * $c * $c);
+        } elseif ($template === 'composite_triangle_semicircle') {
+            $area = (0.5 * $a * $b) + (0.5 * $pi * ($a / 2) ** 2);
+        } elseif ($template === 'composite_triangle_rectangle') {
+            $area = ($a * $b) + (0.5 * $a * $c);
+        } elseif ($template === 'shaded_triangle_midsegment') {
+            $area = ($a * $b) / 8;
+        } elseif ($template === 'shaded_circle_square') {
+            $area = ($pi * $a * $a) - (2 * $a * $a);
+        } elseif ($template === 'shaded_circle_sector' && $b <= 360) {
+            $area = ($b / 360) * $pi * $a * $a;
+        }
+
+        $rows = [];
+        if (((bool) ($options['show_area'] ?? false) || (bool) ($options['area_asked'] ?? false)) && $area !== null) {
+            $rows[] = 'Luas = '.((bool) ($options['area_asked'] ?? false) ? '?' : $this->resultNumber($area).' '.$unit.'²');
+        }
+        if (((bool) ($options['show_perimeter'] ?? false) || (bool) ($options['perimeter_asked'] ?? false)) && $perimeter !== null) {
+            $rows[] = 'Keliling = '.((bool) ($options['perimeter_asked'] ?? false) ? '?' : $this->resultNumber($perimeter).' '.$unit);
+        }
+        if ($rows === []) {
+            return '';
+        }
+
+        $height = count($rows) === 2 ? 86 : 52;
+        $labels = collect($rows)->map(fn (string $row, int $index): string => '<text x="44" y="'.(54 + ($index * 34)).'" font-family="sans-serif" font-size="24" font-weight="700" fill="#312e81">'.$row.'</text>')->implode('');
+
+        return '<g><rect x="24" y="20" width="360" height="'.$height.'" rx="14" fill="#fff" fill-opacity="0.94" stroke="#c7d2fe" stroke-width="3"/>'.$labels.'</g>';
+    }
+
+    private function angle(string $template, float $degrees, string $label): string
     {
         $radians = deg2rad($degrees);
         $endX = 500 + (220 * cos($radians));
@@ -182,10 +286,10 @@ class EducationalGeometryTemplateSvgRenderer
             ? '<path d="M500 320h40v40" class="angle"/>'
             : '<path d="M610 360A110 110 0 '.$largeArc.' 0 '.$this->number($arcX).' '.$this->number($arcY).'" class="angle"/>';
 
-        return '<line x1="500" y1="360" x2="780" y2="360" class="dimension"/><line x1="500" y1="360" x2="'.$this->number($endX).'" y2="'.$this->number($endY).'" class="dimension"/>'.$extra.'<circle cx="500" cy="360" r="7" fill="#0f172a"/><text x="625" y="300" class="label">'.$this->number($degrees).'°</text>';
+        return '<line x1="500" y1="360" x2="780" y2="360" class="dimension"/><line x1="500" y1="360" x2="'.$this->number($endX).'" y2="'.$this->number($endY).'" class="dimension"/>'.$extra.'<circle cx="500" cy="360" r="7" fill="#0f172a"/><text x="625" y="300" class="label">'.$label.'°</text>';
     }
 
-    private function intersectingLines(float $degrees): string
+    private function intersectingLines(float $degrees, string $label): string
     {
         $radians = deg2rad(min(180, $degrees));
         $dx = 220 * cos($radians);
@@ -193,7 +297,7 @@ class EducationalGeometryTemplateSvgRenderer
         $arcX = 500 + (90 * cos($radians));
         $arcY = 300 - (90 * sin($radians));
 
-        return '<line x1="170" y1="300" x2="830" y2="300" stroke="#334155" stroke-width="4"/><line x1="'.$this->number(500 - $dx).'" y1="'.$this->number(300 + $dy).'" x2="'.$this->number(500 + $dx).'" y2="'.$this->number(300 - $dy).'" stroke="#334155" stroke-width="4"/><path d="M590 300A90 90 0 0 0 '.$this->number($arcX).' '.$this->number($arcY).'" class="angle"/><text x="600" y="240" class="label">'.$this->number($degrees).'°</text>';
+        return '<line x1="170" y1="300" x2="830" y2="300" stroke="#334155" stroke-width="4"/><line x1="'.$this->number(500 - $dx).'" y1="'.$this->number(300 + $dy).'" x2="'.$this->number(500 + $dx).'" y2="'.$this->number(300 - $dy).'" stroke="#334155" stroke-width="4"/><path d="M590 300A90 90 0 0 0 '.$this->number($arcX).' '.$this->number($arcY).'" class="angle"/><text x="600" y="240" class="label">'.$label.'°</text>';
     }
 
     private function boxNet(bool $cube, string $a, string $b = '', string $c = ''): string
@@ -496,6 +600,11 @@ class EducationalGeometryTemplateSvgRenderer
     private function number(float $number): string
     {
         return rtrim(rtrim(number_format($number, 2, '.', ''), '0'), '.');
+    }
+
+    private function resultNumber(float $number): string
+    {
+        return rtrim(rtrim(number_format($number, 4, '.', ''), '0'), '.');
     }
 
     private function escape(string $value): string

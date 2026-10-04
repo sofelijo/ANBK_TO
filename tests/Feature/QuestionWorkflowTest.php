@@ -573,6 +573,42 @@ class QuestionWorkflowTest extends TestCase
         $this->assertStringContainsString('translate(-50 25) scale(0.8)', $svg);
     }
 
+    public function test_two_dimensional_template_can_hide_multiple_asked_measurements(): void
+    {
+        Storage::fake('public');
+        [$teacher, $competency] = $this->teacherAndCompetency();
+
+        $this->actingAs($teacher)->post(route('questions.store'), [
+            ...$this->payload($competency, 'Tentukan panjang dan tinggi bangun tersebut.'),
+            'stimulus_image_source' => 'template',
+            'stimulus_svg_template' => 'trapezoid',
+            'stimulus_svg_dimension_a' => '8',
+            'stimulus_svg_dimension_b' => '14',
+            'stimulus_svg_dimension_c' => '6',
+            'stimulus_svg_dimension_a_asked' => true,
+            'stimulus_svg_dimension_b_asked' => false,
+            'stimulus_svg_dimension_c_asked' => true,
+            'stimulus_svg_show_area' => true,
+            'stimulus_svg_area_asked' => true,
+            'stimulus_svg_unit' => 'cm',
+        ])->assertSessionHasNoErrors()->assertRedirect();
+
+        $question = Question::firstOrFail();
+        $this->assertTrue((bool) data_get($question->metadata, 'illustration.dimension_a_asked'));
+        $this->assertFalse((bool) data_get($question->metadata, 'illustration.dimension_b_asked'));
+        $this->assertTrue((bool) data_get($question->metadata, 'illustration.dimension_c_asked'));
+        $this->assertTrue((bool) data_get($question->metadata, 'illustration.show_area'));
+        $this->assertTrue((bool) data_get($question->metadata, 'illustration.area_asked'));
+
+        $svg = Storage::disk('public')->get(data_get($question->metadata, 'illustration.path'));
+        $this->assertStringContainsString('sisi atas = ?', $svg);
+        $this->assertStringContainsString('sisi bawah = 14 cm', $svg);
+        $this->assertStringContainsString('tinggi = ?', $svg);
+        $this->assertStringNotContainsString('sisi atas = 8 cm', $svg);
+        $this->assertStringNotContainsString('tinggi = 6 cm', $svg);
+        $this->assertStringContainsString('Luas = ?', $svg);
+    }
+
     public function test_protractor_can_render_multiple_labeled_angles_and_hide_the_asked_value(): void
     {
         Storage::fake('public');
