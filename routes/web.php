@@ -3,6 +3,7 @@
 use App\Http\Controllers\Admin\AiQuotaController;
 use App\Http\Controllers\Admin\IndonesianBundleController;
 use App\Http\Controllers\Admin\QuestionTypeSettingController;
+use App\Http\Controllers\Admin\TeacherQuestionAnalyticsController;
 use App\Http\Controllers\Admin\TeacherVerificationAnalyticsController;
 use App\Http\Controllers\Admin\UserController as AdminUserController;
 use App\Http\Controllers\Admin\VerificationSettingController;
@@ -152,6 +153,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::patch('/schedules/availability-thresholds', [AssessmentScheduleController::class, 'updateAvailabilityThresholds'])->name('schedules.thresholds.update');
         Route::get('/admin/teacher-verifications', TeacherVerificationAnalyticsController::class)
             ->name('admin.teacher-verifications.index');
+        Route::get('/admin/teacher-questions', TeacherQuestionAnalyticsController::class)
+            ->name('admin.teacher-questions.index');
         Route::get('/admin/indonesian-bundles', [IndonesianBundleController::class, 'edit'])->name('admin.indonesian-bundles.edit');
         Route::patch('/admin/indonesian-bundles', [IndonesianBundleController::class, 'update'])->name('admin.indonesian-bundles.update');
         Route::get('/admin/ai-quotas', [AiQuotaController::class, 'edit'])->name('admin.ai-quotas.edit');

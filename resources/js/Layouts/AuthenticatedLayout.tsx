@@ -61,6 +61,7 @@ export default function AuthenticatedLayout({
                       { label: 'Data Sekolah', href: route('school.edit'), active: 'school.edit' },
                       { label: 'Data Siswa', href: route('school.students.index'), active: 'school.students.*' },
                       { label: 'Pengguna', href: route('admin.users.index'), active: 'admin.users.*' },
+                      { label: 'Statistik Soal Guru', href: route('admin.teacher-questions.index'), active: 'admin.teacher-questions.*' },
                       { label: 'Analisis Verifikasi', href: route('admin.teacher-verifications.index'), active: 'admin.teacher-verifications.*' },
                       { label: 'Bentuk Soal Aktif', href: route('admin.question-types.edit'), active: 'admin.question-types.*' },
                       { label: 'Kuota AI Guru', href: route('admin.ai-quotas.edit'), active: 'admin.ai-quotas.*' },
