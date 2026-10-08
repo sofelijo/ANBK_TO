@@ -137,13 +137,7 @@ export default function ManualBundleCreate({ subject, competencies, bundleDefaul
     };
 
     const updateSlot = <Key extends keyof Slot>(index: number, key: Key, value: Slot[Key]) => setData((current) => {
-        const oldValue = current.bundle_slots[index][key];
-        const occupied = current.bundle_slots.findIndex((slot, otherIndex) => otherIndex !== index && slot[key] === value);
-        const bundleSlots = current.bundle_slots.map((slot, slotIndex) => {
-            if (slotIndex === index) return { ...slot, [key]: value };
-            if (slotIndex === occupied) return { ...slot, [key]: oldValue };
-            return slot;
-        });
+        const bundleSlots = current.bundle_slots.map((slot, slotIndex) => slotIndex === index ? { ...slot, [key]: value } : slot);
 
         return {
             ...current,
@@ -176,7 +170,7 @@ export default function ManualBundleCreate({ subject, competencies, bundleDefaul
             <form onSubmit={submit} className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-6">
                 <section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
                     <h2 className="font-semibold text-emerald-950">Satu bacaan untuk tiga soal</h2>
-                    <p className="mt-2 text-sm leading-6 text-emerald-800">Setiap bundle memakai tiga tipe soal milik satu kompetensi, satu Pilihan Ganda, satu Benar/Salah, satu MCMA, serta Level 1–3 masing-masing satu kali. Pasangannya boleh ditukar.</p>
+                    <p className="mt-2 text-sm leading-6 text-emerald-800">Susunan default sudah disiapkan beragam. Tipe soal, bentuk jawaban, dan level soal dapat dipilih bebas untuk setiap soal—boleh sama ataupun berbeda.</p>
                 </section>
 
                 <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">

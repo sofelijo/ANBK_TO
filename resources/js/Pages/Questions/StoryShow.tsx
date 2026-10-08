@@ -1,5 +1,6 @@
 import InlineQuestionEditor, { InlineEditableQuestion } from '@/Components/InlineQuestionEditor';
 import FormattedText from '@/Components/FormattedText';
+import StimulusText from '@/Components/StimulusText';
 import Modal from '@/Components/Modal';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, Link, router } from '@inertiajs/react';
@@ -835,7 +836,7 @@ export default function StoryShow({
                                 <div style={{ zoom: textScale / 100 }}>
                                     {!storyMode && previewQuestion.stimulus && (
                                         <div className="mb-5 whitespace-pre-wrap rounded-xl bg-slate-50 p-5 text-sm leading-7 text-slate-700">
-                                            <FormattedText text={previewQuestion.stimulus} />
+                                            <StimulusText text={previewQuestion.stimulus} />
                                         </div>
                                     )}
                                     {previewQuestion.illustration_url && (!storyMode || !manualBundle) && (
@@ -1068,7 +1069,7 @@ export default function StoryShow({
                             <section className="min-w-0 p-5 lg:p-7 flex flex-col justify-between">
                                 <div style={{ zoom: textScale / 100 }}>
                                     {!storyMode && previewQuestion.stimulus && (
-                                        <FormattedText text={previewQuestion.stimulus} className="mb-5 block whitespace-pre-wrap rounded-xl bg-slate-50 p-4 text-sm leading-7 text-slate-700" />
+                                        <StimulusText text={previewQuestion.stimulus} className="mb-5 block whitespace-pre-wrap rounded-xl bg-slate-50 p-4 text-sm leading-7 text-slate-700" />
                                     )}
                                     {previewQuestion.illustration_url && (!storyMode || !manualBundle) && (
                                         <img src={previewQuestion.illustration_url} alt={previewQuestion.metadata?.illustration?.alt || 'Ilustrasi soal'} className="mb-5 max-h-72 w-full rounded-xl border border-slate-200 object-contain" />
@@ -1444,7 +1445,7 @@ export default function StoryShow({
                                                 </span>
                                             </div>
                                             <p className="mt-2 text-xs text-slate-500">Kelas {question.grade_level} · Kesulitan {question.difficulty} · {question.verification.count}/{question.verification.required} verifikasi</p>
-                                            {!storyMode && question.stimulus && <FormattedText text={question.stimulus} className="mt-2 block whitespace-pre-wrap rounded-lg bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-700" />}
+                                            {!storyMode && question.stimulus && <StimulusText text={question.stimulus} className="mt-2 block whitespace-pre-wrap rounded-lg bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-700" />}
                                             <h3 className="mt-2 text-base font-semibold leading-7 text-slate-900"><FormattedText text={question.prompt} /></h3>
                                         </div>
                                         {question.status === 'published' ? (

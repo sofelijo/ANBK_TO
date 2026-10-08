@@ -63,15 +63,15 @@ class IndonesianBundleWorkflowTest extends TestCase
         ]])->assertSessionHasErrors('slots');
     }
 
-    public function test_teacher_can_customize_three_complete_slots_for_one_story_bundle(): void
+    public function test_teacher_can_repeat_types_answer_formats_and_levels_in_ai_story_bundle(): void
     {
         config()->set('ai.driver', 'fake');
         config()->set('queue.default', 'sync');
         [, , $teacher, $subject, $competency, $blueprints] = $this->context();
         $slots = [
-            ['question_blueprint_id' => $blueprints[1]->id, 'answer_format' => 'multiple_choice', 'cognitive_level' => 'evaluation'],
             ['question_blueprint_id' => $blueprints[0]->id, 'answer_format' => 'single_choice', 'cognitive_level' => 'textual'],
-            ['question_blueprint_id' => $blueprints[2]->id, 'answer_format' => 'true_false', 'cognitive_level' => 'inferential'],
+            ['question_blueprint_id' => $blueprints[0]->id, 'answer_format' => 'single_choice', 'cognitive_level' => 'textual'],
+            ['question_blueprint_id' => $blueprints[0]->id, 'answer_format' => 'single_choice', 'cognitive_level' => 'evaluation'],
         ];
 
         $this->actingAs($teacher)
@@ -86,6 +86,7 @@ class IndonesianBundleWorkflowTest extends TestCase
             'subject_id' => $subject->id,
             'root_competency_id' => $competency->id,
             'competency_id' => $competency->id,
+            'question_blueprint_ids' => [$blueprints[0]->id, $blueprints[0]->id, $blueprints[0]->id],
             'bundle_slots' => $slots,
             'theme' => '',
             'paragraph_count' => 3,
@@ -101,19 +102,18 @@ class IndonesianBundleWorkflowTest extends TestCase
         $this->assertSame('ai', $generation->request_payload['theme_source']);
         $this->assertSame('Cerita Kegiatan Sekolah Yang Menarik', $generation->result_payload['title']);
         $this->assertSame(
-            [QuestionType::MultipleChoice, QuestionType::SingleChoice, QuestionType::CategoryMatrix],
+            [QuestionType::SingleChoice, QuestionType::SingleChoice, QuestionType::SingleChoice],
             $questions->pluck('type')->all(),
         );
         $this->assertSame(
-            [$blueprints[1]->id, $blueprints[0]->id, $blueprints[2]->id],
+            [$blueprints[0]->id, $blueprints[0]->id, $blueprints[0]->id],
             $questions->pluck('question_blueprint_id')->all(),
         );
         $this->assertSame(
-            ['Evaluasi dan Apresiasi (Level 3)', 'Pemahaman Tekstual (Level 1)', 'Pemahaman Inferensial (Level 2)'],
+            ['Pemahaman Tekstual (Level 1)', 'Pemahaman Tekstual (Level 1)', 'Evaluasi dan Apresiasi (Level 3)'],
             $questions->pluck('cognitive_level')->all(),
         );
-        $this->assertSame([3, 1, 2], $questions->pluck('difficulty')->all());
-        $this->assertCount(3, $questions[2]->metadata['matrix_rows']);
+        $this->assertSame([1, 1, 3], $questions->pluck('difficulty')->all());
     }
 
     public function test_teacher_can_create_manual_indonesian_bundle_without_ai_or_quota(): void
@@ -213,6 +213,42 @@ class IndonesianBundleWorkflowTest extends TestCase
             'actor_id' => $teacher->id,
             'action' => 'manual_story_bundle.created',
         ]);
+    }
+
+    public function test_manual_bundle_allows_repeated_question_types_answer_formats_and_levels(): void
+    {
+        [, , $teacher, $subject, $competency, $blueprints] = $this->context();
+        $slots = collect(['textual', 'textual', 'evaluation'])->map(fn (string $level): array => [
+            'question_blueprint_id' => $blueprints[0]->id,
+            'answer_format' => 'single_choice',
+            'cognitive_level' => $level,
+        ])->all();
+        $questions = collect(range(1, 3))->map(fn (int $number): array => [
+            'prompt' => "Pertanyaan pilihan ganda {$number}?",
+            'explanation' => '',
+            'options' => [
+                ['content' => 'Jawaban benar', 'is_correct' => true],
+                ['content' => 'Pengecoh satu', 'is_correct' => false],
+                ['content' => 'Pengecoh dua', 'is_correct' => false],
+                ['content' => 'Pengecoh tiga', 'is_correct' => false],
+            ],
+            'statements' => [],
+        ])->all();
+
+        $this->actingAs($teacher)->post(route('manual-story-bundles.store'), [
+            'subject_id' => $subject->id,
+            'competency_id' => $competency->id,
+            'title' => 'Bundle Pilihan Ganda',
+            'story' => 'Satu bacaan digunakan untuk tiga soal pilihan ganda.',
+            'bundle_slots' => $slots,
+            'questions' => $questions,
+        ])->assertRedirect();
+
+        $createdQuestions = Question::query()->orderBy('id')->get();
+        $this->assertCount(3, $createdQuestions);
+        $this->assertTrue($createdQuestions->every(fn (Question $question): bool => $question->type === QuestionType::SingleChoice));
+        $this->assertTrue($createdQuestions->every(fn (Question $question): bool => $question->question_blueprint_id === $blueprints[0]->id));
+        $this->assertSame([1, 1, 3], $createdQuestions->pluck('difficulty')->all());
     }
 
     public function test_private_manual_draft_cannot_be_verified_until_author_submits_it(): void
@@ -436,31 +472,6 @@ class IndonesianBundleWorkflowTest extends TestCase
             'actor_id' => $teacher->id,
             'action' => 'story_generation.stimulus_updated',
         ]);
-    }
-
-    public function test_manual_indonesian_bundle_rejects_incomplete_answer_and_level_composition(): void
-    {
-        [, , $teacher, $subject, $competency, $blueprints] = $this->context();
-
-        $this->actingAs($teacher)->post(route('manual-story-bundles.store'), [
-            'subject_id' => $subject->id,
-            'competency_id' => $competency->id,
-            'title' => 'Judul Bacaan',
-            'story' => 'Isi bacaan yang menjadi dasar soal.',
-            'bundle_slots' => [
-                ['question_blueprint_id' => $blueprints[0]->id, 'answer_format' => 'single_choice', 'cognitive_level' => 'textual'],
-                ['question_blueprint_id' => $blueprints[1]->id, 'answer_format' => 'single_choice', 'cognitive_level' => 'inferential'],
-                ['question_blueprint_id' => $blueprints[2]->id, 'answer_format' => 'multiple_choice', 'cognitive_level' => 'evaluation'],
-            ],
-            'questions' => array_fill(0, 3, [
-                'prompt' => 'Pertanyaan?',
-                'explanation' => '',
-                'options' => array_fill(0, 4, ['content' => 'Pilihan', 'is_correct' => false]),
-                'statements' => [],
-            ]),
-        ])->assertSessionHasErrors('bundle_slots');
-
-        $this->assertDatabaseCount('ai_generations', 0);
     }
 
     public function test_ai_story_bundle_draft_and_review_lifecycle(): void

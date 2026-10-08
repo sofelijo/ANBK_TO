@@ -1,6 +1,7 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import Modal from '@/Components/Modal';
 import FormattedText from '@/Components/FormattedText';
+import StimulusText from '@/Components/StimulusText';
 import { Head, Link, router } from '@inertiajs/react';
 import { useState } from 'react';
 
@@ -750,7 +751,7 @@ export default function Show({
                                 <span className="mb-2 block text-xs font-bold uppercase tracking-wide text-amber-900">
                                     📄 Stimulus / Teks Bacaan
                                 </span>
-                                <FormattedText text={previewBundle.stimulus} className="block whitespace-pre-wrap" />
+                                <StimulusText text={previewBundle.stimulus} className="block whitespace-pre-wrap" />
                             </div>
                         )}
 
@@ -863,7 +864,7 @@ export default function Show({
                                 <span className="font-bold text-amber-900 block mb-1 text-xs uppercase tracking-wide">
                                     📄 Stimulus / Teks Bacaan:
                                 </span>
-                                <FormattedText text={previewQuestion.stimulus} className="block whitespace-pre-wrap" />
+                                <StimulusText text={previewQuestion.stimulus} className="block whitespace-pre-wrap" />
                             </div>
                         )}
 

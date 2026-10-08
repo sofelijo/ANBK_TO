@@ -510,6 +510,15 @@ class QuestionWorkflowTest extends TestCase
         $this->assertStringStartsWith('question-explanations/', $explanationImagePath);
         $this->assertSame('Langkah menghitung jumlah buku', data_get($question->metadata, 'explanation_illustration.alt'));
 
+        $this->actingAs($teacher)
+            ->get(route('questions.edit', $question))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Questions/Create')
+                ->where('question.illustration_url', "/storage/{$imagePath}")
+                ->where('question.secondary_illustration_url', "/storage/{$secondImagePath}")
+                ->has('question.additional_illustration_urls', 2)
+                ->has('stimulusSvgTemplates'));
+
         $verifiers = $this->verifyQuestionWithThreeTeachers($question, $teacher);
 
         $this->actingAs($teacher)

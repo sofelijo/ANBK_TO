@@ -123,7 +123,7 @@ class ManualIndonesianBundleController extends Controller
             'max_words' => ['nullable', 'integer', 'between:50,1000'],
             'submission_mode' => ['nullable', Rule::in(['draft', 'review'])],
             'bundle_slots' => ['required', 'array', 'size:3'],
-            'bundle_slots.*.question_blueprint_id' => ['required', 'integer', 'distinct'],
+            'bundle_slots.*.question_blueprint_id' => ['required', 'integer'],
             'bundle_slots.*.answer_format' => ['required', Rule::in(IndonesianBundleConfiguration::ANSWER_FORMATS)],
             'bundle_slots.*.cognitive_level' => ['required', Rule::in(IndonesianBundleConfiguration::COGNITIVE_LEVELS)],
             'questions' => ['required', 'array', 'size:3'],
@@ -173,16 +173,12 @@ class ManualIndonesianBundleController extends Controller
             ->get(['question_blueprints.id', 'code', 'name'])
             ->keyBy('id');
         $submittedIds = collect($data['bundle_slots'])->pluck('question_blueprint_id')->map(fn ($id): int => (int) $id);
-        if ($blueprints->count() !== 3 || $submittedIds->sort()->values()->all() !== $blueprints->keys()->sort()->values()->all()) {
+        if ($blueprints->count() !== 3 || $submittedIds->contains(fn (int $id): bool => ! $blueprints->has($id))) {
             throw ValidationException::withMessages([
-                'bundle_slots' => 'Bundle wajib menggunakan ketiga tipe soal milik kompetensi masing-masing satu kali.',
+                'bundle_slots' => 'Tipe soal yang dipilih harus tersedia pada kompetensi tersebut.',
             ]);
         }
 
-        $configuration->ensureComplete(
-            collect($data['bundle_slots'])->map(fn (array $slot): array => collect($slot)->only(['answer_format', 'cognitive_level'])->all())->all(),
-            'bundle_slots',
-        );
         if ($data['submission_mode'] === 'review') {
             $this->validateAnswers($data['bundle_slots'], $data['questions']);
         }

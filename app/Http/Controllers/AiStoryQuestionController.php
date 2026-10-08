@@ -89,7 +89,9 @@ class AiStoryQuestionController extends Controller
             ->where('code', 'BIND')
             ->exists();
 
-        if (! $requestedSubjectUsesIndonesianBundle) {
+        if ($requestedSubjectUsesIndonesianBundle && is_array($request->input('bundle_slots'))) {
+            $request->request->remove('question_blueprint_ids');
+        } elseif (! $requestedSubjectUsesIndonesianBundle) {
             $request->request->remove('bundle_slots');
         }
 
@@ -100,7 +102,7 @@ class AiStoryQuestionController extends Controller
             'question_blueprint_ids' => ['array'],
             'question_blueprint_ids.*' => ['integer', 'distinct'],
             'bundle_slots' => ['nullable', 'array', 'size:3'],
-            'bundle_slots.*.question_blueprint_id' => ['required_with:bundle_slots', 'integer', 'distinct'],
+            'bundle_slots.*.question_blueprint_id' => ['required_with:bundle_slots', 'integer'],
             'bundle_slots.*.answer_format' => ['required_with:bundle_slots', Rule::in(IndonesianBundleConfiguration::ANSWER_FORMATS)],
             'bundle_slots.*.cognitive_level' => ['required_with:bundle_slots', Rule::in(IndonesianBundleConfiguration::COGNITIVE_LEVELS)],
             'theme' => ['nullable', 'string', 'max:5000'],
@@ -136,18 +138,13 @@ class AiStoryQuestionController extends Controller
                     'question_blueprint_id' => $availableBundleBlueprints[$index]->id,
                     ...$slot,
                 ])->all();
-            $bundleConfiguration->ensureComplete(
-                collect($submittedSlots)->map(fn (array $slot): array => collect($slot)->only(['answer_format', 'cognitive_level'])->all())->all(),
-                'bundle_slots',
-            );
             $submittedBlueprintIds = collect($submittedSlots)->pluck('question_blueprint_id')->map(fn ($id): int => (int) $id);
-            if ($submittedBlueprintIds->unique()->count() !== 3
-                || $submittedBlueprintIds->sort()->values()->all() !== $availableBundleBlueprints->pluck('id')->sort()->values()->all()) {
+            $availableById = $availableBundleBlueprints->keyBy('id');
+            if ($submittedBlueprintIds->contains(fn (int $id): bool => ! $availableById->has($id))) {
                 throw ValidationException::withMessages([
-                    'bundle_slots' => 'Bundle wajib menggunakan ketiga tipe soal milik kompetensi masing-masing satu kali.',
+                    'bundle_slots' => 'Tipe soal yang dipilih harus tersedia pada kompetensi tersebut.',
                 ]);
             }
-            $availableById = $availableBundleBlueprints->keyBy('id');
             $bundleSlots = collect($submittedSlots)->values()->map(fn (array $slot, int $index): array => [
                 'position' => $index + 1,
                 'question_blueprint_id' => (int) $slot['question_blueprint_id'],
@@ -238,14 +235,14 @@ class AiStoryQuestionController extends Controller
                 : 'Topik diterima. AI sedang membuat soal draft tanpa mewajibkan cerita.');
     }
 
-    public function storeJson(Request $request, AuditLogger $auditLogger, IndonesianBundleConfiguration $bundleConfiguration): RedirectResponse
+    public function storeJson(Request $request, AuditLogger $auditLogger): RedirectResponse
     {
         $data = $request->validate([
             'subject_id' => ['required', 'integer'],
             'root_competency_id' => ['required', 'integer'],
             'competency_id' => ['required', 'integer'],
-            'bundle_slots' => ['nullable', 'array'],
-            'bundle_slots.*.question_blueprint_id' => ['required_with:bundle_slots', 'integer', 'distinct'],
+            'bundle_slots' => ['nullable', 'array', 'size:3'],
+            'bundle_slots.*.question_blueprint_id' => ['required_with:bundle_slots', 'integer'],
             'bundle_slots.*.answer_format' => ['required_with:bundle_slots', Rule::in(IndonesianBundleConfiguration::ANSWER_FORMATS)],
             'bundle_slots.*.cognitive_level' => ['required_with:bundle_slots', Rule::in(IndonesianBundleConfiguration::COGNITIVE_LEVELS)],
             'theme' => ['nullable', 'string', 'max:5000'],
@@ -325,16 +322,20 @@ class AiStoryQuestionController extends Controller
 
         $bundleSlots = collect();
         if ($usesIndonesianBundle) {
-            $submittedSlots = $bundleConfiguration->ensureComplete($data['bundle_slots'] ?? [], 'bundle_slots');
+            $submittedSlots = array_values($data['bundle_slots'] ?? []);
+            if (count($submittedSlots) !== 3) {
+                throw ValidationException::withMessages(['bundle_slots' => 'Bundle wajib memiliki tepat tiga soal.']);
+            }
+            $submittedBlueprintIds = collect($submittedSlots)->pluck('question_blueprint_id')->map(fn ($id): int => (int) $id);
             $blueprints = QuestionBlueprint::query()
-                ->whereIn('id', collect($submittedSlots)->pluck('question_blueprint_id'))
+                ->whereIn('id', $submittedBlueprintIds)
                 ->where('subject_id', $subject->id)
                 ->whereHas('competencies', fn ($query) => $query->whereKey($competency->id))
                 ->get()
                 ->keyBy('id');
 
-            if ($blueprints->count() !== 3) {
-                throw ValidationException::withMessages(['bundle_slots' => 'Tiga tipe soal pada bundle tidak valid.']);
+            if ($blueprints->count() !== $submittedBlueprintIds->unique()->count()) {
+                throw ValidationException::withMessages(['bundle_slots' => 'Tipe soal pada bundle tidak valid.']);
             }
 
             $bundleSlots = collect($submittedSlots)->values()->map(fn (array $slot): array => [

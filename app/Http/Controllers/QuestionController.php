@@ -337,6 +337,7 @@ class QuestionController extends Controller
                 ? $this->questionTypeConfiguration->allOptions()
                 : $this->questionTypeConfiguration->options($request->user()->school, $question->type),
             'question' => $question,
+            'stimulusSvgTemplates' => $this->stimulusSvgTemplates(),
             'requiredVerifications' => QuestionVerificationService::requiredGlobally(),
             'returnGeneration' => $returnGeneration ? [
                 'id' => $returnGeneration->id,

@@ -6,6 +6,15 @@ export type StimulusImageLayout = {
     width?: number;
 };
 
+const EDITOR_CANVAS_WIDTH = 768;
+
+const responsiveImageStyle = (layout: StimulusImageLayout | undefined, defaultX: number, defaultY: number) => {
+    const width = Math.min(90, Math.max(13, ((layout?.width ?? 320) / EDITOR_CANVAS_WIDTH) * 100));
+    const left = Math.min(layout?.x ?? defaultX, 100 - width);
+
+    return { left: `${Math.max(0, left)}%`, top: `${layout?.y ?? defaultY}%`, width: `${width}%` };
+};
+
 export default function FreeformStimulusDocument({
     text,
     style,
@@ -34,25 +43,25 @@ export default function FreeformStimulusDocument({
     }
 
     return (
-        <div className={`relative min-h-[32rem] overflow-hidden rounded-lg bg-white ${className}`}>
+        <div className={`relative aspect-[768/620] w-full min-w-0 max-w-full overflow-hidden rounded-lg bg-white ${className}`}>
             {text && <StimulusText text={text} style={style} className="relative z-0 block whitespace-pre-wrap p-6 text-slate-700" />}
             {imageUrl && <img
                 src={imageUrl}
                 alt={imageAlt}
-                style={{ left: `${imageLayout?.x ?? 8}%`, top: `${imageLayout?.y ?? 18}%`, width: `${imageLayout?.width ?? 320}px` }}
+                style={responsiveImageStyle(imageLayout, 8, 18)}
                 className="absolute z-10 h-auto max-w-[90%] rounded-md object-contain shadow-sm"
             />}
             {secondaryImageUrl && <img
                 src={secondaryImageUrl}
                 alt={secondaryImageAlt}
-                style={{ left: `${secondaryImageLayout?.x ?? 48}%`, top: `${secondaryImageLayout?.y ?? 48}%`, width: `${secondaryImageLayout?.width ?? 320}px` }}
+                style={responsiveImageStyle(secondaryImageLayout, 48, 48)}
                 className="absolute z-20 h-auto max-w-[90%] rounded-md object-contain shadow-sm"
             />}
             {additionalImages.map((image, index) => <img
                 key={`${image.url}-${index}`}
                 src={image.url}
                 alt={image.alt || `Gambar stimulus ${index + 3}`}
-                style={{ left: `${image.layout?.x ?? 20}%`, top: `${image.layout?.y ?? 20}%`, width: `${image.layout?.width ?? 320}px`, zIndex: 30 + index }}
+                style={{ ...responsiveImageStyle(image.layout, 20, 20), zIndex: 30 + index }}
                 className="absolute h-auto max-w-[90%] rounded-md object-contain shadow-sm"
             />)}
         </div>

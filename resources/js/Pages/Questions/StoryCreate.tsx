@@ -79,14 +79,7 @@ export default function StoryCreate({ subjects, competencies, questionBlueprints
         .sort((a, b) => (a.competency_positions[competencyId] || 999) - (b.competency_positions[competencyId] || 999));
     const selectedBundleBlueprints = competencyBlueprints(data.root_competency_id);
     const updateBundleSlot = <Key extends keyof BundleSlot>(index: number, key: Key, value: BundleSlot[Key]) => setData((current) => {
-        const previousValue = current.bundle_slots[index][key];
-        const occupiedIndex = current.bundle_slots.findIndex((slot, slotIndex) => slotIndex !== index && slot[key] === value);
-        const bundleSlots = current.bundle_slots.map((slot, slotIndex) => {
-            if (slotIndex === index) return { ...slot, [key]: value };
-            if (slotIndex === occupiedIndex) return { ...slot, [key]: previousValue };
-
-            return slot;
-        });
+        const bundleSlots = current.bundle_slots.map((slot, slotIndex) => slotIndex === index ? { ...slot, [key]: value } : slot);
 
         return { ...current, bundle_slots: bundleSlots, question_blueprint_ids: bundleSlots.map((slot) => slot.question_blueprint_id).filter(Boolean) };
     });
@@ -252,7 +245,7 @@ export default function StoryCreate({ subjects, competencies, questionBlueprints
                                 <select value={slot.cognitive_level} onChange={(event) => updateBundleSlot(index, 'cognitive_level', event.target.value as CognitiveLevel)} className="w-full rounded-lg border-slate-300 text-sm">{cognitiveLevels.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
                             </div>)}</div>
                         </div> : <p className="mt-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-700">Kompetensi ini harus memiliki tepat tiga tipe soal sebelum bundle dapat dibuat.</p>}
-                        <p className="mt-3 text-xs leading-5 text-indigo-700">Ketiga tipe, format jawaban, dan tingkat wajib digunakan masing-masing satu kali. Pasangannya boleh ditukar.</p><InputError message={errors.bundle_slots} className="mt-2" />
+                        <p className="mt-3 text-xs leading-5 text-indigo-700">Tipe soal, format jawaban, dan level dapat dipilih bebas untuk setiap soal—boleh sama ataupun berbeda. Susunan awal mengikuti default sekolah.</p><InputError message={errors.bundle_slots} className="mt-2" />
                     </fieldset>}
 
                     {!usesIndonesianBundle && <label className="mt-5 block text-sm font-semibold text-slate-800">

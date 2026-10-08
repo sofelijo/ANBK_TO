@@ -5,7 +5,7 @@ import Modal from '@/Components/Modal';
 import PositionedImage from '@/Components/PositionedImage';
 import StimulusVisual, { StimulusVisualData } from '@/Components/StimulusVisual';
 import FormattedText from '@/Components/FormattedText';
-import StimulusText, { StimulusTextStyle, stimulusTextClasses } from '@/Components/StimulusText';
+import StimulusText, { RICH_STIMULUS_PREFIX, StimulusTextStyle, stimulusEditorHtml, stimulusTextClasses } from '@/Components/StimulusText';
 import FreeformStimulusDocument from '@/Components/FreeformStimulusDocument';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, Link, useForm } from '@inertiajs/react';
@@ -313,7 +313,14 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
     const [previewOpen, setPreviewOpen] = useState(false);
     const [submitIntent, setSubmitIntent] = useState<'draft' | 'review'>('draft');
     const [saveError, setSaveError] = useState<string | null>(null);
-    const [activeStimulusTab, setActiveStimulusTab] = useState<'text' | 'visual' | 'template' | null>(null);
+    const [activeStimulusTab, setActiveStimulusTab] = useState<'text' | 'visual' | 'template' | null>(() => {
+        if (!question) return null;
+        if (question.metadata?.illustration?.source === 'template-svg') return 'template';
+        if (question.stimulus || question.illustration_url || question.secondary_illustration_url || question.additional_illustration_urls?.length) return 'text';
+        if (question.metadata?.stimulus_visual) return 'visual';
+
+        return null;
+    });
     const defaultOptions = [
             { content: '', is_correct: true },
             { content: '', is_correct: false },
@@ -476,8 +483,13 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
     const [draggingSvgPreview, setDraggingSvgPreview] = useState(false);
     const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null);
     const [canvasFullscreen, setCanvasFullscreen] = useState(false);
+    const [editorFontFamily, setEditorFontFamily] = useState<QuestionForm['stimulus_font_family']>(data.stimulus_font_family);
+    const [editorFontSize, setEditorFontSize] = useState<QuestionForm['stimulus_font_size']>(data.stimulus_font_size);
+    const [editorLineSpacing, setEditorLineSpacing] = useState<QuestionForm['stimulus_line_spacing']>(data.stimulus_line_spacing);
+    const [editorTextAlign, setEditorTextAlign] = useState<QuestionForm['stimulus_text_align']>(data.stimulus_text_align);
     const svgDragStart = useRef({ clientX: 0, clientY: 0, offsetX: 0, offsetY: 0 });
-    const stimulusEditorRef = useRef<HTMLTextAreaElement>(null);
+    const stimulusEditorRef = useRef<HTMLDivElement>(null);
+    const stimulusSelectionRef = useRef<Range | null>(null);
     const stimulusImageInputRef = useRef<HTMLInputElement>(null);
     const pendingImageSlot = useRef<DocumentImageSlot>('primary');
     const stimulusDocumentRef = useRef<HTMLDivElement>(null);
@@ -504,6 +516,64 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
         font_size: data.stimulus_font_size,
         text_align: data.stimulus_text_align,
         line_spacing: data.stimulus_line_spacing,
+    };
+    useEffect(() => {
+        const editor = stimulusEditorRef.current;
+        if (!editor || document.activeElement === editor) return;
+
+        const html = stimulusEditorHtml(data.stimulus);
+        if (editor.innerHTML !== html) editor.innerHTML = html;
+    }, [activeStimulusTab, data.stimulus]);
+    const syncStimulusEditor = () => {
+        const editor = stimulusEditorRef.current;
+        if (!editor) return;
+
+        const hasText = editor.innerText.replaceAll('\u200B', '').trim().length > 0;
+        setData('stimulus', hasText ? `${RICH_STIMULUS_PREFIX}${editor.innerHTML}` : '');
+    };
+    const captureStimulusSelection = () => {
+        const editor = stimulusEditorRef.current;
+        const selection = window.getSelection();
+        if (!editor || !selection || selection.rangeCount === 0) return;
+
+        const range = selection.getRangeAt(0);
+        if (editor.contains(range.commonAncestorContainer)) stimulusSelectionRef.current = range.cloneRange();
+    };
+    const restoreStimulusSelection = (): Selection | null => {
+        const editor = stimulusEditorRef.current;
+        const range = stimulusSelectionRef.current;
+        const selection = window.getSelection();
+        if (!editor || !range || !selection) return null;
+
+        editor.focus();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        return selection;
+    };
+    const runStimulusCommand = (command: 'bold' | 'italic' | 'underline' | 'justifyLeft' | 'justifyCenter' | 'justifyRight' | 'justifyFull') => {
+        if (!restoreStimulusSelection()) return;
+        document.execCommand(command, false);
+        syncStimulusEditor();
+        captureStimulusSelection();
+    };
+    const applyStimulusInlineStyle = (property: 'font-family' | 'font-size' | 'line-height', value: string) => {
+        const selection = restoreStimulusSelection();
+        if (!selection || selection.rangeCount === 0) return;
+
+        const range = selection.getRangeAt(0);
+        if (range.collapsed) return;
+
+        const span = document.createElement('span');
+        span.style.setProperty(property, value);
+        const contents = range.extractContents();
+        span.append(contents);
+        range.insertNode(span);
+        selection.removeAllRanges();
+        const nextRange = document.createRange();
+        nextRange.selectNodeContents(span);
+        selection.addRange(nextRange);
+        stimulusSelectionRef.current = nextRange.cloneRange();
+        syncStimulusEditor();
     };
     const startDocumentImageDrag = (slot: DocumentImageSlot, event: ReactPointerEvent<HTMLDivElement>) => {
         event.preventDefault();
@@ -1122,26 +1192,55 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
                             {activeStimulusTab === 'text' && (
                                 <div role="tabpanel" className="overflow-hidden rounded-xl border border-slate-300 bg-slate-100 shadow-inner">
                                     <div className="flex flex-wrap items-center gap-2 border-b border-slate-300 bg-white px-3 py-2" aria-label="Pengaturan tulisan stimulus">
-                                        <select aria-label="Jenis font" value={data.stimulus_font_family} onChange={(event) => setData('stimulus_font_family', event.target.value as QuestionForm['stimulus_font_family'])} className="h-9 rounded-md border-slate-300 py-1 pl-2 pr-8 text-sm">
+                                        <select aria-label="Jenis font untuk teks terpilih" value={editorFontFamily} onMouseDown={captureStimulusSelection} onChange={(event) => {
+                                            const family = event.target.value as QuestionForm['stimulus_font_family'];
+                                            setEditorFontFamily(family);
+                                            applyStimulusInlineStyle('font-family', { sans: 'ui-sans-serif, system-ui, sans-serif', serif: 'ui-serif, Georgia, serif', mono: 'ui-monospace, monospace' }[family]);
+                                        }} className="h-9 rounded-md border-slate-300 py-1 pl-2 pr-8 text-sm">
                                             <option value="sans">Sans serif</option>
                                             <option value="serif">Serif</option>
                                             <option value="mono">Monospace</option>
                                         </select>
-                                        <select aria-label="Ukuran font" value={data.stimulus_font_size} onChange={(event) => setData('stimulus_font_size', event.target.value as QuestionForm['stimulus_font_size'])} className="h-9 rounded-md border-slate-300 py-1 pl-2 pr-8 text-sm">
+                                        <select aria-label="Ukuran font untuk teks terpilih" value={editorFontSize} onMouseDown={captureStimulusSelection} onChange={(event) => {
+                                            const size = event.target.value as QuestionForm['stimulus_font_size'];
+                                            setEditorFontSize(size);
+                                            applyStimulusInlineStyle('font-size', { sm: '14px', base: '16px', lg: '18px', xl: '20px' }[size]);
+                                        }} className="h-9 rounded-md border-slate-300 py-1 pl-2 pr-8 text-sm">
                                             <option value="sm">Kecil</option>
                                             <option value="base">Normal</option>
                                             <option value="lg">Besar</option>
                                             <option value="xl">Sangat besar</option>
                                         </select>
                                         <span className="hidden h-6 w-px bg-slate-200 sm:block" />
+                                        {([
+                                            ['bold', 'B', 'Tebal'],
+                                            ['italic', 'I', 'Miring'],
+                                            ['underline', 'U', 'Garis bawah'],
+                                        ] as const).map(([command, label, title]) => (
+                                            <button key={command} type="button" aria-label={`${title} pada teks terpilih`} title={title} onMouseDown={(event) => {
+                                                event.preventDefault();
+                                                runStimulusCommand(command);
+                                            }} className={`h-9 min-w-9 rounded-md px-2 text-sm text-slate-700 hover:bg-slate-100 ${command === 'bold' ? 'font-bold' : command === 'italic' ? 'italic' : 'underline'}`}>
+                                                {label}
+                                            </button>
+                                        ))}
+                                        <span className="hidden h-6 w-px bg-slate-200 sm:block" />
                                         {(['left', 'center', 'right', 'justify'] as const).map((alignment) => (
-                                            <button key={alignment} type="button" aria-label={`Rata ${alignment}`} onClick={() => setData('stimulus_text_align', alignment)} className={`h-9 min-w-9 rounded-md px-2 text-sm font-semibold ${data.stimulus_text_align === alignment ? 'bg-indigo-100 text-indigo-700' : 'text-slate-600 hover:bg-slate-100'}`}>
+                                            <button key={alignment} type="button" aria-label={`Rata ${alignment} pada teks terpilih`} onMouseDown={(event) => {
+                                                event.preventDefault();
+                                                setEditorTextAlign(alignment);
+                                                runStimulusCommand({ left: 'justifyLeft', center: 'justifyCenter', right: 'justifyRight', justify: 'justifyFull' }[alignment] as 'justifyLeft' | 'justifyCenter' | 'justifyRight' | 'justifyFull');
+                                            }} className={`h-9 min-w-9 rounded-md px-2 text-sm font-semibold ${editorTextAlign === alignment ? 'bg-indigo-100 text-indigo-700' : 'text-slate-600 hover:bg-slate-100'}`}>
                                                 {{ left: '≡', center: '≣', right: '≡', justify: '☰' }[alignment]}
                                             </button>
                                         ))}
                                         <span className="hidden h-6 w-px bg-slate-200 sm:block" />
                                         <label className="flex items-center gap-2 text-xs font-medium text-slate-600">Spasi
-                                            <select aria-label="Jarak baris" value={data.stimulus_line_spacing} onChange={(event) => setData('stimulus_line_spacing', event.target.value as QuestionForm['stimulus_line_spacing'])} className="h-9 rounded-md border-slate-300 py-1 pl-2 pr-8 text-sm">
+                                            <select aria-label="Jarak baris untuk teks terpilih" value={editorLineSpacing} onMouseDown={captureStimulusSelection} onChange={(event) => {
+                                                const spacing = event.target.value as QuestionForm['stimulus_line_spacing'];
+                                                setEditorLineSpacing(spacing);
+                                                applyStimulusInlineStyle('line-height', { normal: '1', relaxed: '1.5', loose: '2' }[spacing]);
+                                            }} className="h-9 rounded-md border-slate-300 py-1 pl-2 pr-8 text-sm">
                                                 <option value="normal">1,0</option>
                                                 <option value="relaxed">1,5</option>
                                                 <option value="loose">2,0</option>
@@ -1197,14 +1296,17 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
                                     <div className="p-4 sm:p-6">
                                         <div ref={stimulusDocumentRef} className="relative mx-auto min-h-[620px] max-w-3xl overflow-hidden rounded-sm border border-slate-200 bg-white px-6 py-7 shadow-sm sm:px-10">
                                             <span className="mb-3 block text-xs font-semibold uppercase tracking-wide text-slate-400">Dokumen stimulus · gambar dapat ditarik bebas</span>
-                                            <textarea
+                                            <div
                                                 ref={stimulusEditorRef}
+                                                contentEditable
+                                                suppressContentEditableWarning
                                                 aria-label="Teks stimulus"
-                                                value={data.stimulus}
-                                                onChange={(event) => setData('stimulus', event.target.value)}
-                                                rows={20}
-                                                placeholder="Mulai tulis bacaan, cerita, atau informasi pendamping soal…"
-                                                className={`relative z-0 block min-h-[500px] w-full resize-none border-0 bg-transparent p-0 text-slate-800 placeholder:text-slate-300 focus:ring-0 ${stimulusTextClasses(stimulusTextStyle)}`}
+                                                data-placeholder="Mulai tulis bacaan, cerita, atau informasi pendamping soal…"
+                                                onInput={syncStimulusEditor}
+                                                onMouseUp={captureStimulusSelection}
+                                                onKeyUp={captureStimulusSelection}
+                                                onBlur={captureStimulusSelection}
+                                                className={`relative z-0 block min-h-[500px] w-full border-0 bg-transparent p-0 text-slate-800 outline-none empty:before:pointer-events-none empty:before:text-slate-300 empty:before:content-[attr(data-placeholder)] focus:ring-0 ${stimulusTextClasses(stimulusTextStyle)}`}
                                             />
                                             {editableUploadIllustrationUrl && <div
                                                 role="application"
