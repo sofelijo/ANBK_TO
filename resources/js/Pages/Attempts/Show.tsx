@@ -2,6 +2,9 @@ import ThemeToggle from '@/Components/ThemeToggle';
 import StimulusVisual, { StimulusVisualData } from '@/Components/StimulusVisual';
 import PositionedImage from '@/Components/PositionedImage';
 import FormattedText from '@/Components/FormattedText';
+import { StimulusTextStyle } from '@/Components/StimulusText';
+import StimulusDocument from '@/Components/StimulusDocument';
+import FreeformStimulusDocument from '@/Components/FreeformStimulusDocument';
 import { Head, router } from '@inertiajs/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
@@ -11,9 +14,14 @@ type ExamQuestion = {
     id: number;
     type: 'single_choice' | 'multiple_choice' | 'short_answer' | 'matching' | 'category_matrix';
     stimulus?: string;
+    stimulus_text_style?: StimulusTextStyle;
     stimulus_visual?: StimulusVisualData;
     illustration_url?: string;
-    illustration_display?: { width: number; height: number; zoom: number; offset_x: number; offset_y: number };
+    secondary_illustration_url?: string;
+    additional_illustration_urls?: string[];
+    illustration_display?: { source?: string; width: number; height: number; text_position: number; document_x?: number; document_y?: number; zoom: number; offset_x: number; offset_y: number };
+    secondary_illustration_display?: { width: number; document_x?: number; document_y?: number; alt?: string };
+    additional_illustration_displays?: { width: number; document_x?: number; document_y?: number; alt?: string }[];
     prompt: string;
     position: number;
     options: { id: number; label: string; content: string }[];
@@ -423,7 +431,7 @@ export default function Show({ attempt, preview = false }: { attempt: Attempt; p
             progress: 'bg-rose-500',
         },
     }[timerState];
-    const hasStimulus = Boolean(current.stimulus?.trim() || current.illustration_url || current.stimulus_visual);
+    const hasStimulus = Boolean(current.stimulus?.trim() || current.illustration_url || current.secondary_illustration_url || current.additional_illustration_urls?.length || current.stimulus_visual);
 
     return (
         <div className="flex min-h-[100dvh] flex-col bg-slate-100 lg:h-[100dvh] lg:min-h-0 lg:overflow-hidden">
@@ -525,9 +533,10 @@ export default function Show({ attempt, preview = false }: { attempt: Attempt; p
                             <aside className="min-h-0 overflow-y-auto border-b border-slate-200 bg-slate-50/60 p-4 lg:border-b-0 lg:border-r lg:p-5">
                                 <div>
                                     <p className="text-xs font-semibold uppercase tracking-wider text-indigo-600">Stimulus</p>
-                                    {current.illustration_url && <PositionedImage src={current.illustration_url} alt={`Ilustrasi untuk soal ${currentIndex + 1}`} width={current.illustration_display?.width || 800} height={current.illustration_display?.height || 450} zoom={current.illustration_display?.zoom || 1} offsetX={current.illustration_display?.offset_x || 0} offsetY={current.illustration_display?.offset_y || 0} className="mt-3" />}
                                     {current.stimulus_visual && <StimulusVisual visual={current.stimulus_visual} className="mt-3" />}
-                                    {current.stimulus && <FormattedText text={current.stimulus} className="mt-3 block whitespace-pre-wrap text-sm leading-6 text-slate-700" />}
+                                    {(current.stimulus || current.illustration_url || current.secondary_illustration_url || current.additional_illustration_urls?.length) && (current.illustration_display?.source === 'template-svg'
+                                        ? <StimulusDocument text={current.stimulus} style={current.stimulus_text_style} image={current.illustration_url ? <PositionedImage src={current.illustration_url} alt={`Ilustrasi untuk soal ${currentIndex + 1}`} width={current.illustration_display?.width || 800} height={current.illustration_display?.height || 450} className="my-3" /> : undefined} className="mt-3" />
+                                        : <FreeformStimulusDocument text={current.stimulus} style={current.stimulus_text_style} imageUrl={current.illustration_url} imageAlt={`Ilustrasi untuk soal ${currentIndex + 1}`} imageLayout={{ x: current.illustration_display?.document_x, y: current.illustration_display?.document_y, width: current.illustration_display?.width }} secondaryImageUrl={current.secondary_illustration_url} secondaryImageAlt={current.secondary_illustration_display?.alt} secondaryImageLayout={{ x: current.secondary_illustration_display?.document_x, y: current.secondary_illustration_display?.document_y, width: current.secondary_illustration_display?.width }} additionalImages={(current.additional_illustration_urls || []).map((url, index) => ({ url, alt: current.additional_illustration_displays?.[index]?.alt, layout: { x: current.additional_illustration_displays?.[index]?.document_x, y: current.additional_illustration_displays?.[index]?.document_y, width: current.additional_illustration_displays?.[index]?.width } }))} className="mt-3" />)}
                                 </div>
                             </aside>
                         )}

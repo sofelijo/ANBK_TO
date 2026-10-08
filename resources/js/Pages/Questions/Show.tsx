@@ -2,6 +2,9 @@ import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import StimulusVisual, { StimulusVisualData } from '@/Components/StimulusVisual';
 import PositionedImage from '@/Components/PositionedImage';
 import FormattedText from '@/Components/FormattedText';
+import { StimulusTextStyle } from '@/Components/StimulusText';
+import StimulusDocument from '@/Components/StimulusDocument';
+import FreeformStimulusDocument from '@/Components/FreeformStimulusDocument';
 import { Head, Link, router } from '@inertiajs/react';
 import { useState } from 'react';
 
@@ -22,12 +25,17 @@ type Question = {
     difficulty: number;
     grade_level: number;
     illustration_url?: string;
+    secondary_illustration_url?: string;
+    additional_illustration_urls?: string[];
     explanation_image_url?: string;
     metadata?: {
         accepted_answers?: string[];
-        illustration?: { alt?: string; display_width?: number; display_height?: number; display_zoom?: number; display_offset_x?: number; display_offset_y?: number };
+        illustration?: { alt?: string; source?: string; display_width?: number; display_height?: number; text_position?: number; document_x?: number; document_y?: number; display_zoom?: number; display_offset_x?: number; display_offset_y?: number };
+        secondary_illustration?: { alt?: string; display_width?: number; document_x?: number; document_y?: number };
+        additional_illustrations?: { alt?: string; display_width?: number; document_x?: number; document_y?: number }[];
         explanation_illustration?: { alt?: string };
         stimulus_visual?: StimulusVisualData;
+        stimulus_text_style?: StimulusTextStyle;
         matching_pairs?: MatchingPair[];
         matching_distractors?: MatchingDistractor[];
         matrix_columns?: { id: string; label: string }[];
@@ -268,9 +276,10 @@ export default function Show({
                                 Versi ini sudah digantikan oleh <Link href={route('questions.show', question.superseded_by.id)} className="font-semibold underline">versi {question.superseded_by.version}</Link>.
                             </p>
                         )}
-                        {question.illustration_url && <PositionedImage src={question.illustration_url} alt={question.metadata?.illustration?.alt || 'Ilustrasi soal'} width={question.metadata?.illustration?.display_width || 800} height={question.metadata?.illustration?.display_height || 450} zoom={question.metadata?.illustration?.display_zoom || 1} offsetX={question.metadata?.illustration?.display_offset_x || 0} offsetY={question.metadata?.illustration?.display_offset_y || 0} className="mt-6" />}
                         {question.metadata?.stimulus_visual && <StimulusVisual visual={question.metadata.stimulus_visual} className="mt-6" />}
-                        {question.stimulus && <FormattedText text={question.stimulus} className="mt-6 block whitespace-pre-wrap rounded-xl bg-slate-50 p-5 leading-7 text-slate-700" />}
+                        {(question.stimulus || question.illustration_url || question.secondary_illustration_url || question.additional_illustration_urls?.length) && (question.metadata?.illustration?.source === 'template-svg'
+                            ? <StimulusDocument text={question.stimulus} style={question.metadata?.stimulus_text_style} image={question.illustration_url ? <PositionedImage src={question.illustration_url} alt={question.metadata?.illustration?.alt || 'Ilustrasi soal'} width={question.metadata?.illustration?.display_width || 800} height={question.metadata?.illustration?.display_height || 450} className="my-4" /> : undefined} className="mt-6 rounded-xl bg-slate-50 p-5" />
+                            : <FreeformStimulusDocument text={question.stimulus} style={question.metadata?.stimulus_text_style} imageUrl={question.illustration_url} imageAlt={question.metadata?.illustration?.alt || 'Ilustrasi soal'} imageLayout={{ x: question.metadata?.illustration?.document_x, y: question.metadata?.illustration?.document_y, width: question.metadata?.illustration?.display_width }} secondaryImageUrl={question.secondary_illustration_url} secondaryImageAlt={question.metadata?.secondary_illustration?.alt} secondaryImageLayout={{ x: question.metadata?.secondary_illustration?.document_x, y: question.metadata?.secondary_illustration?.document_y, width: question.metadata?.secondary_illustration?.display_width }} additionalImages={(question.additional_illustration_urls || []).map((url, index) => ({ url, alt: question.metadata?.additional_illustrations?.[index]?.alt, layout: { x: question.metadata?.additional_illustrations?.[index]?.document_x, y: question.metadata?.additional_illustrations?.[index]?.document_y, width: question.metadata?.additional_illustrations?.[index]?.display_width } }))} className="mt-6 bg-slate-50" />)}
                         <h2 className="mt-6 text-lg font-semibold leading-7 text-slate-900"><FormattedText text={question.prompt} /></h2>
                         {question.options.length > 0 && (
                             <div className="mt-5 space-y-3">
@@ -416,7 +425,7 @@ export default function Show({
 function QuestionStudentPreview({ question }: { question: Question }) {
     const [selectedOptions, setSelectedOptions] = useState<number[]>([]);
     const [matrixAnswers, setMatrixAnswers] = useState<Record<string, string>>({});
-    const hasStimulus = Boolean(question.illustration_url || question.metadata?.stimulus_visual || question.stimulus);
+    const hasStimulus = Boolean(question.illustration_url || question.secondary_illustration_url || question.additional_illustration_urls?.length || question.metadata?.stimulus_visual || question.stimulus);
     const matchingChoices = [
         ...(question.metadata?.matching_pairs || []).map((pair) => ({ id: pair.right_id, content: pair.right })),
         ...(question.metadata?.matching_distractors || []).map((item) => ({ id: item.id, content: item.content })),
@@ -442,9 +451,10 @@ function QuestionStudentPreview({ question }: { question: Question }) {
                 <main className={`grid overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm ${hasStimulus ? 'lg:grid-cols-2' : ''}`}>
                     {hasStimulus && <aside className="border-b border-slate-200 bg-slate-50/70 p-5 lg:border-b-0 lg:border-r sm:p-6">
                         <p className="text-xs font-bold uppercase tracking-wider text-indigo-600">Stimulus</p>
-                        {question.illustration_url && <PositionedImage src={question.illustration_url} alt={question.metadata?.illustration?.alt || 'Ilustrasi soal'} width={question.metadata?.illustration?.display_width || 800} height={question.metadata?.illustration?.display_height || 450} zoom={question.metadata?.illustration?.display_zoom || 1} offsetX={question.metadata?.illustration?.display_offset_x || 0} offsetY={question.metadata?.illustration?.display_offset_y || 0} className="mt-3" />}
                         {question.metadata?.stimulus_visual && <StimulusVisual visual={question.metadata.stimulus_visual} className="mt-3" />}
-                        {question.stimulus && <FormattedText text={question.stimulus} className="mt-4 block whitespace-pre-wrap text-sm leading-7 text-slate-700" />}
+                        {(question.stimulus || question.illustration_url || question.secondary_illustration_url || question.additional_illustration_urls?.length) && (question.metadata?.illustration?.source === 'template-svg'
+                            ? <StimulusDocument text={question.stimulus} style={question.metadata?.stimulus_text_style} image={question.illustration_url ? <PositionedImage src={question.illustration_url} alt={question.metadata?.illustration?.alt || 'Ilustrasi soal'} width={question.metadata?.illustration?.display_width || 800} height={question.metadata?.illustration?.display_height || 450} className="my-3" /> : undefined} className="mt-4" />
+                            : <FreeformStimulusDocument text={question.stimulus} style={question.metadata?.stimulus_text_style} imageUrl={question.illustration_url} imageAlt={question.metadata?.illustration?.alt || 'Ilustrasi soal'} imageLayout={{ x: question.metadata?.illustration?.document_x, y: question.metadata?.illustration?.document_y, width: question.metadata?.illustration?.display_width }} secondaryImageUrl={question.secondary_illustration_url} secondaryImageAlt={question.metadata?.secondary_illustration?.alt} secondaryImageLayout={{ x: question.metadata?.secondary_illustration?.document_x, y: question.metadata?.secondary_illustration?.document_y, width: question.metadata?.secondary_illustration?.display_width }} additionalImages={(question.additional_illustration_urls || []).map((url, index) => ({ url, alt: question.metadata?.additional_illustrations?.[index]?.alt, layout: { x: question.metadata?.additional_illustrations?.[index]?.document_x, y: question.metadata?.additional_illustrations?.[index]?.document_y, width: question.metadata?.additional_illustrations?.[index]?.display_width } }))} className="mt-4" />)}
                     </aside>}
                     <section className="min-w-0 p-5 sm:p-7">
                         <p className="text-xs font-bold uppercase tracking-wider text-emerald-600">Soal 1</p>

@@ -189,13 +189,17 @@ class QuestionController extends Controller
         $data = $this->validatedData($request);
         $intent = $request->input('intent') === 'review' ? QuestionStatus::Review : QuestionStatus::Draft;
         $illustration = null;
+        $secondaryIllustration = null;
+        $additionalIllustrations = [];
         $explanationIllustration = null;
 
         try {
             $illustration = $this->storeStimulusImage($request, $data, $imageService);
+            $secondaryIllustration = $this->storeSecondaryStimulusImage($request, $data, $imageService);
+            $additionalIllustrations = $this->storeAdditionalStimulusImages($request, $data, $imageService);
             $explanationIllustration = $this->storeExplanationImage($request, $data, $imageService);
             $metadata = $this->withExplanationImage(
-                $this->withStimulusImage([], $data, $illustration),
+                $this->withAdditionalStimulusImages($this->withSecondaryStimulusImage($this->withStimulusImage([], $data, $illustration), $data, $secondaryIllustration), $data, $additionalIllustrations),
                 $data,
                 $explanationIllustration,
             );
@@ -214,6 +218,10 @@ class QuestionController extends Controller
             });
         } catch (Throwable $exception) {
             $this->deleteStoredIllustration($illustration);
+            $this->deleteStoredIllustration($secondaryIllustration);
+            foreach ($additionalIllustrations as $additionalIllustration) {
+                $this->deleteStoredIllustration($additionalIllustration);
+            }
             $this->deleteStoredIllustration($explanationIllustration);
 
             throw $exception;
@@ -346,15 +354,19 @@ class QuestionController extends Controller
         $data = $this->validatedData($request, $question);
         $intent = $request->input('intent') === 'review' ? QuestionStatus::Review : QuestionStatus::Draft;
         $illustration = null;
+        $secondaryIllustration = null;
+        $additionalIllustrations = [];
         $explanationIllustration = null;
         $createRevision = $question->status === QuestionStatus::Published
             || $question->assessments()->exists();
 
         try {
             $illustration = $this->storeStimulusImage($request, $data, $imageService);
+            $secondaryIllustration = $this->storeSecondaryStimulusImage($request, $data, $imageService);
+            $additionalIllustrations = $this->storeAdditionalStimulusImages($request, $data, $imageService);
             $explanationIllustration = $this->storeExplanationImage($request, $data, $imageService);
             $metadata = $this->withExplanationImage(
-                $this->withStimulusImage($question->metadata ?? [], $data, $illustration),
+                $this->withAdditionalStimulusImages($this->withSecondaryStimulusImage($this->withStimulusImage($question->metadata ?? [], $data, $illustration), $data, $secondaryIllustration), $data, $additionalIllustrations),
                 $data,
                 $explanationIllustration,
             );
@@ -390,6 +402,10 @@ class QuestionController extends Controller
             });
         } catch (Throwable $exception) {
             $this->deleteStoredIllustration($illustration);
+            $this->deleteStoredIllustration($secondaryIllustration);
+            foreach ($additionalIllustrations as $additionalIllustration) {
+                $this->deleteStoredIllustration($additionalIllustration);
+            }
             $this->deleteStoredIllustration($explanationIllustration);
 
             throw $exception;
@@ -772,6 +788,10 @@ class QuestionController extends Controller
             'type' => ['required', Rule::in(array_unique($allowedQuestionTypes))],
             'title' => ['nullable', 'string', 'max:255'],
             'stimulus' => ['nullable', 'string', 'max:20000'],
+            'stimulus_font_family' => ['nullable', Rule::in(['sans', 'serif', 'mono'])],
+            'stimulus_font_size' => ['nullable', Rule::in(['sm', 'base', 'lg', 'xl'])],
+            'stimulus_text_align' => ['nullable', Rule::in(['left', 'center', 'right', 'justify'])],
+            'stimulus_line_spacing' => ['nullable', Rule::in(['normal', 'relaxed', 'loose'])],
             'stimulus_visual_type' => ['nullable', Rule::in(['none', 'table', 'bar_chart', 'pictogram', 'pie_chart'])],
             'stimulus_visual_title' => ['exclude_if:stimulus_visual_type,none', 'nullable', 'string', 'max:255'],
             'stimulus_table_headers' => ['exclude_unless:stimulus_visual_type,table', 'required', 'array', 'between:2,6'],
@@ -808,6 +828,16 @@ class QuestionController extends Controller
             'stimulus_pie_items.*.asked' => ['nullable', 'boolean'],
             'stimulus_pie_items.*.auto_calculate' => ['nullable', 'boolean'],
             'stimulus_image' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:10240', 'dimensions:max_width=5000,max_height=5000'],
+            'stimulus_image_secondary' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:10240', 'dimensions:max_width=5000,max_height=5000'],
+            'stimulus_images_additional' => ['nullable', 'array', 'max:18'],
+            'stimulus_images_additional.*' => ['image', 'mimes:jpg,jpeg,png,webp', 'max:10240', 'dimensions:max_width=5000,max_height=5000'],
+            'stimulus_images_additional_layouts' => ['nullable', 'array', 'max:18'],
+            'stimulus_images_additional_layouts.*.source' => ['required', Rule::in(['existing', 'upload'])],
+            'stimulus_images_additional_layouts.*.source_index' => ['required', 'integer', 'min:0', 'max:99'],
+            'stimulus_images_additional_layouts.*.x' => ['required', 'numeric', 'between:0,90'],
+            'stimulus_images_additional_layouts.*.y' => ['required', 'numeric', 'between:0,90'],
+            'stimulus_images_additional_layouts.*.width' => ['required', 'integer', 'between:100,1200'],
+            'stimulus_images_additional_layouts.*.alt' => ['nullable', 'string', 'max:255'],
             'stimulus_image_source' => ['nullable', Rule::in(['upload', 'template'])],
             'stimulus_svg_template' => ['nullable', Rule::in(EducationalGeometryTemplateSvgRenderer::TEMPLATES)],
             'stimulus_svg_dimension_a' => ['nullable', 'numeric', 'between:-1000000,1000000'],
@@ -845,6 +875,14 @@ class QuestionController extends Controller
             'stimulus_protractor_angles.*.asked' => ['required', 'boolean'],
             'stimulus_image_width' => ['nullable', 'integer', 'between:100,1600'],
             'stimulus_image_height' => ['nullable', 'integer', 'between:100,1200'],
+            'stimulus_image_position' => ['nullable', 'integer', 'between:0,100'],
+            'stimulus_image_document_x' => ['nullable', 'numeric', 'between:0,90'],
+            'stimulus_image_document_y' => ['nullable', 'numeric', 'between:0,90'],
+            'stimulus_image_secondary_width' => ['nullable', 'integer', 'between:100,1200'],
+            'stimulus_image_secondary_x' => ['nullable', 'numeric', 'between:0,90'],
+            'stimulus_image_secondary_y' => ['nullable', 'numeric', 'between:0,90'],
+            'stimulus_image_secondary_alt' => ['nullable', 'string', 'max:255'],
+            'remove_stimulus_image_secondary' => ['nullable', 'boolean'],
             'stimulus_upload_zoom' => ['nullable', 'numeric', 'between:0.25,3'],
             'stimulus_upload_offset_x' => ['nullable', 'numeric', 'between:-100,100'],
             'stimulus_upload_offset_y' => ['nullable', 'numeric', 'between:-100,100'],
@@ -858,7 +896,7 @@ class QuestionController extends Controller
             'difficulty' => ['required', 'integer', 'between:1,3'],
             'grade_level' => ['required', 'integer', Rule::in([6, 9, 12])],
             'cognitive_level' => ['nullable', 'string', 'max:100'],
-            'options' => ['array'],
+            'options' => ['exclude_unless:type,single_choice,multiple_choice', 'array'],
             'options.*.content' => ['required_with:options', 'string', 'max:3000'],
             'options.*.is_correct' => ['required_with:options', 'boolean'],
             'accepted_answers' => ['array'],
@@ -1295,6 +1333,13 @@ class QuestionController extends Controller
         $type = QuestionType::from($data['type']);
         $metadata = $existingMetadata;
 
+        $metadata['stimulus_text_style'] = [
+            'font_family' => $data['stimulus_font_family'] ?? data_get($metadata, 'stimulus_text_style.font_family', 'sans'),
+            'font_size' => $data['stimulus_font_size'] ?? data_get($metadata, 'stimulus_text_style.font_size', 'sm'),
+            'text_align' => $data['stimulus_text_align'] ?? data_get($metadata, 'stimulus_text_style.text_align', 'left'),
+            'line_spacing' => $data['stimulus_line_spacing'] ?? data_get($metadata, 'stimulus_text_style.line_spacing', 'relaxed'),
+        ];
+
         if ($type === QuestionType::ShortAnswer) {
             $metadata['accepted_answers'] = $data['accepted_answers'];
         } else {
@@ -1464,6 +1509,9 @@ class QuestionController extends Controller
                 'protractor_angles' => $data['stimulus_protractor_angles'] ?? [],
                 'display_width' => (int) ($data['stimulus_image_width'] ?? 800),
                 'display_height' => (int) ($data['stimulus_image_height'] ?? 450),
+                'text_position' => (int) ($data['stimulus_image_position'] ?? 0),
+                'document_x' => (float) ($data['stimulus_image_document_x'] ?? 8),
+                'document_y' => (float) ($data['stimulus_image_document_y'] ?? 18),
             ];
         }
 
@@ -1481,6 +1529,9 @@ class QuestionController extends Controller
             ),
             'display_width' => (int) ($data['stimulus_image_width'] ?? 800),
             'display_height' => (int) ($data['stimulus_image_height'] ?? 450),
+            'text_position' => (int) ($data['stimulus_image_position'] ?? 0),
+            'document_x' => (float) ($data['stimulus_image_document_x'] ?? 8),
+            'document_y' => (float) ($data['stimulus_image_document_y'] ?? 18),
             'display_zoom' => (float) ($data['stimulus_upload_zoom'] ?? 1),
             'display_offset_x' => (float) ($data['stimulus_upload_offset_x'] ?? 0),
             'display_offset_y' => (float) ($data['stimulus_upload_offset_y'] ?? 0),
@@ -1500,11 +1551,109 @@ class QuestionController extends Controller
         if (isset($metadata['illustration'])) {
             $metadata['illustration']['display_width'] = (int) ($data['stimulus_image_width'] ?? data_get($metadata, 'illustration.display_width', 800));
             $metadata['illustration']['display_height'] = (int) ($data['stimulus_image_height'] ?? data_get($metadata, 'illustration.display_height', 450));
+            $metadata['illustration']['text_position'] = (int) ($data['stimulus_image_position'] ?? data_get($metadata, 'illustration.text_position', 0));
+            $metadata['illustration']['document_x'] = (float) ($data['stimulus_image_document_x'] ?? data_get($metadata, 'illustration.document_x', 8));
+            $metadata['illustration']['document_y'] = (float) ($data['stimulus_image_document_y'] ?? data_get($metadata, 'illustration.document_y', 18));
             if (($metadata['illustration']['source'] ?? null) !== 'template-svg') {
                 $metadata['illustration']['display_zoom'] = (float) ($data['stimulus_upload_zoom'] ?? data_get($metadata, 'illustration.display_zoom', 1));
                 $metadata['illustration']['display_offset_x'] = (float) ($data['stimulus_upload_offset_x'] ?? data_get($metadata, 'illustration.display_offset_x', 0));
                 $metadata['illustration']['display_offset_y'] = (float) ($data['stimulus_upload_offset_y'] ?? data_get($metadata, 'illustration.display_offset_y', 0));
             }
+        }
+
+        return $metadata;
+    }
+
+    private function storeSecondaryStimulusImage(Request $request, array $data, StimulusImageService $imageService): ?array
+    {
+        $file = $request->file('stimulus_image_secondary');
+
+        if ($file === null) {
+            return null;
+        }
+
+        return [
+            ...$imageService->store(
+                $file,
+                $request->user()->school_id,
+                trim($data['stimulus_image_secondary_alt'] ?? '') ?: 'Gambar stimulus kedua',
+                'stimulus_image_secondary',
+            ),
+            'display_width' => (int) ($data['stimulus_image_secondary_width'] ?? 320),
+            'document_x' => (float) ($data['stimulus_image_secondary_x'] ?? 48),
+            'document_y' => (float) ($data['stimulus_image_secondary_y'] ?? 48),
+        ];
+    }
+
+    private function withSecondaryStimulusImage(array $metadata, array $data, ?array $illustration): array
+    {
+        if ($illustration !== null) {
+            $metadata['secondary_illustration'] = $illustration;
+        } elseif ($data['remove_stimulus_image_secondary'] ?? false) {
+            unset($metadata['secondary_illustration']);
+        }
+
+        if (isset($metadata['secondary_illustration'])) {
+            $metadata['secondary_illustration']['alt'] = trim($data['stimulus_image_secondary_alt'] ?? '')
+                ?: data_get($metadata, 'secondary_illustration.alt', 'Gambar stimulus kedua');
+            $metadata['secondary_illustration']['display_width'] = (int) ($data['stimulus_image_secondary_width'] ?? data_get($metadata, 'secondary_illustration.display_width', 320));
+            $metadata['secondary_illustration']['document_x'] = (float) ($data['stimulus_image_secondary_x'] ?? data_get($metadata, 'secondary_illustration.document_x', 48));
+            $metadata['secondary_illustration']['document_y'] = (float) ($data['stimulus_image_secondary_y'] ?? data_get($metadata, 'secondary_illustration.document_y', 48));
+        }
+
+        return $metadata;
+    }
+
+    private function storeAdditionalStimulusImages(Request $request, array $data, StimulusImageService $imageService): array
+    {
+        $files = $request->file('stimulus_images_additional', []);
+        $uploadIndexes = collect($data['stimulus_images_additional_layouts'] ?? [])
+            ->where('source', 'upload')
+            ->pluck('source_index')
+            ->unique();
+
+        return $uploadIndexes->mapWithKeys(function (int $index) use ($files, $request, $imageService): array {
+            $file = $files[$index] ?? null;
+            if ($file === null) {
+                return [];
+            }
+
+            return [$index => $imageService->store(
+                $file,
+                $request->user()->school_id,
+                'Gambar stimulus tambahan',
+                "stimulus_images_additional.{$index}",
+            )];
+        })->all();
+    }
+
+    private function withAdditionalStimulusImages(array $metadata, array $data, array $uploaded): array
+    {
+        if (! array_key_exists('stimulus_images_additional_layouts', $data)) {
+            return $metadata;
+        }
+
+        $existing = $metadata['additional_illustrations'] ?? [];
+        $metadata['additional_illustrations'] = collect($data['stimulus_images_additional_layouts'])->map(function (array $layout) use ($existing, $uploaded): ?array {
+            $illustration = $layout['source'] === 'existing'
+                ? ($existing[$layout['source_index']] ?? null)
+                : ($uploaded[$layout['source_index']] ?? null);
+
+            if ($illustration === null) {
+                return null;
+            }
+
+            return [
+                ...$illustration,
+                'alt' => trim($layout['alt'] ?? '') ?: ($illustration['alt'] ?? 'Gambar stimulus tambahan'),
+                'display_width' => (int) $layout['width'],
+                'document_x' => (float) $layout['x'],
+                'document_y' => (float) $layout['y'],
+            ];
+        })->filter()->values()->all();
+
+        if ($metadata['additional_illustrations'] === []) {
+            unset($metadata['additional_illustrations']);
         }
 
         return $metadata;

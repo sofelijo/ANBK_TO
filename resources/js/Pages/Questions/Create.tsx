@@ -5,6 +5,8 @@ import Modal from '@/Components/Modal';
 import PositionedImage from '@/Components/PositionedImage';
 import StimulusVisual, { StimulusVisualData } from '@/Components/StimulusVisual';
 import FormattedText from '@/Components/FormattedText';
+import StimulusText, { StimulusTextStyle, stimulusTextClasses } from '@/Components/StimulusText';
+import FreeformStimulusDocument from '@/Components/FreeformStimulusDocument';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, Link, useForm } from '@inertiajs/react';
 import { FormEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from 'react';
@@ -31,6 +33,8 @@ type StimulusGroupedChartCategory = { label: string; values: string[] };
 type FractionModel = { numerator: string; denominator: string; shaded_parts?: number[] };
 type CanvasOverlay = { id: string; type: 'text' | 'symbol'; content: string; x: number; y: number; font_size: number; color: string; rotation: number };
 type ProtractorAngle = { id: string; label: string; degrees: string; asked: boolean };
+type DocumentImageSlot = 'primary' | 'secondary' | `additional:${number}`;
+type AdditionalImageLayout = { source: 'existing' | 'upload'; source_index: number; x: number; y: number; width: number; alt: string };
 type StimulusSvgTemplateOption = {
     value: GeometryTemplate;
     category: string;
@@ -105,6 +109,10 @@ type QuestionForm = {
     type: 'single_choice' | 'multiple_choice' | 'short_answer' | 'matching' | 'category_matrix';
     title: string;
     stimulus: string;
+    stimulus_font_family: NonNullable<StimulusTextStyle['font_family']>;
+    stimulus_font_size: NonNullable<StimulusTextStyle['font_size']>;
+    stimulus_text_align: NonNullable<StimulusTextStyle['text_align']>;
+    stimulus_line_spacing: NonNullable<StimulusTextStyle['line_spacing']>;
     stimulus_visual_type: StimulusVisualType;
     stimulus_visual_title: string;
     stimulus_table_headers: string[];
@@ -126,6 +134,7 @@ type QuestionForm = {
     stimulus_pie_total_asked: boolean;
     stimulus_pie_items: StimulusPieItem[];
     stimulus_image: File | null;
+    stimulus_image_secondary: File | null;
     stimulus_image_source: 'upload' | 'template';
     stimulus_svg_template: GeometryTemplate;
     stimulus_svg_dimension_a: string;
@@ -147,6 +156,15 @@ type QuestionForm = {
     stimulus_protractor_angles: ProtractorAngle[];
     stimulus_image_width: number;
     stimulus_image_height: number;
+    stimulus_image_document_x: number;
+    stimulus_image_document_y: number;
+    stimulus_image_secondary_width: number;
+    stimulus_image_secondary_x: number;
+    stimulus_image_secondary_y: number;
+    stimulus_image_secondary_alt: string;
+    remove_stimulus_image_secondary: boolean;
+    stimulus_images_additional: File[];
+    stimulus_images_additional_layouts: AdditionalImageLayout[];
     stimulus_upload_zoom: number;
     stimulus_upload_offset_x: number;
     stimulus_upload_offset_y: number;
@@ -272,13 +290,18 @@ type ExistingQuestion = {
     grade_level: number;
     cognitive_level?: string;
     illustration_url?: string;
+    secondary_illustration_url?: string;
+    additional_illustration_urls?: string[];
     explanation_image_url?: string;
     options: { content: string; is_correct: boolean }[];
     metadata?: {
         accepted_answers?: string[];
-        illustration?: { alt?: string; path?: string; source?: string; display_width?: number; display_height?: number; display_zoom?: number; display_offset_x?: number; display_offset_y?: number; template?: GeometryTemplate; dimension_a?: number; dimension_b?: number; dimension_c?: number; dimension_a_asked?: boolean; dimension_b_asked?: boolean; dimension_c_asked?: boolean; show_area?: boolean; area_asked?: boolean; show_perimeter?: boolean; perimeter_asked?: boolean; unit?: string; zoom?: number; offset_x?: number; offset_y?: number; fraction_models?: { numerator: number; denominator: number; shaded_parts?: number[] }[]; overlays?: CanvasOverlay[]; protractor_angles?: { id: string; label: string; degrees: number; asked: boolean }[] };
+        illustration?: { alt?: string; path?: string; source?: string; display_width?: number; display_height?: number; text_position?: number; document_x?: number; document_y?: number; display_zoom?: number; display_offset_x?: number; display_offset_y?: number; template?: GeometryTemplate; dimension_a?: number; dimension_b?: number; dimension_c?: number; dimension_a_asked?: boolean; dimension_b_asked?: boolean; dimension_c_asked?: boolean; show_area?: boolean; area_asked?: boolean; show_perimeter?: boolean; perimeter_asked?: boolean; unit?: string; zoom?: number; offset_x?: number; offset_y?: number; fraction_models?: { numerator: number; denominator: number; shaded_parts?: number[] }[]; overlays?: CanvasOverlay[]; protractor_angles?: { id: string; label: string; degrees: number; asked: boolean }[] };
         explanation_illustration?: { alt?: string };
+        secondary_illustration?: { alt?: string; display_width?: number; document_x?: number; document_y?: number };
+        additional_illustrations?: { alt?: string; display_width?: number; document_x?: number; document_y?: number }[];
         stimulus_visual?: StimulusVisualData;
+        stimulus_text_style?: StimulusTextStyle;
         matching_pairs?: MatchingPair[];
         matching_distractors?: MatchingDistractor[];
         matrix_columns?: MatrixColumn[];
@@ -290,7 +313,7 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
     const [previewOpen, setPreviewOpen] = useState(false);
     const [submitIntent, setSubmitIntent] = useState<'draft' | 'review'>('draft');
     const [saveError, setSaveError] = useState<string | null>(null);
-    const [activeStimulusTab, setActiveStimulusTab] = useState<'text' | 'visual' | 'image' | null>(null);
+    const [activeStimulusTab, setActiveStimulusTab] = useState<'text' | 'visual' | 'template' | null>(null);
     const defaultOptions = [
             { content: '', is_correct: true },
             { content: '', is_correct: false },
@@ -344,6 +367,10 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
         type: question?.type || questionTypes[0]?.value || 'single_choice',
         title: question?.title || '',
         stimulus: question?.stimulus || '',
+        stimulus_font_family: question?.metadata?.stimulus_text_style?.font_family || 'sans',
+        stimulus_font_size: question?.metadata?.stimulus_text_style?.font_size || 'sm',
+        stimulus_text_align: question?.metadata?.stimulus_text_style?.text_align || 'left',
+        stimulus_line_spacing: question?.metadata?.stimulus_text_style?.line_spacing || 'relaxed',
         stimulus_visual_type: existingStimulusVisual?.type || 'none',
         stimulus_visual_title: existingStimulusVisual?.title || '',
         stimulus_table_headers: existingStimulusVisual?.type === 'table' ? existingStimulusVisual.headers : ['Kategori', 'Nilai'],
@@ -378,6 +405,7 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
         stimulus_pie_total_asked: existingStimulusVisual?.type === 'pie_chart' ? Boolean(existingStimulusVisual.total_asked) : false,
         stimulus_pie_items: initialPieItems,
         stimulus_image: null,
+        stimulus_image_secondary: null,
         stimulus_image_source: question?.metadata?.illustration?.source === 'template-svg' ? 'template' : 'upload',
         stimulus_svg_template: question?.metadata?.illustration?.template || 'square',
         stimulus_svg_dimension_a: question?.metadata?.illustration?.dimension_a != null ? String(question.metadata.illustration.dimension_a) : '',
@@ -399,6 +427,22 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
         stimulus_protractor_angles: initialProtractorAngles,
         stimulus_image_width: question?.metadata?.illustration?.display_width || 800,
         stimulus_image_height: question?.metadata?.illustration?.display_height || 450,
+        stimulus_image_document_x: question?.metadata?.illustration?.document_x ?? 8,
+        stimulus_image_document_y: question?.metadata?.illustration?.document_y ?? 18,
+        stimulus_image_secondary_width: question?.metadata?.secondary_illustration?.display_width || 320,
+        stimulus_image_secondary_x: question?.metadata?.secondary_illustration?.document_x ?? 48,
+        stimulus_image_secondary_y: question?.metadata?.secondary_illustration?.document_y ?? 48,
+        stimulus_image_secondary_alt: question?.metadata?.secondary_illustration?.alt || '',
+        remove_stimulus_image_secondary: false,
+        stimulus_images_additional: [],
+        stimulus_images_additional_layouts: (question?.metadata?.additional_illustrations || []).map((illustration, index) => ({
+            source: 'existing' as const,
+            source_index: index,
+            x: illustration.document_x ?? 20 + (index * 8),
+            y: illustration.document_y ?? 20 + (index * 8),
+            width: illustration.display_width || 320,
+            alt: illustration.alt || '',
+        })),
         stimulus_upload_zoom: question?.metadata?.illustration?.display_zoom || 1,
         stimulus_upload_offset_x: question?.metadata?.illustration?.display_offset_x || 0,
         stimulus_upload_offset_y: question?.metadata?.illustration?.display_offset_y || 0,
@@ -426,15 +470,108 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
     });
     const formErrors = errors as Record<string, string>;
     const [selectedIllustrationUrl, setSelectedIllustrationUrl] = useState<string>();
+    const [selectedSecondaryIllustrationUrl, setSelectedSecondaryIllustrationUrl] = useState<string>();
+    const [additionalUploadUrls, setAdditionalUploadUrls] = useState<string[]>([]);
     const [selectedExplanationImageUrl, setSelectedExplanationImageUrl] = useState<string>();
     const [draggingSvgPreview, setDraggingSvgPreview] = useState(false);
     const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null);
     const [canvasFullscreen, setCanvasFullscreen] = useState(false);
     const svgDragStart = useRef({ clientX: 0, clientY: 0, offsetX: 0, offsetY: 0 });
+    const stimulusEditorRef = useRef<HTMLTextAreaElement>(null);
+    const stimulusImageInputRef = useRef<HTMLInputElement>(null);
+    const pendingImageSlot = useRef<DocumentImageSlot>('primary');
+    const stimulusDocumentRef = useRef<HTMLDivElement>(null);
+    const documentImageDrag = useRef({ pointerId: 0, slot: 'primary' as DocumentImageSlot, clientX: 0, clientY: 0, x: 0, y: 0 });
+    const documentImageResize = useRef({ pointerId: 0, slot: 'primary' as DocumentImageSlot, clientX: 0, width: 0 });
+    const [draggingDocumentImage, setDraggingDocumentImage] = useState(false);
+    const [resizingDocumentImage, setResizingDocumentImage] = useState(false);
     const selectedSvgTemplate = stimulusSvgTemplates.find((template) => template.value === data.stimulus_svg_template);
     const editableUploadIllustrationUrl = data.stimulus_image_source === 'upload'
         ? selectedIllustrationUrl || (!data.remove_stimulus_image ? question?.illustration_url : undefined)
         : undefined;
+    const editableSecondaryIllustrationUrl = selectedSecondaryIllustrationUrl
+        || (!data.remove_stimulus_image_secondary ? question?.secondary_illustration_url : undefined);
+    const additionalDocumentImages = data.stimulus_images_additional_layouts.map((layout, index) => ({
+        slot: `additional:${index}` as DocumentImageSlot,
+        layout,
+        url: layout.source === 'existing'
+            ? question?.additional_illustration_urls?.[layout.source_index]
+            : additionalUploadUrls[layout.source_index],
+    })).filter((image): image is { slot: DocumentImageSlot; layout: AdditionalImageLayout; url: string } => Boolean(image.url));
+    const documentImageCount = Number(Boolean(editableUploadIllustrationUrl)) + Number(Boolean(editableSecondaryIllustrationUrl)) + additionalDocumentImages.length;
+    const stimulusTextStyle: StimulusTextStyle = {
+        font_family: data.stimulus_font_family,
+        font_size: data.stimulus_font_size,
+        text_align: data.stimulus_text_align,
+        line_spacing: data.stimulus_line_spacing,
+    };
+    const startDocumentImageDrag = (slot: DocumentImageSlot, event: ReactPointerEvent<HTMLDivElement>) => {
+        event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        const additionalIndex = slot.startsWith('additional:') ? Number(slot.split(':')[1]) : -1;
+        const additionalLayout = data.stimulus_images_additional_layouts[additionalIndex];
+        documentImageDrag.current = {
+            pointerId: event.pointerId,
+            slot,
+            clientX: event.clientX,
+            clientY: event.clientY,
+            x: slot === 'primary' ? data.stimulus_image_document_x : slot === 'secondary' ? data.stimulus_image_secondary_x : additionalLayout?.x || 0,
+            y: slot === 'primary' ? data.stimulus_image_document_y : slot === 'secondary' ? data.stimulus_image_secondary_y : additionalLayout?.y || 0,
+        };
+        setDraggingDocumentImage(true);
+    };
+    const moveDocumentImage = (event: ReactPointerEvent<HTMLDivElement>) => {
+        if (!draggingDocumentImage || event.pointerId !== documentImageDrag.current.pointerId || !stimulusDocumentRef.current) return;
+        const bounds = stimulusDocumentRef.current.getBoundingClientRect();
+        const x = documentImageDrag.current.x + ((event.clientX - documentImageDrag.current.clientX) / bounds.width) * 100;
+        const y = documentImageDrag.current.y + ((event.clientY - documentImageDrag.current.clientY) / bounds.height) * 100;
+        const nextX = Math.max(0, Math.min(90, Number(x.toFixed(2))));
+        const nextY = Math.max(0, Math.min(90, Number(y.toFixed(2))));
+        setData((current) => {
+            if (documentImageDrag.current.slot === 'primary') return { ...current, stimulus_image_document_x: nextX, stimulus_image_document_y: nextY };
+            if (documentImageDrag.current.slot === 'secondary') return { ...current, stimulus_image_secondary_x: nextX, stimulus_image_secondary_y: nextY };
+            const index = Number(documentImageDrag.current.slot.split(':')[1]);
+            return { ...current, stimulus_images_additional_layouts: current.stimulus_images_additional_layouts.map((layout, layoutIndex) => layoutIndex === index ? { ...layout, x: nextX, y: nextY } : layout) };
+        });
+    };
+    const stopDocumentImageDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+        setDraggingDocumentImage(false);
+    };
+    const startDocumentImageResize = (slot: DocumentImageSlot, event: ReactPointerEvent<HTMLButtonElement>) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        const additionalIndex = slot.startsWith('additional:') ? Number(slot.split(':')[1]) : -1;
+        documentImageResize.current = {
+            pointerId: event.pointerId,
+            slot,
+            clientX: event.clientX,
+            width: slot === 'primary' ? data.stimulus_image_width : slot === 'secondary' ? data.stimulus_image_secondary_width : data.stimulus_images_additional_layouts[additionalIndex]?.width || 320,
+        };
+        setResizingDocumentImage(true);
+    };
+    const resizeDocumentImage = (event: ReactPointerEvent<HTMLButtonElement>) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!resizingDocumentImage || event.pointerId !== documentImageResize.current.pointerId) return;
+        const width = documentImageResize.current.width + (event.clientX - documentImageResize.current.clientX);
+        const nextWidth = Math.max(100, Math.min(1200, Math.round(width)));
+        if (documentImageResize.current.slot === 'primary') {
+            setData('stimulus_image_width', nextWidth);
+        } else if (documentImageResize.current.slot === 'secondary') {
+            setData('stimulus_image_secondary_width', nextWidth);
+        } else {
+            const index = Number(documentImageResize.current.slot.split(':')[1]);
+            setData('stimulus_images_additional_layouts', data.stimulus_images_additional_layouts.map((layout, layoutIndex) => layoutIndex === index ? { ...layout, width: nextWidth } : layout));
+        }
+    };
+    const stopDocumentImageResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+        setResizingDocumentImage(false);
+    };
     const selectedSvgCategory = selectedSvgTemplate?.category || '2d';
     const svgFamilies = Array.from(new Map(stimulusSvgTemplates
         .filter((template) => template.category === selectedSvgCategory)
@@ -599,6 +736,25 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
 
         return () => URL.revokeObjectURL(objectUrl);
     }, [data.stimulus_image]);
+
+    useEffect(() => {
+        if (!data.stimulus_image_secondary) {
+            setSelectedSecondaryIllustrationUrl(undefined);
+            return;
+        }
+
+        const objectUrl = URL.createObjectURL(data.stimulus_image_secondary);
+        setSelectedSecondaryIllustrationUrl(objectUrl);
+
+        return () => URL.revokeObjectURL(objectUrl);
+    }, [data.stimulus_image_secondary]);
+
+    useEffect(() => {
+        const urls = data.stimulus_images_additional.map((file) => URL.createObjectURL(file));
+        setAdditionalUploadUrls(urls);
+
+        return () => urls.forEach((url) => URL.revokeObjectURL(url));
+    }, [data.stimulus_images_additional]);
 
     useEffect(() => {
         if (!data.explanation_image) {
@@ -951,22 +1107,185 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
                             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Stimulus opsional</p>
                             <div role="tablist" aria-label="Jenis stimulus" className="grid grid-cols-3 overflow-hidden rounded-xl border border-slate-200 bg-slate-50 p-1">
                                 {([
-                                    { id: 'text' as const, icon: '¶', label: 'Tulisan', filled: Boolean(data.stimulus.trim()) },
+                                    { id: 'text' as const, icon: '▤', label: 'Tulisan & gambar', filled: Boolean(data.stimulus.trim() || selectedIllustrationUrl || (data.stimulus_image_source === 'upload' && question?.illustration_url && !data.remove_stimulus_image)) },
                                     { id: 'visual' as const, icon: '▥', label: 'Tabel/diagram', filled: data.stimulus_visual_type !== 'none' },
-                                    { id: 'image' as const, icon: '▧', label: 'Gambar', filled: Boolean((data.stimulus_image_source === 'template' && data.stimulus_svg_dimension_a) || selectedIllustrationUrl || (question?.illustration_url && !data.remove_stimulus_image)) },
+                                    { id: 'template' as const, icon: '◇', label: 'Template gambar', filled: Boolean(data.stimulus_image_source === 'template' && data.stimulus_svg_dimension_a) },
                                 ]).map((tab) => (
-                                    <button key={tab.id} type="button" role="tab" aria-selected={activeStimulusTab === tab.id} onClick={() => setActiveStimulusTab((current) => current === tab.id ? null : tab.id)} className={`relative flex min-h-12 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-semibold transition sm:text-sm ${activeStimulusTab === tab.id ? 'bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200' : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'}`}>
+                                    <button key={tab.id} type="button" role="tab" aria-selected={activeStimulusTab === tab.id} onClick={() => {
+                                        if (tab.id === 'template') setData((current) => ({ ...current, stimulus_image_source: 'template', remove_stimulus_image: false }));
+                                        setActiveStimulusTab((current) => current === tab.id ? null : tab.id);
+                                    }} className={`relative flex min-h-12 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-semibold transition sm:text-sm ${activeStimulusTab === tab.id ? 'bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200' : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'}`}>
                                         <span aria-hidden="true">{tab.icon}</span><span className="truncate">{tab.label}</span>{tab.filled && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-emerald-500" title="Terisi" />}
                                     </button>
                                 ))}
                             </div>
                             {activeStimulusTab === 'text' && (
-                                <div role="tabpanel" className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-                                    <label className="block p-4 text-sm font-medium text-slate-700">
-                                        Teks stimulus
-                                        <textarea value={data.stimulus} onChange={(event) => setData('stimulus', event.target.value)} rows={5} className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500" />
-                                        <span className="mt-1 block text-xs font-normal text-slate-500">Gunakan untuk bacaan, cerita, atau informasi tertulis pendamping soal.</span>
-                                    </label>
+                                <div role="tabpanel" className="overflow-hidden rounded-xl border border-slate-300 bg-slate-100 shadow-inner">
+                                    <div className="flex flex-wrap items-center gap-2 border-b border-slate-300 bg-white px-3 py-2" aria-label="Pengaturan tulisan stimulus">
+                                        <select aria-label="Jenis font" value={data.stimulus_font_family} onChange={(event) => setData('stimulus_font_family', event.target.value as QuestionForm['stimulus_font_family'])} className="h-9 rounded-md border-slate-300 py-1 pl-2 pr-8 text-sm">
+                                            <option value="sans">Sans serif</option>
+                                            <option value="serif">Serif</option>
+                                            <option value="mono">Monospace</option>
+                                        </select>
+                                        <select aria-label="Ukuran font" value={data.stimulus_font_size} onChange={(event) => setData('stimulus_font_size', event.target.value as QuestionForm['stimulus_font_size'])} className="h-9 rounded-md border-slate-300 py-1 pl-2 pr-8 text-sm">
+                                            <option value="sm">Kecil</option>
+                                            <option value="base">Normal</option>
+                                            <option value="lg">Besar</option>
+                                            <option value="xl">Sangat besar</option>
+                                        </select>
+                                        <span className="hidden h-6 w-px bg-slate-200 sm:block" />
+                                        {(['left', 'center', 'right', 'justify'] as const).map((alignment) => (
+                                            <button key={alignment} type="button" aria-label={`Rata ${alignment}`} onClick={() => setData('stimulus_text_align', alignment)} className={`h-9 min-w-9 rounded-md px-2 text-sm font-semibold ${data.stimulus_text_align === alignment ? 'bg-indigo-100 text-indigo-700' : 'text-slate-600 hover:bg-slate-100'}`}>
+                                                {{ left: '≡', center: '≣', right: '≡', justify: '☰' }[alignment]}
+                                            </button>
+                                        ))}
+                                        <span className="hidden h-6 w-px bg-slate-200 sm:block" />
+                                        <label className="flex items-center gap-2 text-xs font-medium text-slate-600">Spasi
+                                            <select aria-label="Jarak baris" value={data.stimulus_line_spacing} onChange={(event) => setData('stimulus_line_spacing', event.target.value as QuestionForm['stimulus_line_spacing'])} className="h-9 rounded-md border-slate-300 py-1 pl-2 pr-8 text-sm">
+                                                <option value="normal">1,0</option>
+                                                <option value="relaxed">1,5</option>
+                                                <option value="loose">2,0</option>
+                                            </select>
+                                        </label>
+                                        <span className="hidden h-6 w-px bg-slate-200 sm:block" />
+                                        <input ref={stimulusImageInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(event) => {
+                                            const file = event.target.files?.[0] || null;
+                                            if (!file) return;
+                                            setData((current) => {
+                                                if (pendingImageSlot.current === 'primary') return {
+                                                    ...current,
+                                                    stimulus_image: file,
+                                                    stimulus_image_source: 'upload',
+                                                    remove_stimulus_image: false,
+                                                    stimulus_image_document_x: 8,
+                                                    stimulus_image_document_y: 18,
+                                                    stimulus_image_width: 320,
+                                                };
+                                                if (pendingImageSlot.current === 'secondary') return {
+                                                    ...current,
+                                                    stimulus_image_secondary: file,
+                                                    remove_stimulus_image_secondary: false,
+                                                    stimulus_image_secondary_x: 48,
+                                                    stimulus_image_secondary_y: 48,
+                                                    stimulus_image_secondary_width: 320,
+                                                };
+
+                                                const uploadIndex = current.stimulus_images_additional.length;
+                                                const imageNumber = current.stimulus_images_additional_layouts.length + 3;
+                                                return {
+                                                    ...current,
+                                                    stimulus_images_additional: [...current.stimulus_images_additional, file],
+                                                    stimulus_images_additional_layouts: [...current.stimulus_images_additional_layouts, {
+                                                        source: 'upload',
+                                                        source_index: uploadIndex,
+                                                        x: Math.min(70, 12 + ((imageNumber * 9) % 58)),
+                                                        y: Math.min(75, 14 + ((imageNumber * 11) % 62)),
+                                                        width: 320,
+                                                        alt: '',
+                                                    }],
+                                                };
+                                            });
+                                            event.target.value = '';
+                                        }} />
+                                        <button type="button" aria-label="Upload gambar ke kanvas" title={documentImageCount >= 20 ? 'Maksimal 20 gambar per stimulus' : 'Upload gambar'} disabled={documentImageCount >= 20} onClick={() => {
+                                            pendingImageSlot.current = !editableUploadIllustrationUrl ? 'primary' : !editableSecondaryIllustrationUrl ? 'secondary' : `additional:${data.stimulus_images_additional_layouts.length}`;
+                                            stimulusImageInputRef.current?.click();
+                                        }} className="flex h-9 w-9 items-center justify-center rounded-md bg-emerald-100 text-emerald-800 hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-40">
+                                            <svg aria-hidden="true" className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 16.5V19a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2.5"/><path d="M12 4v11m0-11-4 4m4-4 4 4"/><path d="m5 15 3.5-3.5 3 3 2-2L19 18"/></svg>
+                                        </button>
+                                    </div>
+                                    <div className="p-4 sm:p-6">
+                                        <div ref={stimulusDocumentRef} className="relative mx-auto min-h-[620px] max-w-3xl overflow-hidden rounded-sm border border-slate-200 bg-white px-6 py-7 shadow-sm sm:px-10">
+                                            <span className="mb-3 block text-xs font-semibold uppercase tracking-wide text-slate-400">Dokumen stimulus · gambar dapat ditarik bebas</span>
+                                            <textarea
+                                                ref={stimulusEditorRef}
+                                                aria-label="Teks stimulus"
+                                                value={data.stimulus}
+                                                onChange={(event) => setData('stimulus', event.target.value)}
+                                                rows={20}
+                                                placeholder="Mulai tulis bacaan, cerita, atau informasi pendamping soal…"
+                                                className={`relative z-0 block min-h-[500px] w-full resize-none border-0 bg-transparent p-0 text-slate-800 placeholder:text-slate-300 focus:ring-0 ${stimulusTextClasses(stimulusTextStyle)}`}
+                                            />
+                                            {editableUploadIllustrationUrl && <div
+                                                role="application"
+                                                aria-label="Gambar stimulus yang dapat dipindahkan"
+                                                onPointerDown={(event) => startDocumentImageDrag('primary', event)}
+                                                onPointerMove={moveDocumentImage}
+                                                onPointerUp={stopDocumentImageDrag}
+                                                onPointerCancel={stopDocumentImageDrag}
+                                                style={{ left: `${data.stimulus_image_document_x}%`, top: `${data.stimulus_image_document_y}%`, width: `${data.stimulus_image_width}px` }}
+                                                className={`absolute z-10 max-w-[90%] touch-none rounded-lg border-2 bg-white p-1 shadow-lg ${draggingDocumentImage && documentImageDrag.current.slot === 'primary' ? 'cursor-grabbing border-indigo-500 ring-4 ring-indigo-100' : 'cursor-grab border-indigo-300'} ${resizingDocumentImage && documentImageResize.current.slot === 'primary' ? 'ring-4 ring-emerald-100' : ''}`}
+                                            >
+                                                <img src={editableUploadIllustrationUrl} alt={data.stimulus_image_alt || 'Gambar stimulus'} draggable={false} className="pointer-events-none h-auto w-full rounded object-contain" />
+                                                <span className="pointer-events-none absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-indigo-600 px-2 py-0.5 text-[10px] font-bold text-white shadow">Tarik</span>
+                                                <button type="button" aria-label="Hapus gambar pertama" onPointerDown={(event) => event.stopPropagation()} onClick={() => setData((current) => ({ ...current, stimulus_image: null, remove_stimulus_image: true }))} className="absolute -right-3 -top-3 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-rose-600 text-sm font-black text-white shadow-lg">×</button>
+                                                <button
+                                                    type="button"
+                                                    aria-label="Tarik untuk mengubah ukuran gambar"
+                                                    title="Tarik untuk memperbesar atau memperkecil"
+                                                    onPointerDown={(event) => startDocumentImageResize('primary', event)}
+                                                    onPointerMove={resizeDocumentImage}
+                                                    onPointerUp={stopDocumentImageResize}
+                                                    onPointerCancel={stopDocumentImageResize}
+                                                    className="absolute -bottom-3 -right-3 flex h-7 w-7 touch-none cursor-nwse-resize items-center justify-center rounded-full border-2 border-white bg-emerald-600 text-sm font-black text-white shadow-lg"
+                                                >↘</button>
+                                            </div>}
+                                            {editableSecondaryIllustrationUrl && <div
+                                                role="application"
+                                                aria-label="Gambar stimulus kedua yang dapat dipindahkan"
+                                                onPointerDown={(event) => startDocumentImageDrag('secondary', event)}
+                                                onPointerMove={moveDocumentImage}
+                                                onPointerUp={stopDocumentImageDrag}
+                                                onPointerCancel={stopDocumentImageDrag}
+                                                style={{ left: `${data.stimulus_image_secondary_x}%`, top: `${data.stimulus_image_secondary_y}%`, width: `${data.stimulus_image_secondary_width}px` }}
+                                                className={`absolute z-20 max-w-[90%] touch-none rounded-lg border-2 bg-white p-1 shadow-lg ${draggingDocumentImage && documentImageDrag.current.slot === 'secondary' ? 'cursor-grabbing border-indigo-500 ring-4 ring-indigo-100' : 'cursor-grab border-indigo-300'} ${resizingDocumentImage && documentImageResize.current.slot === 'secondary' ? 'ring-4 ring-emerald-100' : ''}`}
+                                            >
+                                                <img src={editableSecondaryIllustrationUrl} alt={data.stimulus_image_secondary_alt || 'Gambar stimulus kedua'} draggable={false} className="pointer-events-none h-auto w-full rounded object-contain" />
+                                                <span className="pointer-events-none absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-indigo-600 px-2 py-0.5 text-[10px] font-bold text-white shadow">Tarik</span>
+                                                <button type="button" aria-label="Hapus gambar kedua" onPointerDown={(event) => event.stopPropagation()} onClick={() => setData((current) => ({ ...current, stimulus_image_secondary: null, remove_stimulus_image_secondary: true }))} className="absolute -right-3 -top-3 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-rose-600 text-sm font-black text-white shadow-lg">×</button>
+                                                <button
+                                                    type="button"
+                                                    aria-label="Tarik untuk mengubah ukuran gambar kedua"
+                                                    title="Tarik untuk memperbesar atau memperkecil"
+                                                    onPointerDown={(event) => startDocumentImageResize('secondary', event)}
+                                                    onPointerMove={resizeDocumentImage}
+                                                    onPointerUp={stopDocumentImageResize}
+                                                    onPointerCancel={stopDocumentImageResize}
+                                                    className="absolute -bottom-3 -right-3 flex h-7 w-7 touch-none cursor-nwse-resize items-center justify-center rounded-full border-2 border-white bg-emerald-600 text-sm font-black text-white shadow-lg"
+                                                >↘</button>
+                                            </div>}
+                                            {additionalDocumentImages.map(({ slot, layout, url }, index) => <div
+                                                key={`${layout.source}-${layout.source_index}-${index}`}
+                                                role="application"
+                                                aria-label={`Gambar stimulus ${index + 3} yang dapat dipindahkan`}
+                                                onPointerDown={(event) => startDocumentImageDrag(slot, event)}
+                                                onPointerMove={moveDocumentImage}
+                                                onPointerUp={stopDocumentImageDrag}
+                                                onPointerCancel={stopDocumentImageDrag}
+                                                style={{ left: `${layout.x}%`, top: `${layout.y}%`, width: `${layout.width}px`, zIndex: 30 + index }}
+                                                className={`absolute max-w-[90%] touch-none rounded-lg border-2 bg-white p-1 shadow-lg ${draggingDocumentImage && documentImageDrag.current.slot === slot ? 'cursor-grabbing border-indigo-500 ring-4 ring-indigo-100' : 'cursor-grab border-indigo-300'} ${resizingDocumentImage && documentImageResize.current.slot === slot ? 'ring-4 ring-emerald-100' : ''}`}
+                                            >
+                                                <img src={url} alt={layout.alt || `Gambar stimulus ${index + 3}`} draggable={false} className="pointer-events-none h-auto w-full rounded object-contain" />
+                                                <span className="pointer-events-none absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-indigo-600 px-2 py-0.5 text-[10px] font-bold text-white shadow">Tarik</span>
+                                                <button type="button" aria-label={`Hapus gambar ${index + 3}`} onPointerDown={(event) => event.stopPropagation()} onClick={() => setData('stimulus_images_additional_layouts', data.stimulus_images_additional_layouts.filter((_, layoutIndex) => layoutIndex !== index))} className="absolute -right-3 -top-3 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-rose-600 text-sm font-black text-white shadow-lg">×</button>
+                                                <button
+                                                    type="button"
+                                                    aria-label={`Tarik untuk mengubah ukuran gambar ${index + 3}`}
+                                                    title="Tarik untuk memperbesar atau memperkecil"
+                                                    onPointerDown={(event) => startDocumentImageResize(slot, event)}
+                                                    onPointerMove={resizeDocumentImage}
+                                                    onPointerUp={stopDocumentImageResize}
+                                                    onPointerCancel={stopDocumentImageResize}
+                                                    className="absolute -bottom-3 -right-3 flex h-7 w-7 touch-none cursor-nwse-resize items-center justify-center rounded-full border-2 border-white bg-emerald-600 text-sm font-black text-white shadow-lg"
+                                                >↘</button>
+                                            </div>)}
+                                            <div className="relative z-20 mt-4 border-t border-slate-100 pt-3">
+                                                <input value={data.stimulus_image_alt} onChange={(event) => setData('stimulus_image_alt', event.target.value)} placeholder="Teks alternatif gambar (opsional)" className="block w-full border-0 bg-transparent p-0 text-xs text-slate-500 placeholder:text-slate-300 focus:ring-0" />
+                                                {editableSecondaryIllustrationUrl && <input value={data.stimulus_image_secondary_alt} onChange={(event) => setData('stimulus_image_secondary_alt', event.target.value)} placeholder="Teks alternatif gambar kedua (opsional)" className="mt-2 block w-full border-0 bg-transparent p-0 text-xs text-slate-500 placeholder:text-slate-300 focus:ring-0" />}
+                                                {data.stimulus_images_additional_layouts.map((layout, index) => <input key={`${layout.source}-${layout.source_index}-${index}`} value={layout.alt} onChange={(event) => setData('stimulus_images_additional_layouts', data.stimulus_images_additional_layouts.map((item, layoutIndex) => layoutIndex === index ? { ...item, alt: event.target.value } : item))} placeholder={`Teks alternatif gambar ${index + 3} (opsional)`} className="mt-2 block w-full border-0 bg-transparent p-0 text-xs text-slate-500 placeholder:text-slate-300 focus:ring-0" />)}
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             )}
                         </div>
@@ -1263,29 +1582,8 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
                                 </div>
                             )}
                             </div>}
-                        {activeStimulusTab === 'image' && <div role="tabpanel" className="rounded-xl border border-dashed border-slate-300 bg-white p-4">
-                            <div className="grid grid-cols-2 rounded-lg bg-slate-100 p-1" role="tablist" aria-label="Sumber gambar stimulus">
-                                <button type="button" role="tab" aria-selected={data.stimulus_image_source === 'upload'} onClick={() => setData((current) => ({ ...current, stimulus_image_source: 'upload', remove_stimulus_image: current.stimulus_image_source !== 'upload' && !current.stimulus_image }))} className={`rounded-md px-3 py-2 text-sm font-semibold ${data.stimulus_image_source === 'upload' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-600'}`}>Upload gambar</button>
-                                <button type="button" role="tab" aria-selected={data.stimulus_image_source === 'template'} onClick={() => setData((current) => ({ ...current, stimulus_image_source: 'template', remove_stimulus_image: false }))} className={`rounded-md px-2 py-2 text-sm font-semibold ${data.stimulus_image_source === 'template' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600'}`}>Template gambar</button>
-                            </div>
-                            {data.stimulus_image_source === 'upload' ? <div className="mt-4">
-                                <label className="block text-sm font-medium text-slate-700">
-                                    File gambar <span className="font-normal text-slate-500">(opsional)</span>
-                                    <input
-                                        type="file"
-                                        accept="image/jpeg,image/png,image/webp"
-                                        onChange={(event) => {
-                                            setData('stimulus_image', event.target.files?.[0] || null);
-                                            setData('remove_stimulus_image', false);
-                                            setData('stimulus_upload_zoom', 1);
-                                            setData('stimulus_upload_offset_x', 0);
-                                            setData('stimulus_upload_offset_y', 0);
-                                        }}
-                                        className="mt-2 block w-full text-sm text-slate-600 file:mr-4 file:rounded-lg file:border-0 file:bg-emerald-100 file:px-4 file:py-2 file:font-semibold file:text-emerald-700 hover:file:bg-emerald-200"
-                                    />
-                                </label>
-                                <p className="mt-2 text-xs text-slate-500">Format JPG, PNG, atau WebP. File awal maksimal 10 MB dan otomatis dikompresi menjadi maksimal 200 KB.</p>
-                            </div> : <div className="mt-4 space-y-4">
+                        {activeStimulusTab === 'template' && <div className="rounded-xl border border-slate-200 bg-white p-4">
+                            <div className="space-y-4">
                                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                                     <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Pilih gambar</p>
                                     <div className={`grid gap-2 sm:grid-cols-2 ${hasSvgSubfamilies ? 'lg:grid-cols-4' : 'lg:grid-cols-3'}`} aria-label="Katalog template gambar berjenjang">
@@ -1387,34 +1685,8 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
                                 />
                                 {renderCanvasEditor()}
                                 <p className="mt-2 text-center text-xs text-slate-500">Tarik kanvas untuk menggeser · tarik elemen untuk memindahkan · tombol panah untuk presisi · Ctrl/⌘ + scroll untuk zoom</p>
-                            </div>}
-                            {editableUploadIllustrationUrl && <div className="mt-4">
-                                <figure className="relative rounded-xl border border-emerald-200 bg-white p-3 pb-14">
-                                    <PositionedImage
-                                        src={editableUploadIllustrationUrl}
-                                        alt={data.stimulus_image_alt || 'Preview gambar stimulus'}
-                                        width={data.stimulus_image_width}
-                                        height={data.stimulus_image_height}
-                                        zoom={data.stimulus_upload_zoom}
-                                        offsetX={data.stimulus_upload_offset_x}
-                                        offsetY={data.stimulus_upload_offset_y}
-                                        onPan={(position) => setData((current) => ({ ...current, stimulus_upload_offset_x: position.x, stimulus_upload_offset_y: position.y }))}
-                                    />
-                                    <div className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-xl border border-slate-200 bg-white/95 p-1.5 shadow-lg backdrop-blur">
-                                        <button type="button" aria-label="Perkecil gambar upload" onClick={() => setData('stimulus_upload_zoom', Math.max(0.25, Number((data.stimulus_upload_zoom - 0.1).toFixed(2))))} className="rounded-lg px-3 py-1.5 text-sm font-bold text-slate-700 hover:bg-slate-100">−</button>
-                                        <span className="min-w-12 text-center text-xs font-bold text-slate-600">{Math.round(data.stimulus_upload_zoom * 100)}%</span>
-                                        <button type="button" aria-label="Perbesar gambar upload" onClick={() => setData('stimulus_upload_zoom', Math.min(3, Number((data.stimulus_upload_zoom + 0.1).toFixed(2))))} className="rounded-lg px-3 py-1.5 text-sm font-bold text-slate-700 hover:bg-slate-100">+</button>
-                                        <button type="button" onClick={() => setData((current) => ({ ...current, stimulus_upload_zoom: 1, stimulus_upload_offset_x: 0, stimulus_upload_offset_y: 0 }))} className="border-l border-slate-200 px-2 py-1.5 text-xs font-semibold text-indigo-700">Reset</button>
-                                    </div>
-                                    <figcaption className="mt-3 flex flex-wrap items-center justify-between gap-2 pr-1 text-sm">
-                                        <span className="min-w-0 truncate font-medium text-emerald-700">{data.stimulus_image ? `Dipilih: ${data.stimulus_image.name}` : 'Gambar stimulus saat ini'} · tahan dan tarik untuk menggeser</span>
-                                        <span className="flex items-center gap-3">{data.stimulus_image && <span className="text-xs text-slate-500">{(data.stimulus_image.size / 1024).toFixed(1)} KB</span>}{!data.stimulus_image && question?.illustration_url && <button type="button" onClick={() => setData('remove_stimulus_image', true)} className="font-semibold text-rose-700">Hapus gambar</button>}</span>
-                                    </figcaption>
-                                </figure>
-                            </div>}
-                            {data.remove_stimulus_image && <button type="button" onClick={() => setData('remove_stimulus_image', false)} className="mt-3 text-sm font-semibold text-indigo-700">Batalkan penghapusan gambar</button>}
-                                <InputError message={errors.stimulus_image} className="mt-2" />
-                                {(data.stimulus_image_source === 'template' || selectedIllustrationUrl || (question?.illustration_url && !data.remove_stimulus_image)) && (
+                            </div>
+                                {data.stimulus_image_source === 'template' && (
                                     <label className="mt-4 block text-sm font-medium text-slate-700">
                                         Teks alternatif gambar <span className="font-normal text-slate-500">(opsional, untuk aksesibilitas)</span>
                                         <input value={data.stimulus_image_alt} onChange={(event) => setData('stimulus_image_alt', event.target.value)} placeholder="Contoh: Diagram jumlah buku yang dibaca siswa" className="mt-1 block w-full rounded-lg border-slate-300 focus:border-emerald-500 focus:ring-emerald-500" />
@@ -1735,6 +2007,10 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
                     data={data}
                     existingIllustrationUrl={question?.illustration_url}
                     uploadedIllustrationUrl={selectedIllustrationUrl}
+                    existingSecondaryIllustrationUrl={question?.secondary_illustration_url}
+                    uploadedSecondaryIllustrationUrl={selectedSecondaryIllustrationUrl}
+                    existingAdditionalIllustrationUrls={question?.additional_illustration_urls}
+                    uploadedAdditionalIllustrationUrls={additionalUploadUrls}
                     onClose={() => setPreviewOpen(false)}
                 />
             </Modal>
@@ -1742,7 +2018,7 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
     );
 }
 
-function StudentQuestionPreview({ data, existingIllustrationUrl, uploadedIllustrationUrl, onClose }: { data: QuestionForm; existingIllustrationUrl?: string; uploadedIllustrationUrl?: string; onClose: () => void }) {
+function StudentQuestionPreview({ data, existingIllustrationUrl, uploadedIllustrationUrl, existingSecondaryIllustrationUrl, uploadedSecondaryIllustrationUrl, existingAdditionalIllustrationUrls = [], uploadedAdditionalIllustrationUrls = [], onClose }: { data: QuestionForm; existingIllustrationUrl?: string; uploadedIllustrationUrl?: string; existingSecondaryIllustrationUrl?: string; uploadedSecondaryIllustrationUrl?: string; existingAdditionalIllustrationUrls?: string[]; uploadedAdditionalIllustrationUrls?: string[]; onClose: () => void }) {
     const [selectedOptions, setSelectedOptions] = useState<number[]>([]);
     const [shortAnswer, setShortAnswer] = useState('');
     const [matrixAnswers, setMatrixAnswers] = useState<Record<number, number>>({});
@@ -1760,8 +2036,15 @@ function StudentQuestionPreview({ data, existingIllustrationUrl, uploadedIllustr
     const usesGeometryTemplate = data.stimulus_image_source === 'template';
     const illustrationUrl = usesGeometryTemplate ? undefined : uploadedIllustrationUrl
         || (!data.remove_stimulus_image ? existingIllustrationUrl : undefined);
+    const secondaryIllustrationUrl = uploadedSecondaryIllustrationUrl
+        || (!data.remove_stimulus_image_secondary ? existingSecondaryIllustrationUrl : undefined);
+    const additionalIllustrations = data.stimulus_images_additional_layouts.map((layout) => ({
+        url: layout.source === 'existing' ? existingAdditionalIllustrationUrls[layout.source_index] : uploadedAdditionalIllustrationUrls[layout.source_index],
+        alt: layout.alt,
+        layout: { x: layout.x, y: layout.y, width: layout.width },
+    })).filter((image): image is { url: string; alt: string; layout: { x: number; y: number; width: number } } => Boolean(image.url));
     const stimulusVisual = stimulusVisualFromForm(data);
-    const hasStimulus = Boolean(data.stimulus.trim() || illustrationUrl || stimulusVisual || usesGeometryTemplate);
+    const hasStimulus = Boolean(data.stimulus.trim() || illustrationUrl || secondaryIllustrationUrl || additionalIllustrations.length || stimulusVisual || usesGeometryTemplate);
     const visibleOptions = data.options.filter((option) => option.content.trim());
     const matchingPairs = data.matching_pairs.filter((pair) => pair.left.trim() || pair.right.trim());
     const matchingRightItems = [
@@ -1810,10 +2093,21 @@ function StudentQuestionPreview({ data, existingIllustrationUrl, uploadedIllustr
                     {hasStimulus && (
                         <aside className="border-b border-slate-200 bg-slate-50/60 p-5 lg:border-b-0 lg:border-r">
                             <p className="text-xs font-semibold uppercase tracking-wider text-indigo-600">Stimulus</p>
-                            {illustrationUrl && <PositionedImage src={illustrationUrl} alt={data.stimulus_image_alt || 'Ilustrasi soal'} width={data.stimulus_image_width} height={data.stimulus_image_height} zoom={data.stimulus_upload_zoom} offsetX={data.stimulus_upload_offset_x} offsetY={data.stimulus_upload_offset_y} className="mt-3" />}
                             {usesGeometryTemplate && <GeometryTemplatePreview template={data.stimulus_svg_template} dimensionA={data.stimulus_svg_dimension_a} dimensionB={data.stimulus_svg_dimension_b} dimensionC={data.stimulus_svg_dimension_c} dimensionAAsked={data.stimulus_svg_dimension_a_asked} dimensionBAsked={data.stimulus_svg_dimension_b_asked} dimensionCAsked={data.stimulus_svg_dimension_c_asked} showArea={data.stimulus_svg_show_area} areaAsked={data.stimulus_svg_area_asked} showPerimeter={data.stimulus_svg_show_perimeter} perimeterAsked={data.stimulus_svg_perimeter_asked} unit={data.stimulus_svg_unit} fractionModels={data.stimulus_fraction_models} protractorAngles={data.stimulus_protractor_angles} overlays={data.stimulus_svg_overlays} zoom={data.stimulus_svg_zoom} offsetX={data.stimulus_svg_offset_x} offsetY={data.stimulus_svg_offset_y} className="mx-auto mt-3 h-auto w-full rounded-lg border border-slate-200 bg-white" />}
                             {stimulusVisual && <StimulusVisual visual={stimulusVisual} className="mt-3" />}
-                            {data.stimulus.trim() && <FormattedText text={data.stimulus} className="mt-3 block whitespace-pre-wrap text-sm leading-7 text-slate-700" />}
+                            {!usesGeometryTemplate && (data.stimulus.trim() || illustrationUrl) && <FreeformStimulusDocument
+                                text={data.stimulus}
+                                style={{ font_family: data.stimulus_font_family, font_size: data.stimulus_font_size, text_align: data.stimulus_text_align, line_spacing: data.stimulus_line_spacing }}
+                                imageUrl={illustrationUrl}
+                                imageAlt={data.stimulus_image_alt || 'Ilustrasi soal'}
+                                imageLayout={{ x: data.stimulus_image_document_x, y: data.stimulus_image_document_y, width: data.stimulus_image_width }}
+                                secondaryImageUrl={secondaryIllustrationUrl}
+                                secondaryImageAlt={data.stimulus_image_secondary_alt || 'Gambar stimulus kedua'}
+                                secondaryImageLayout={{ x: data.stimulus_image_secondary_x, y: data.stimulus_image_secondary_y, width: data.stimulus_image_secondary_width }}
+                                additionalImages={additionalIllustrations}
+                                className="mt-3"
+                            />}
+                            {usesGeometryTemplate && data.stimulus.trim() && <StimulusText text={data.stimulus} style={{ font_family: data.stimulus_font_family, font_size: data.stimulus_font_size, text_align: data.stimulus_text_align, line_spacing: data.stimulus_line_spacing }} className="mt-3 block text-slate-700" />}
                         </aside>
                     )}
 

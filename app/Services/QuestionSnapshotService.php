@@ -92,6 +92,34 @@ class QuestionSnapshotService
         return StorageUrl::for($disk, $path);
     }
 
+    public function secondaryIllustrationUrl(array $snapshot): ?string
+    {
+        $disk = data_get($snapshot, 'metadata.secondary_illustration.disk');
+        $path = data_get($snapshot, 'metadata.secondary_illustration.path');
+
+        if (! is_string($disk) || $disk === '' || ! is_string($path) || $path === '') {
+            return null;
+        }
+
+        return StorageUrl::for($disk, $path);
+    }
+
+    public function additionalIllustrationUrls(array $snapshot): array
+    {
+        return collect(data_get($snapshot, 'metadata.additional_illustrations', []))
+            ->map(function (array $illustration): ?string {
+                $disk = $illustration['disk'] ?? null;
+                $path = $illustration['path'] ?? null;
+
+                return is_string($disk) && $disk !== '' && is_string($path) && $path !== ''
+                    ? StorageUrl::for($disk, $path)
+                    : null;
+            })
+            ->filter()
+            ->values()
+            ->all();
+    }
+
     private function decode(mixed $snapshot): ?array
     {
         if (is_string($snapshot)) {

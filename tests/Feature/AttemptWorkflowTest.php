@@ -471,10 +471,17 @@ class AttemptWorkflowTest extends TestCase
             'type' => 'category_matrix',
             'status' => QuestionStatus::Published,
             'title' => 'Kebutuhan gambar pendukung',
+            'stimulus' => 'Baca setiap pernyataan dengan teliti.',
             'prompt' => 'Pilih kategori untuk setiap pernyataan.',
             'difficulty' => 2,
             'grade_level' => 6,
             'metadata' => [
+                'stimulus_text_style' => [
+                    'font_family' => 'serif',
+                    'font_size' => 'lg',
+                    'text_align' => 'justify',
+                    'line_spacing' => 'loose',
+                ],
                 'matrix_columns' => [
                     ['id' => '30000000-0000-4000-8000-000000000001', 'label' => 'Perlu'],
                     ['id' => '30000000-0000-4000-8000-000000000002', 'label' => 'Tidak Perlu'],
@@ -505,6 +512,10 @@ class AttemptWorkflowTest extends TestCase
             ->get(route('attempts.show', $attempt->public_id))
             ->assertInertia(fn (Assert $page) => $page
                 ->where('attempt.questions.0.type', 'category_matrix')
+                ->where('attempt.questions.0.stimulus_text_style.font_family', 'serif')
+                ->where('attempt.questions.0.stimulus_text_style.font_size', 'lg')
+                ->where('attempt.questions.0.stimulus_text_style.text_align', 'justify')
+                ->where('attempt.questions.0.stimulus_text_style.line_spacing', 'loose')
                 ->has('attempt.questions.0.matrix.columns', 2)
                 ->has('attempt.questions.0.matrix.rows', 2)
                 ->missing('attempt.questions.0.matrix.answer_key')

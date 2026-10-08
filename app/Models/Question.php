@@ -25,7 +25,7 @@ class Question extends Model
 
     public const REQUIRED_VERIFICATIONS = 3;
 
-    protected $appends = ['illustration_url', 'explanation_image_url'];
+    protected $appends = ['illustration_url', 'secondary_illustration_url', 'additional_illustration_urls', 'explanation_image_url'];
 
     protected function casts(): array
     {
@@ -63,6 +63,36 @@ class Question extends Model
 
             return StorageUrl::for($disk, $path);
         });
+    }
+
+    protected function secondaryIllustrationUrl(): Attribute
+    {
+        return Attribute::get(function (): ?string {
+            $disk = data_get($this->metadata, 'secondary_illustration.disk');
+            $path = data_get($this->metadata, 'secondary_illustration.path');
+
+            if (! is_string($disk) || $disk === '' || ! is_string($path) || $path === '') {
+                return null;
+            }
+
+            return StorageUrl::for($disk, $path);
+        });
+    }
+
+    protected function additionalIllustrationUrls(): Attribute
+    {
+        return Attribute::get(fn (): array => collect(data_get($this->metadata, 'additional_illustrations', []))
+            ->map(function (array $illustration): ?string {
+                $disk = $illustration['disk'] ?? null;
+                $path = $illustration['path'] ?? null;
+
+                return is_string($disk) && $disk !== '' && is_string($path) && $path !== ''
+                    ? StorageUrl::for($disk, $path)
+                    : null;
+            })
+            ->filter()
+            ->values()
+            ->all());
     }
 
     public function author(): BelongsTo

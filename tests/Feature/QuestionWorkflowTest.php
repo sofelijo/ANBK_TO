@@ -444,6 +444,9 @@ class QuestionWorkflowTest extends TestCase
         Storage::fake('public');
         [$teacher, $competency] = $this->teacherAndCompetency();
         $image = UploadedFile::fake()->image('diagram.png', 1200, 675);
+        $secondImage = UploadedFile::fake()->image('diagram-kedua.png', 800, 600);
+        $thirdImage = UploadedFile::fake()->image('diagram-ketiga.png', 700, 500);
+        $fourthImage = UploadedFile::fake()->image('diagram-keempat.png', 640, 480);
         $explanationImage = UploadedFile::fake()->image('pembahasan.png', 1000, 800);
         file_put_contents($image->getPathname(), random_bytes(300 * 1024), FILE_APPEND);
 
@@ -452,7 +455,20 @@ class QuestionWorkflowTest extends TestCase
         $this->actingAs($teacher)->post(route('questions.store'), [
             ...$this->payload($competency, 'Apa informasi yang ditunjukkan gambar?'),
             'stimulus_image' => $image,
+            'stimulus_image_secondary' => $secondImage,
+            'stimulus_images_additional' => [$thirdImage, $fourthImage],
+            'stimulus_images_additional_layouts' => [
+                ['source' => 'upload', 'source_index' => 0, 'x' => 12.5, 'y' => 18.5, 'width' => 260, 'alt' => 'Diagram ketiga'],
+                ['source' => 'upload', 'source_index' => 1, 'x' => 64.5, 'y' => 72.5, 'width' => 240, 'alt' => 'Diagram keempat'],
+            ],
             'stimulus_image_alt' => 'Diagram jumlah buku yang dibaca siswa',
+            'stimulus_image_position' => 2,
+            'stimulus_image_document_x' => 42.5,
+            'stimulus_image_document_y' => 31.25,
+            'stimulus_image_secondary_width' => 280,
+            'stimulus_image_secondary_x' => 55.5,
+            'stimulus_image_secondary_y' => 62.25,
+            'stimulus_image_secondary_alt' => 'Diagram pembanding kedua',
             'stimulus_upload_zoom' => '1.4',
             'stimulus_upload_offset_x' => '-12.5',
             'stimulus_upload_offset_y' => '8',
@@ -462,15 +478,31 @@ class QuestionWorkflowTest extends TestCase
 
         $question = Question::firstOrFail();
         $imagePath = data_get($question->metadata, 'illustration.path');
+        $secondImagePath = data_get($question->metadata, 'secondary_illustration.path');
+        $additionalImagePaths = collect(data_get($question->metadata, 'additional_illustrations'))->pluck('path');
         $explanationImagePath = data_get($question->metadata, 'explanation_illustration.path');
 
         Storage::disk('public')->assertExists($imagePath);
+        Storage::disk('public')->assertExists($secondImagePath);
+        $additionalImagePaths->each(fn (string $path) => Storage::disk('public')->assertExists($path));
         $this->assertLessThanOrEqual(StimulusImageService::MAX_BYTES, Storage::disk('public')->size($imagePath));
         $this->assertSame('public', data_get($question->metadata, 'illustration.disk'));
         $this->assertSame('image/jpeg', data_get($question->metadata, 'illustration.mime_type'));
         $this->assertLessThanOrEqual(StimulusImageService::MAX_BYTES, data_get($question->metadata, 'illustration.size_bytes'));
         $this->assertSame('upload', data_get($question->metadata, 'illustration.source'));
         $this->assertSame('Diagram jumlah buku yang dibaca siswa', data_get($question->metadata, 'illustration.alt'));
+        $this->assertSame(2, data_get($question->metadata, 'illustration.text_position'));
+        $this->assertEquals(42.5, data_get($question->metadata, 'illustration.document_x'));
+        $this->assertEquals(31.25, data_get($question->metadata, 'illustration.document_y'));
+        $this->assertSame('Diagram pembanding kedua', data_get($question->metadata, 'secondary_illustration.alt'));
+        $this->assertSame(280, data_get($question->metadata, 'secondary_illustration.display_width'));
+        $this->assertEquals(55.5, data_get($question->metadata, 'secondary_illustration.document_x'));
+        $this->assertEquals(62.25, data_get($question->metadata, 'secondary_illustration.document_y'));
+        $this->assertNotNull($question->secondary_illustration_url);
+        $this->assertCount(2, data_get($question->metadata, 'additional_illustrations'));
+        $this->assertCount(2, $question->additional_illustration_urls);
+        $this->assertSame('Diagram ketiga', data_get($question->metadata, 'additional_illustrations.0.alt'));
+        $this->assertSame(240, data_get($question->metadata, 'additional_illustrations.1.display_width'));
         $this->assertEquals(1.4, data_get($question->metadata, 'illustration.display_zoom'));
         $this->assertEquals(-12.5, data_get($question->metadata, 'illustration.display_offset_x'));
         $this->assertEquals(8.0, data_get($question->metadata, 'illustration.display_offset_y'));
@@ -855,12 +887,23 @@ class QuestionWorkflowTest extends TestCase
             'type' => 'category_matrix',
             'title' => 'Kebutuhan gambar pendukung',
             'stimulus' => 'Teks membahas berbagai manfaat rempah.',
+            'stimulus_font_family' => 'serif',
+            'stimulus_font_size' => 'lg',
+            'stimulus_text_align' => 'justify',
+            'stimulus_line_spacing' => 'loose',
             'prompt' => 'Pilih Perlu atau Tidak Perlu untuk setiap pernyataan.',
             'explanation' => 'Setiap pernyataan memiliki tepat satu kategori jawaban.',
             'difficulty' => 2,
             'grade_level' => 6,
             'cognitive_level' => 'interpretasi',
-            'options' => [],
+            // The create form keeps its default multiple-choice options in state
+            // when the user switches to a category matrix question.
+            'options' => [
+                ['content' => '', 'is_correct' => true],
+                ['content' => '', 'is_correct' => false],
+                ['content' => '', 'is_correct' => false],
+                ['content' => '', 'is_correct' => false],
+            ],
             'accepted_answers' => [],
             'matrix_columns' => [
                 ['label' => 'Perlu'],
@@ -873,8 +916,15 @@ class QuestionWorkflowTest extends TestCase
         ]);
 
         $question = Question::firstOrFail();
+        $response->assertSessionHasNoErrors();
         $response->assertRedirect(route('questions.show', $question));
         $this->assertSame('category_matrix', $question->type->value);
+        $this->assertSame([
+            'font_family' => 'serif',
+            'font_size' => 'lg',
+            'text_align' => 'justify',
+            'line_spacing' => 'loose',
+        ], $question->metadata['stimulus_text_style']);
         $this->assertCount(2, $question->metadata['matrix_columns']);
         $this->assertCount(2, $question->metadata['matrix_rows']);
         $this->assertSame(
