@@ -448,12 +448,18 @@ class QuestionWorkflowTest extends TestCase
         $thirdImage = UploadedFile::fake()->image('diagram-ketiga.png', 700, 500);
         $fourthImage = UploadedFile::fake()->image('diagram-keempat.png', 640, 480);
         $explanationImage = UploadedFile::fake()->image('pembahasan.png', 1000, 800);
+        $optionImage = UploadedFile::fake()->image('pilihan-a.png', 500, 350);
         file_put_contents($image->getPathname(), random_bytes(300 * 1024), FILE_APPEND);
 
         $this->assertGreaterThan(StimulusImageService::MAX_BYTES, $image->getSize());
 
+        $payload = $this->payload($competency, 'Apa informasi yang ditunjukkan gambar?');
+        $payload['options'][0]['content'] = '';
+        $payload['options'][0]['image'] = $optionImage;
+        $payload['options'][0]['image_alt'] = 'Ilustrasi jawaban A';
+
         $this->actingAs($teacher)->post(route('questions.store'), [
-            ...$this->payload($competency, 'Apa informasi yang ditunjukkan gambar?'),
+            ...$payload,
             'stimulus_image' => $image,
             'stimulus_image_secondary' => $secondImage,
             'stimulus_images_additional' => [$thirdImage, $fourthImage],
@@ -481,6 +487,7 @@ class QuestionWorkflowTest extends TestCase
         $secondImagePath = data_get($question->metadata, 'secondary_illustration.path');
         $additionalImagePaths = collect(data_get($question->metadata, 'additional_illustrations'))->pluck('path');
         $explanationImagePath = data_get($question->metadata, 'explanation_illustration.path');
+        $optionImagePath = data_get($question->metadata, 'option_illustrations.0.path');
 
         Storage::disk('public')->assertExists($imagePath);
         Storage::disk('public')->assertExists($secondImagePath);
@@ -509,6 +516,10 @@ class QuestionWorkflowTest extends TestCase
         Storage::disk('public')->assertExists($explanationImagePath);
         $this->assertStringStartsWith('question-explanations/', $explanationImagePath);
         $this->assertSame('Langkah menghitung jumlah buku', data_get($question->metadata, 'explanation_illustration.alt'));
+        Storage::disk('public')->assertExists($optionImagePath);
+        $this->assertSame('Ilustrasi jawaban A', data_get($question->metadata, 'option_illustrations.0.alt'));
+        $this->assertSame("/storage/{$optionImagePath}", $question->option_image_urls[0]);
+        $this->assertSame('', $question->options->first()->content);
 
         $this->actingAs($teacher)
             ->get(route('questions.edit', $question))
@@ -516,6 +527,7 @@ class QuestionWorkflowTest extends TestCase
                 ->component('Questions/Create')
                 ->where('question.illustration_url', "/storage/{$imagePath}")
                 ->where('question.secondary_illustration_url', "/storage/{$secondImagePath}")
+                ->where('question.option_image_urls.0', "/storage/{$optionImagePath}")
                 ->has('question.additional_illustration_urls', 2)
                 ->has('stimulusSvgTemplates'));
 
@@ -888,6 +900,7 @@ class QuestionWorkflowTest extends TestCase
 
     public function test_teacher_can_create_a_category_matrix_question(): void
     {
+        Storage::fake('public');
         [$teacher, $competency] = $this->teacherAndCompetency();
 
         $response = $this->actingAs($teacher)->post(route('questions.store'), [
@@ -919,7 +932,12 @@ class QuestionWorkflowTest extends TestCase
                 ['label' => 'Tidak Perlu'],
             ],
             'matrix_rows' => [
-                ['statement' => 'Gambar makanan atau minuman dari rempah.', 'correct_column_index' => 0],
+                [
+                    'statement' => 'Gambar makanan atau minuman dari rempah.',
+                    'correct_column_index' => 0,
+                    'image' => UploadedFile::fake()->image('pernyataan-rempah.png', 640, 480),
+                    'image_alt' => 'Minuman berbahan rempah',
+                ],
                 ['statement' => 'Gambar penyakit yang disebabkan rempah.', 'correct_column_index' => 1],
             ],
         ]);
@@ -944,6 +962,9 @@ class QuestionWorkflowTest extends TestCase
             $question->metadata['matrix_columns'][1]['id'],
             $question->metadata['matrix_rows'][1]['correct_column_id'],
         );
+        $this->assertSame('Minuman berbahan rempah', $question->metadata['matrix_rows'][0]['illustration']['alt']);
+        Storage::disk('public')->assertExists($question->metadata['matrix_rows'][0]['illustration']['path']);
+        $this->assertArrayNotHasKey('illustration', $question->metadata['matrix_rows'][1]);
         $this->assertCount(0, $question->options);
 
         $this->actingAs($teacher)

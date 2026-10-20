@@ -15,6 +15,7 @@ use App\Models\User;
 use App\Notifications\ActionNotification;
 use App\Services\NotificationAudience;
 use App\Services\QuestionSnapshotService;
+use App\Support\StorageUrl;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\RedirectResponse;
@@ -477,6 +478,8 @@ class AssessmentController extends Controller
                             'rows' => collect($metadata['matrix_rows'] ?? [])->map(fn (array $row): array => [
                                 'id' => $row['id'],
                                 'statement' => $row['statement'],
+                                'image_url' => $this->storedImageUrl(data_get($row, 'illustration')),
+                                'image_alt' => data_get($row, 'illustration.alt'),
                             ])->values(),
                         ];
                     }
@@ -521,12 +524,24 @@ class AssessmentController extends Controller
                             'id' => $option['id'],
                             'label' => chr(65 + $optionIndex),
                             'content' => $option['content'],
+                            'image_url' => $this->storedImageUrl(data_get($metadata, 'option_illustrations.'.((int) ($option['position'] ?? 0) - 1))),
+                            'image_alt' => data_get($metadata, 'option_illustrations.'.((int) ($option['position'] ?? 0) - 1).'.alt'),
                         ]),
                         'response' => null,
                     ];
                 }),
             ],
         ]);
+    }
+
+    private function storedImageUrl(mixed $illustration): ?string
+    {
+        $disk = data_get($illustration, 'disk');
+        $path = data_get($illustration, 'path');
+
+        return is_string($disk) && $disk !== '' && is_string($path) && $path !== ''
+            ? StorageUrl::for($disk, $path)
+            : null;
     }
 
     public function removeQuestion(Request $request, Assessment $assessment, Question $question): RedirectResponse

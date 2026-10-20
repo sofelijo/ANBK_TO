@@ -28,6 +28,8 @@ type Question = {
     secondary_illustration_url?: string;
     additional_illustration_urls?: string[];
     explanation_image_url?: string;
+    matrix_row_image_urls?: Record<string, string>;
+    option_image_urls?: (string | null)[];
     metadata?: {
         accepted_answers?: string[];
         illustration?: { alt?: string; source?: string; display_width?: number; display_height?: number; text_position?: number; document_x?: number; document_y?: number; display_zoom?: number; display_offset_x?: number; display_offset_y?: number };
@@ -39,7 +41,8 @@ type Question = {
         matching_pairs?: MatchingPair[];
         matching_distractors?: MatchingDistractor[];
         matrix_columns?: { id: string; label: string }[];
-        matrix_rows?: { id: string; statement: string; correct_column_id: string }[];
+        matrix_rows?: { id: string; statement: string; correct_column_id: string; illustration?: { alt?: string } }[];
+        option_illustrations?: ({ alt?: string } | null)[];
     };
     options: Option[];
     competency: { code: string; domain: string; name: string; subject?: { code: string; name: string } };
@@ -283,10 +286,10 @@ export default function Show({
                         <h2 className="mt-6 text-lg font-semibold leading-7 text-slate-900"><FormattedText text={question.prompt} /></h2>
                         {question.options.length > 0 && (
                             <div className="mt-5 space-y-3">
-                                {question.options.map((option) => (
+                                {question.options.map((option, index) => (
                                     <div key={option.id} className={`flex gap-3 rounded-xl border p-4 ${option.is_correct ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200'}`}>
                                         {question.type === 'multiple_choice' ? <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border text-xs ${option.is_correct ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-300 text-transparent'}`}>✓</span> : <span className="font-semibold">{option.label}.</span>}
-                                        <FormattedText text={option.content} />
+                                        <div className="min-w-0"><FormattedText text={option.content} />{question.option_image_urls?.[index] && <img src={question.option_image_urls[index] || undefined} alt={question.metadata?.option_illustrations?.[index]?.alt || `Gambar pilihan ${option.label}`} className="mt-3 max-h-56 rounded-lg border border-slate-200 bg-white object-contain" />}</div>
                                     </div>
                                 ))}
                             </div>
@@ -314,7 +317,7 @@ export default function Show({
                             <div className="mt-5 overflow-x-auto rounded-xl border border-slate-200">
                                 <table className="w-full min-w-[560px] text-sm">
                                     <thead className="bg-slate-100 text-slate-700"><tr><th className="p-4 text-left">Pernyataan</th>{question.metadata.matrix_columns.map((column) => <th key={column.id} className="p-4 text-center">{column.label}</th>)}</tr></thead>
-                                    <tbody>{question.metadata.matrix_rows.map((row) => <tr key={row.id} className="border-t border-slate-200"><td className="p-4 text-slate-800">{row.statement}</td>{question.metadata?.matrix_columns?.map((column) => <td key={column.id} className="p-4 text-center"><span className={`inline-flex h-7 w-7 items-center justify-center rounded-full ${row.correct_column_id === column.id ? 'bg-emerald-600 text-white' : 'border border-slate-300 text-transparent'}`}>✓</span></td>)}</tr>)}</tbody>
+                                    <tbody>{question.metadata.matrix_rows.map((row) => <tr key={row.id} className="border-t border-slate-200"><td className="p-4 text-slate-800"><FormattedText text={row.statement} />{question.matrix_row_image_urls?.[row.id] && <img src={question.matrix_row_image_urls[row.id]} alt={row.illustration?.alt || 'Gambar pernyataan'} className="mt-3 max-h-64 rounded-lg border border-slate-200 bg-white object-contain" />}</td>{question.metadata?.matrix_columns?.map((column) => <td key={column.id} className="p-4 text-center"><span className={`inline-flex h-7 w-7 items-center justify-center rounded-full ${row.correct_column_id === column.id ? 'bg-emerald-600 text-white' : 'border border-slate-300 text-transparent'}`}>✓</span></td>)}</tr>)}</tbody>
                                 </table>
                             </div>
                         )}
@@ -461,11 +464,11 @@ function QuestionStudentPreview({ question }: { question: Question }) {
                         <h2 className="mt-2 text-lg font-semibold leading-8 text-slate-900"><FormattedText text={question.prompt} /></h2>
 
                         {['single_choice', 'multiple_choice'].includes(question.type) && <div className="mt-6 space-y-3">
-                            {question.options.map((option) => {
+                            {question.options.map((option, index) => {
                                 const selected = selectedOptions.includes(option.id);
                                 return <button key={option.id} type="button" onClick={() => chooseOption(option.id)} className={`flex w-full items-start gap-3 rounded-xl border p-4 text-left transition ${selected ? 'border-indigo-500 bg-indigo-50 ring-1 ring-indigo-500' : 'border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/40'}`}>
                                     <span className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center border text-xs font-bold ${question.type === 'single_choice' ? 'rounded-full' : 'rounded-md'} ${selected ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300 text-slate-500'}`}>{selected ? '✓' : option.label}</span>
-                                    <FormattedText text={option.content} className="leading-6 text-slate-800" />
+                                    <span className="min-w-0 flex-1"><FormattedText text={option.content} className="leading-6 text-slate-800" />{question.option_image_urls?.[index] && <img src={question.option_image_urls[index] || undefined} alt={question.metadata?.option_illustrations?.[index]?.alt || `Gambar pilihan ${option.label}`} className="mt-2 max-h-48 rounded-lg border border-slate-200 bg-white object-contain" />}</span>
                                 </button>;
                             })}
                         </div>}
@@ -479,7 +482,7 @@ function QuestionStudentPreview({ question }: { question: Question }) {
 
                         {question.type === 'category_matrix' && <div className="mt-6 space-y-3">
                             <p className="text-sm text-slate-600">Pilih satu jawaban untuk setiap pernyataan.</p>
-                            {(question.metadata?.matrix_rows || []).map((row, index) => <div key={row.id} className="rounded-xl border border-slate-200 p-3"><p className="text-sm leading-6 text-slate-800"><strong className="mr-2 text-slate-500">{index + 1}.</strong>{row.statement}</p><div className="mt-3 flex flex-wrap gap-2">{(question.metadata?.matrix_columns || []).map((column) => { const selected = matrixAnswers[row.id] === column.id; return <button key={column.id} type="button" onClick={() => setMatrixAnswers((current) => ({ ...current, [row.id]: column.id }))} className={`rounded-lg border px-3 py-2 text-xs font-semibold ${selected ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300 text-slate-700 hover:bg-indigo-50'}`}>{column.label}</button>; })}</div></div>)}
+                            {(question.metadata?.matrix_rows || []).map((row, index) => <div key={row.id} className="rounded-xl border border-slate-200 p-3"><p className="text-sm leading-6 text-slate-800"><strong className="mr-2 text-slate-500">{index + 1}.</strong>{row.statement}</p>{question.matrix_row_image_urls?.[row.id] && <img src={question.matrix_row_image_urls[row.id]} alt={row.illustration?.alt || `Gambar pernyataan ${index + 1}`} className="mt-3 max-h-64 rounded-lg border border-slate-200 bg-white object-contain" />}<div className="mt-3 flex flex-wrap gap-2">{(question.metadata?.matrix_columns || []).map((column) => { const selected = matrixAnswers[row.id] === column.id; return <button key={column.id} type="button" onClick={() => setMatrixAnswers((current) => ({ ...current, [row.id]: column.id }))} className={`rounded-lg border px-3 py-2 text-xs font-semibold ${selected ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300 text-slate-700 hover:bg-indigo-50'}`}>{column.label}</button>; })}</div></div>)}
                         </div>}
                     </section>
                 </main>

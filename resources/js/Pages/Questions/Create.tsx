@@ -24,7 +24,8 @@ type Competency = {
 type MatchingPair = { left_id?: string; left: string; right_id?: string; right: string };
 type MatchingDistractor = { id?: string; content: string };
 type MatrixColumn = { id?: string; label: string };
-type MatrixRow = { id?: string; statement: string; correct_column_index: number };
+type MatrixRow = { id?: string; statement: string; correct_column_index: number; image?: File | null; image_url?: string; image_alt?: string; remove_image?: boolean };
+type OptionForm = { content: string; is_correct: boolean; image?: File | null; image_url?: string; image_alt?: string; remove_image?: boolean };
 type StimulusVisualType = 'none' | 'table' | 'bar_chart' | 'pictogram' | 'pie_chart';
 type StimulusChartItem = { label: string; value: string };
 type PieTotalMode = 'percentage' | 'degrees' | 'custom';
@@ -178,7 +179,7 @@ type QuestionForm = {
     difficulty: number;
     grade_level: number;
     cognitive_level: string;
-    options: { content: string; is_correct: boolean }[];
+    options: OptionForm[];
     accepted_answers: string[];
     matching_pairs: MatchingPair[];
     matching_distractors: MatchingDistractor[];
@@ -293,6 +294,8 @@ type ExistingQuestion = {
     secondary_illustration_url?: string;
     additional_illustration_urls?: string[];
     explanation_image_url?: string;
+    matrix_row_image_urls?: Record<string, string>;
+    option_image_urls?: (string | null)[];
     options: { content: string; is_correct: boolean }[];
     metadata?: {
         accepted_answers?: string[];
@@ -305,7 +308,8 @@ type ExistingQuestion = {
         matching_pairs?: MatchingPair[];
         matching_distractors?: MatchingDistractor[];
         matrix_columns?: MatrixColumn[];
-        matrix_rows?: { id: string; statement: string; correct_column_id: string }[];
+        matrix_rows?: { id: string; statement: string; correct_column_id: string; illustration?: { alt?: string } }[];
+        option_illustrations?: ({ alt?: string } | null)[];
     };
 };
 
@@ -335,9 +339,13 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
         id: row.id,
         statement: row.statement,
         correct_column_index: Math.max(0, initialMatrixColumns.findIndex((column) => column.id === row.correct_column_id)),
+        image: null,
+        image_url: question.matrix_row_image_urls?.[row.id],
+        image_alt: row.illustration?.alt || '',
+        remove_image: false,
     })) : [
-        { statement: '', correct_column_index: 0 },
-        { statement: '', correct_column_index: 1 },
+        { statement: '', correct_column_index: 0, image: null, image_alt: '', remove_image: false },
+        { statement: '', correct_column_index: 1, image: null, image_alt: '', remove_image: false },
     ];
     const questionCompetency = question ? competencies.find((competency) => competency.id === question.competency_id) : undefined;
     const initialRootCompetencyId = questionCompetency?.parent_id || questionCompetency?.id;
@@ -463,7 +471,14 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
         difficulty: question?.difficulty || 1,
         grade_level: question?.grade_level || 6,
         cognitive_level: question?.cognitive_level || '',
-        options: question?.options.length ? question.options.map((option) => ({ content: option.content, is_correct: option.is_correct })) : defaultOptions,
+        options: question?.options.length ? question.options.map((option, index) => ({
+            content: option.content,
+            is_correct: option.is_correct,
+            image: null,
+            image_url: question.option_image_urls?.[index] || undefined,
+            image_alt: question.metadata?.option_illustrations?.[index]?.alt || '',
+            remove_image: false,
+        })) : defaultOptions,
         accepted_answers: question?.metadata?.accepted_answers?.length ? question.metadata.accepted_answers : [''],
         matching_pairs: question?.metadata?.matching_pairs?.length ? question.metadata.matching_pairs : [
             { left: '', right: '' },
@@ -1959,18 +1974,35 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
                                 <h3 className="text-sm font-semibold text-slate-800">Pernyataan dan kunci</h3>
                                 <div className="mt-3 space-y-3">
                                     {data.matrix_rows.map((row, index) => (
-                                        <div key={row.id || index} className="grid gap-3 rounded-xl border border-slate-200 p-3 sm:grid-cols-[minmax(0,1fr)_190px_40px] sm:items-center">
-                                            <textarea
-                                                value={row.statement}
-                                                onChange={(event) => {
-                                                    const rows = [...data.matrix_rows];
-                                                    rows[index] = { ...rows[index], statement: event.target.value };
-                                                    setData('matrix_rows', rows);
-                                                }}
-                                                rows={2}
-                                                placeholder={`Pernyataan ${index + 1}`}
-                                                className="rounded-lg border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500"
-                                            />
+                                        <div key={row.id || index} className="grid gap-3 rounded-xl border border-slate-200 p-3 sm:grid-cols-[minmax(0,1fr)_190px_40px] sm:items-start">
+                                            <div className="space-y-3">
+                                                <textarea
+                                                    value={row.statement}
+                                                    onChange={(event) => {
+                                                        const rows = [...data.matrix_rows];
+                                                        rows[index] = { ...rows[index], statement: event.target.value };
+                                                        setData('matrix_rows', rows);
+                                                    }}
+                                                    rows={2}
+                                                    placeholder={`Pernyataan ${index + 1}`}
+                                                    className="block w-full rounded-lg border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500"
+                                                />
+                                                <div className="flex min-w-0 items-center gap-2">
+                                                    {(row.image_url && !row.remove_image) && <img src={row.image_url} alt={row.image_alt || `Gambar pernyataan ${index + 1}`} className="h-14 w-20 shrink-0 rounded-md border border-slate-200 bg-slate-50 object-contain" />}
+                                                    <label className="cursor-pointer rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100">
+                                                        {row.image_url && !row.remove_image ? 'Ganti gambar' : 'Upload gambar'}
+                                                        <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={(event) => {
+                                                            const file = event.target.files?.[0] || null;
+                                                            const rows = [...data.matrix_rows];
+                                                            rows[index] = { ...rows[index], image: file, image_url: file ? URL.createObjectURL(file) : row.image_url, remove_image: false };
+                                                            setData('matrix_rows', rows);
+                                                        }} />
+                                                    </label>
+                                                    {row.image_url && !row.remove_image && <button type="button" onClick={() => setData('matrix_rows', data.matrix_rows.map((item, rowIndex) => rowIndex === index ? { ...item, image: null, image_url: undefined, remove_image: true } : item))} className="text-xs font-semibold text-rose-600">Hapus gambar</button>}
+                                                </div>
+                                                {(row.image_url && !row.remove_image) && <input value={row.image_alt || ''} onChange={(event) => setData('matrix_rows', data.matrix_rows.map((item, rowIndex) => rowIndex === index ? { ...item, image_alt: event.target.value } : item))} placeholder="Teks alternatif (opsional)" className="block h-8 w-full rounded-md border-slate-300 py-1 text-xs focus:border-emerald-500 focus:ring-emerald-500" />}
+                                                <InputError message={formErrors[`matrix_rows.${index}.image`]} />
+                                            </div>
                                             <select
                                                 value={row.correct_column_index}
                                                 onChange={(event) => {
@@ -1986,25 +2018,35 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
                                         </div>
                                     ))}
                                 </div>
-                                <button type="button" disabled={data.matrix_rows.length >= 10} onClick={() => setData('matrix_rows', [...data.matrix_rows, { statement: '', correct_column_index: 0 }])} className="mt-3 text-sm font-semibold text-emerald-700 disabled:opacity-40">+ Tambah pernyataan</button>
+                                <button type="button" disabled={data.matrix_rows.length >= 10} onClick={() => setData('matrix_rows', [...data.matrix_rows, { statement: '', correct_column_index: 0, image: null, image_alt: '', remove_image: false }])} className="mt-3 text-sm font-semibold text-emerald-700 disabled:opacity-40">+ Tambah pernyataan</button>
                                 <InputError message={errors.matrix_rows} />
                             </div>
                         </div>
                     ) : (
                         <div className="mt-4 space-y-3">
                             {data.options.map((option, index) => (
-                                <div key={index} className="flex items-center gap-3">
+                                <div key={index} className="grid grid-cols-[auto_24px_minmax(0,1fr)] items-start gap-2 rounded-lg border border-slate-200 p-2">
                                     <input
                                         type={data.type === 'single_choice' ? 'radio' : 'checkbox'}
                                         name="correct-option"
                                         checked={option.is_correct}
                                         onChange={(event) => updateOption(index, 'is_correct', event.target.checked)}
-                                        className="border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                                        className="mt-2 border-slate-300 text-emerald-600 focus:ring-emerald-500"
                                     />
-                                    {data.type === 'single_choice' && <span className="w-6 text-sm font-semibold text-slate-500">{String.fromCharCode(65 + index)}</span>}
-                                    <div className="min-w-0 flex-1">
-                                        <input value={option.content} aria-invalid={Boolean(formErrors[`options.${index}.content`])} onChange={(event) => updateOption(index, 'content', event.target.value)} className={`block w-full rounded-lg focus:ring-emerald-500 ${formErrors[`options.${index}.content`] ? 'border-rose-400 focus:border-rose-500' : 'border-slate-300 focus:border-emerald-500'}`} />
+                                    <span className="mt-2 text-sm font-semibold text-slate-500">{String.fromCharCode(65 + index)}</span>
+                                    <div className="min-w-0 space-y-2">
+                                        <input value={option.content} aria-label={`Pilihan ${String.fromCharCode(65 + index)}`} aria-invalid={Boolean(formErrors[`options.${index}.content`])} onChange={(event) => updateOption(index, 'content', event.target.value)} className={`block h-9 w-full rounded-md py-1 text-sm focus:ring-emerald-500 ${formErrors[`options.${index}.content`] ? 'border-rose-400 focus:border-rose-500' : 'border-slate-300 focus:border-emerald-500'}`} />
+                                        <div className="flex min-w-0 items-center gap-2">
+                                            {option.image_url && !option.remove_image && <img src={option.image_url} alt={option.image_alt || `Gambar pilihan ${String.fromCharCode(65 + index)}`} className="h-12 w-16 shrink-0 rounded-md border border-slate-200 bg-slate-50 object-contain" />}
+                                            <label className="shrink-0 cursor-pointer rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100">{option.image_url && !option.remove_image ? 'Ganti gambar' : '+ Gambar'}<input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={(event) => {
+                                                const file = event.target.files?.[0] || null;
+                                                setData('options', data.options.map((item, optionIndex) => optionIndex === index ? { ...item, image: file, image_url: file ? URL.createObjectURL(file) : item.image_url, remove_image: false } : item));
+                                            }} /></label>
+                                            {option.image_url && !option.remove_image && <button type="button" onClick={() => setData('options', data.options.map((item, optionIndex) => optionIndex === index ? { ...item, image: null, image_url: undefined, remove_image: true } : item))} className="shrink-0 text-xs font-semibold text-rose-600">Hapus</button>}
+                                            {option.image_url && !option.remove_image && <input value={option.image_alt || ''} onChange={(event) => setData('options', data.options.map((item, optionIndex) => optionIndex === index ? { ...item, image_alt: event.target.value } : item))} placeholder="Teks alternatif" className="h-8 min-w-0 flex-1 rounded-md border-slate-300 py-1 text-xs focus:border-emerald-500 focus:ring-emerald-500" />}
+                                        </div>
                                         <InputError message={formErrors[`options.${index}.content`]} className="mt-1" />
+                                        <InputError message={formErrors[`options.${index}.image`]} />
                                     </div>
                                 </div>
                             ))}
@@ -2147,7 +2189,7 @@ function StudentQuestionPreview({ data, existingIllustrationUrl, uploadedIllustr
     })).filter((image): image is { url: string; alt: string; layout: { x: number; y: number; width: number } } => Boolean(image.url));
     const stimulusVisual = stimulusVisualFromForm(data);
     const hasStimulus = Boolean(data.stimulus.trim() || illustrationUrl || secondaryIllustrationUrl || additionalIllustrations.length || stimulusVisual || usesGeometryTemplate);
-    const visibleOptions = data.options.filter((option) => option.content.trim());
+    const visibleOptions = data.options.filter((option) => option.content.trim() || (option.image_url && !option.remove_image));
     const matchingPairs = data.matching_pairs.filter((pair) => pair.left.trim() || pair.right.trim());
     const matchingRightItems = [
         ...matchingPairs.map((pair, index) => ({ id: index, content: pair.right })),
@@ -2224,7 +2266,7 @@ function StudentQuestionPreview({ data, existingIllustrationUrl, uploadedIllustr
                                 <p className="mb-3 text-xs text-slate-600">Pilih satu jawaban untuk setiap pernyataan.</p>
                                 {data.matrix_rows.filter((row) => row.statement.trim()).map((row, rowIndex) => (
                                     <div key={row.id || rowIndex} className="grid gap-3 rounded-lg border border-slate-200 p-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-                                        <p className="text-sm leading-6 text-slate-800"><span className="mr-1.5 font-semibold text-slate-500">{rowIndex + 1}.</span>{row.statement}</p>
+                                        <div><p className="text-sm leading-6 text-slate-800"><span className="mr-1.5 font-semibold text-slate-500">{rowIndex + 1}.</span>{row.statement}</p>{row.image_url && !row.remove_image && <img src={row.image_url} alt={row.image_alt || `Gambar pernyataan ${rowIndex + 1}`} className="mt-2 max-h-32 rounded-lg border border-slate-200 bg-white object-contain" />}</div>
                                         <div className="flex flex-wrap gap-2 sm:justify-end">
                                             {data.matrix_columns.filter((column) => column.label.trim()).map((column, columnIndex) => {
                                                 const selected = matrixAnswers[rowIndex] === columnIndex;
@@ -2257,7 +2299,7 @@ function StudentQuestionPreview({ data, existingIllustrationUrl, uploadedIllustr
                             <div className="mt-5 space-y-3">
                                 {visibleOptions.length > 0 ? visibleOptions.map((option, index) => {
                                     const selected = selectedOptions.includes(index);
-                                    return <button key={index} type="button" onClick={() => chooseOption(index)} className={`flex min-h-11 w-full items-center gap-3 rounded-xl border p-3 text-left ${selected ? 'border-emerald-500 bg-emerald-50 ring-1 ring-emerald-500' : 'border-slate-200 hover:border-slate-300'}`}>{data.type === 'multiple_choice' ? <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded border-2 text-sm font-bold ${selected ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-300 text-transparent'}`}>✓</span> : <span className="w-5 font-semibold text-slate-600">{String.fromCharCode(65 + index)}</span>}<FormattedText text={option.content} className="text-sm leading-6 text-slate-800" /></button>;
+                                    return <button key={index} type="button" onClick={() => chooseOption(index)} className={`flex min-h-11 w-full items-start gap-3 rounded-xl border p-3 text-left ${selected ? 'border-emerald-500 bg-emerald-50 ring-1 ring-emerald-500' : 'border-slate-200 hover:border-slate-300'}`}>{data.type === 'multiple_choice' ? <span className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded border-2 text-sm font-bold ${selected ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-300 text-transparent'}`}>✓</span> : <span className="mt-0.5 w-5 font-semibold text-slate-600">{String.fromCharCode(65 + index)}</span>}<span className="min-w-0 flex-1"><FormattedText text={option.content} className="text-sm leading-6 text-slate-800" />{option.image_url && !option.remove_image && <img src={option.image_url} alt={option.image_alt || `Gambar pilihan ${String.fromCharCode(65 + index)}`} className="mt-2 max-h-40 rounded-lg border border-slate-200 bg-white object-contain" />}</span></button>;
                                 }) : <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">Pilihan jawaban belum diisi.</p>}
                             </div>
                         )}

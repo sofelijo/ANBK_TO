@@ -25,7 +25,7 @@ class Question extends Model
 
     public const REQUIRED_VERIFICATIONS = 3;
 
-    protected $appends = ['illustration_url', 'secondary_illustration_url', 'additional_illustration_urls', 'explanation_image_url'];
+    protected $appends = ['illustration_url', 'secondary_illustration_url', 'additional_illustration_urls', 'explanation_image_url', 'matrix_row_image_urls', 'option_image_urls'];
 
     protected function casts(): array
     {
@@ -92,6 +92,41 @@ class Question extends Model
             })
             ->filter()
             ->values()
+            ->all());
+    }
+
+    protected function matrixRowImageUrls(): Attribute
+    {
+        return Attribute::get(fn (): array => collect(data_get($this->metadata, 'matrix_rows', []))
+            ->mapWithKeys(function (array $row): array {
+                $rowId = $row['id'] ?? null;
+                $disk = data_get($row, 'illustration.disk');
+                $path = data_get($row, 'illustration.path');
+
+                if (! is_string($rowId) || $rowId === '' || ! is_string($disk) || $disk === '' || ! is_string($path) || $path === '') {
+                    return [];
+                }
+
+                return [$rowId => StorageUrl::for($disk, $path)];
+            })
+            ->all());
+    }
+
+    protected function optionImageUrls(): Attribute
+    {
+        return Attribute::get(fn (): array => collect(data_get($this->metadata, 'option_illustrations', []))
+            ->map(function (mixed $illustration): ?string {
+                if (! is_array($illustration)) {
+                    return null;
+                }
+
+                $disk = $illustration['disk'] ?? null;
+                $path = $illustration['path'] ?? null;
+
+                return is_string($disk) && $disk !== '' && is_string($path) && $path !== ''
+                    ? StorageUrl::for($disk, $path)
+                    : null;
+            })
             ->all());
     }
 

@@ -192,17 +192,22 @@ class QuestionController extends Controller
         $secondaryIllustration = null;
         $additionalIllustrations = [];
         $explanationIllustration = null;
+        $matrixRowIllustrations = [];
+        $optionIllustrations = [];
 
         try {
             $illustration = $this->storeStimulusImage($request, $data, $imageService);
             $secondaryIllustration = $this->storeSecondaryStimulusImage($request, $data, $imageService);
             $additionalIllustrations = $this->storeAdditionalStimulusImages($request, $data, $imageService);
             $explanationIllustration = $this->storeExplanationImage($request, $data, $imageService);
-            $metadata = $this->withExplanationImage(
+            $matrixRowIllustrations = $this->storeMatrixRowImages($request, $data, $imageService);
+            $data = $this->withMatrixRowImages($data, [], $matrixRowIllustrations);
+            $optionIllustrations = $this->storeOptionImages($request, $data, $imageService);
+            $metadata = $this->withOptionImages($this->withExplanationImage(
                 $this->withAdditionalStimulusImages($this->withSecondaryStimulusImage($this->withStimulusImage([], $data, $illustration), $data, $secondaryIllustration), $data, $additionalIllustrations),
                 $data,
                 $explanationIllustration,
-            );
+            ), $data, $optionIllustrations);
             if ($intent === QuestionStatus::Review) {
                 $metadata['verification_locked'] = false;
             }
@@ -223,6 +228,12 @@ class QuestionController extends Controller
                 $this->deleteStoredIllustration($additionalIllustration);
             }
             $this->deleteStoredIllustration($explanationIllustration);
+            foreach ($matrixRowIllustrations as $matrixRowIllustration) {
+                $this->deleteStoredIllustration($matrixRowIllustration);
+            }
+            foreach ($optionIllustrations as $optionIllustration) {
+                $this->deleteStoredIllustration($optionIllustration);
+            }
 
             throw $exception;
         }
@@ -358,6 +369,8 @@ class QuestionController extends Controller
         $secondaryIllustration = null;
         $additionalIllustrations = [];
         $explanationIllustration = null;
+        $matrixRowIllustrations = [];
+        $optionIllustrations = [];
         $createRevision = $question->status === QuestionStatus::Published
             || $question->assessments()->exists();
 
@@ -366,11 +379,14 @@ class QuestionController extends Controller
             $secondaryIllustration = $this->storeSecondaryStimulusImage($request, $data, $imageService);
             $additionalIllustrations = $this->storeAdditionalStimulusImages($request, $data, $imageService);
             $explanationIllustration = $this->storeExplanationImage($request, $data, $imageService);
-            $metadata = $this->withExplanationImage(
+            $matrixRowIllustrations = $this->storeMatrixRowImages($request, $data, $imageService);
+            $data = $this->withMatrixRowImages($data, $question->metadata['matrix_rows'] ?? [], $matrixRowIllustrations);
+            $optionIllustrations = $this->storeOptionImages($request, $data, $imageService);
+            $metadata = $this->withOptionImages($this->withExplanationImage(
                 $this->withAdditionalStimulusImages($this->withSecondaryStimulusImage($this->withStimulusImage($question->metadata ?? [], $data, $illustration), $data, $secondaryIllustration), $data, $additionalIllustrations),
                 $data,
                 $explanationIllustration,
-            );
+            ), $data, $optionIllustrations);
             if ($intent === QuestionStatus::Review) {
                 $metadata['verification_locked'] = false;
             }
@@ -408,6 +424,12 @@ class QuestionController extends Controller
                 $this->deleteStoredIllustration($additionalIllustration);
             }
             $this->deleteStoredIllustration($explanationIllustration);
+            foreach ($matrixRowIllustrations as $matrixRowIllustration) {
+                $this->deleteStoredIllustration($matrixRowIllustration);
+            }
+            foreach ($optionIllustrations as $optionIllustration) {
+                $this->deleteStoredIllustration($optionIllustration);
+            }
 
             throw $exception;
         }
@@ -898,8 +920,11 @@ class QuestionController extends Controller
             'grade_level' => ['required', 'integer', Rule::in([6, 9, 12])],
             'cognitive_level' => ['nullable', 'string', 'max:100'],
             'options' => ['exclude_unless:type,single_choice,multiple_choice', 'array'],
-            'options.*.content' => ['required_with:options', 'string', 'max:3000'],
+            'options.*.content' => ['nullable', 'string', 'max:3000'],
             'options.*.is_correct' => ['required_with:options', 'boolean'],
+            'options.*.image' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:10240', 'dimensions:max_width=5000,max_height=5000'],
+            'options.*.image_alt' => ['nullable', 'string', 'max:255'],
+            'options.*.remove_image' => ['nullable', 'boolean'],
             'accepted_answers' => ['array'],
             'accepted_answers.*' => ['nullable', 'string', 'max:500'],
             'matching_pairs' => ['exclude_unless:type,matching', 'required', 'array', 'between:2,8'],
@@ -917,9 +942,11 @@ class QuestionController extends Controller
             'matrix_rows.*.id' => ['nullable', 'uuid', 'distinct'],
             'matrix_rows.*.statement' => ['required', 'string', 'max:1000'],
             'matrix_rows.*.correct_column_index' => ['required', 'integer', 'between:0,3'],
+            'matrix_rows.*.image' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:10240', 'dimensions:max_width=5000,max_height=5000'],
+            'matrix_rows.*.image_alt' => ['nullable', 'string', 'max:255'],
+            'matrix_rows.*.remove_image' => ['nullable', 'boolean'],
             'target_assessment_id' => ['nullable', 'integer', 'exists:assessments,id'],
         ], [
-            'options.*.content.required_with' => 'Pilihan jawaban ke-:position belum diisi.',
             'options.*.content.max' => 'Pilihan jawaban ke-:position maksimal 3.000 karakter.',
             'options.*.is_correct.required_with' => 'Status kunci pilihan jawaban ke-:position belum ditentukan.',
             'stimulus_pie_items.*.label.required' => 'Label kategori diagram ke-:position belum diisi.',
@@ -1251,6 +1278,23 @@ class QuestionController extends Controller
         $data['accepted_answers'] = array_values(array_filter($data['accepted_answers'] ?? []));
         $correctCount = collect($data['options'] ?? [])->where('is_correct', true)->count();
 
+        if (in_array($type, [QuestionType::SingleChoice, QuestionType::MultipleChoice], true)) {
+            $existingOptionIllustrations = data_get($existingQuestion?->metadata, 'option_illustrations', []);
+            $emptyOptionIndex = collect($data['options'] ?? [])->search(function (array $option, int $index) use ($request, $existingOptionIllustrations): bool {
+                $hasText = trim((string) ($option['content'] ?? '')) !== '';
+                $hasUpload = $request->hasFile("options.{$index}.image");
+                $keepsExistingImage = ! ($option['remove_image'] ?? false) && is_array($existingOptionIllustrations[$index] ?? null);
+
+                return ! $hasText && ! $hasUpload && ! $keepsExistingImage;
+            });
+
+            if ($emptyOptionIndex !== false) {
+                throw ValidationException::withMessages([
+                    "options.{$emptyOptionIndex}.content" => 'Isi teks atau upload gambar untuk pilihan jawaban ini.',
+                ]);
+            }
+        }
+
         if ($type === QuestionType::SingleChoice && (count($data['options'] ?? []) < 2 || $correctCount !== 1)) {
             throw ValidationException::withMessages([
                 'options' => 'Pilihan tunggal membutuhkan minimal dua opsi dan tepat satu jawaban benar.',
@@ -1372,6 +1416,7 @@ class QuestionController extends Controller
                 'id' => $row['id'] ?? (string) Str::uuid(),
                 'statement' => trim($row['statement']),
                 'correct_column_id' => $columns[$row['correct_column_index']]['id'],
+                ...(isset($row['_illustration']) ? ['illustration' => $row['_illustration']] : []),
             ])->all();
         } else {
             unset($metadata['matrix_columns'], $metadata['matrix_rows']);
@@ -1690,6 +1735,101 @@ class QuestionController extends Controller
         return $metadata;
     }
 
+    private function storeMatrixRowImages(Request $request, array $data, StimulusImageService $imageService): array
+    {
+        if (($data['type'] ?? null) !== QuestionType::CategoryMatrix->value) {
+            return [];
+        }
+
+        return collect($request->file('matrix_rows', []))->mapWithKeys(function (array $rowFiles, int $index) use ($data, $request, $imageService): array {
+            $file = $rowFiles['image'] ?? null;
+            if ($file === null) {
+                return [];
+            }
+
+            return [$index => $imageService->store(
+                $file,
+                $request->user()->school_id,
+                trim(data_get($data, "matrix_rows.{$index}.image_alt", '')) ?: 'Gambar pernyataan '.($index + 1),
+                "matrix_rows.{$index}.image",
+                'question-matrix-rows',
+            )];
+        })->all();
+    }
+
+    private function withMatrixRowImages(array $data, array $existingRows, array $uploaded): array
+    {
+        if (($data['type'] ?? null) !== QuestionType::CategoryMatrix->value) {
+            return $data;
+        }
+
+        $existingById = collect($existingRows)->keyBy('id');
+        $data['matrix_rows'] = collect($data['matrix_rows'])->map(function (array $row, int $index) use ($existingById, $uploaded): array {
+            $illustration = $uploaded[$index]
+                ?? (($row['remove_image'] ?? false) ? null : data_get($existingById->get($row['id'] ?? ''), 'illustration'));
+
+            if (is_array($illustration)) {
+                $illustration['alt'] = trim($row['image_alt'] ?? '') ?: ($illustration['alt'] ?? 'Gambar pernyataan '.($index + 1));
+                $row['_illustration'] = $illustration;
+            }
+
+            return $row;
+        })->all();
+
+        return $data;
+    }
+
+    private function storeOptionImages(Request $request, array $data, StimulusImageService $imageService): array
+    {
+        if (! in_array($data['type'] ?? null, [QuestionType::SingleChoice->value, QuestionType::MultipleChoice->value], true)) {
+            return [];
+        }
+
+        return collect($request->file('options', []))->mapWithKeys(function (array $optionFiles, int $index) use ($data, $request, $imageService): array {
+            $file = $optionFiles['image'] ?? null;
+            if ($file === null) {
+                return [];
+            }
+
+            return [$index => $imageService->store(
+                $file,
+                $request->user()->school_id,
+                trim(data_get($data, "options.{$index}.image_alt", '')) ?: 'Gambar pilihan '.chr(65 + $index),
+                "options.{$index}.image",
+                'question-options',
+            )];
+        })->all();
+    }
+
+    private function withOptionImages(array $metadata, array $data, array $uploaded): array
+    {
+        if (! in_array($data['type'] ?? null, [QuestionType::SingleChoice->value, QuestionType::MultipleChoice->value], true)) {
+            unset($metadata['option_illustrations']);
+
+            return $metadata;
+        }
+
+        $existing = $metadata['option_illustrations'] ?? [];
+        $metadata['option_illustrations'] = collect($data['options'] ?? [])->map(function (array $option, int $index) use ($existing, $uploaded): ?array {
+            $illustration = $uploaded[$index]
+                ?? (($option['remove_image'] ?? false) ? null : ($existing[$index] ?? null));
+
+            if (! is_array($illustration)) {
+                return null;
+            }
+
+            $illustration['alt'] = trim($option['image_alt'] ?? '') ?: ($illustration['alt'] ?? 'Gambar pilihan '.chr(65 + $index));
+
+            return $illustration;
+        })->all();
+
+        if (! collect($metadata['option_illustrations'])->contains(fn (mixed $illustration): bool => is_array($illustration))) {
+            unset($metadata['option_illustrations']);
+        }
+
+        return $metadata;
+    }
+
     private function deleteStoredIllustration(?array $illustration): void
     {
         if ($illustration !== null && ($illustration['source'] ?? null) !== 'library-svg') {
@@ -1800,7 +1940,7 @@ class QuestionController extends Controller
         foreach ($options as $index => $option) {
             $question->options()->create([
                 'label' => chr(65 + $index),
-                'content' => $option['content'],
+                'content' => trim((string) ($option['content'] ?? '')),
                 'is_correct' => $option['is_correct'],
                 'position' => $index + 1,
             ]);
