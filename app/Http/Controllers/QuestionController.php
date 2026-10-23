@@ -191,6 +191,7 @@ class QuestionController extends Controller
         $illustration = null;
         $secondaryIllustration = null;
         $additionalIllustrations = [];
+        $additionalTemplateIllustrations = [];
         $explanationIllustration = null;
         $matrixRowIllustrations = [];
         $optionIllustrations = [];
@@ -199,6 +200,7 @@ class QuestionController extends Controller
             $illustration = $this->storeStimulusImage($request, $data, $imageService);
             $secondaryIllustration = $this->storeSecondaryStimulusImage($request, $data, $imageService);
             $additionalIllustrations = $this->storeAdditionalStimulusImages($request, $data, $imageService);
+            $additionalTemplateIllustrations = $this->storeAdditionalStimulusTemplates($request, $data);
             $explanationIllustration = $this->storeExplanationImage($request, $data, $imageService);
             $matrixRowIllustrations = $this->storeMatrixRowImages($request, $data, $imageService);
             $data = $this->withMatrixRowImages($data, [], $matrixRowIllustrations);
@@ -208,6 +210,7 @@ class QuestionController extends Controller
                 $data,
                 $explanationIllustration,
             ), $data, $optionIllustrations);
+            $metadata = $this->withAdditionalStimulusTemplates($metadata, $additionalTemplateIllustrations);
             if ($intent === QuestionStatus::Review) {
                 $metadata['verification_locked'] = false;
             }
@@ -226,6 +229,9 @@ class QuestionController extends Controller
             $this->deleteStoredIllustration($secondaryIllustration);
             foreach ($additionalIllustrations as $additionalIllustration) {
                 $this->deleteStoredIllustration($additionalIllustration);
+            }
+            foreach ($additionalTemplateIllustrations as $additionalTemplateIllustration) {
+                $this->deleteStoredIllustration($additionalTemplateIllustration);
             }
             $this->deleteStoredIllustration($explanationIllustration);
             foreach ($matrixRowIllustrations as $matrixRowIllustration) {
@@ -368,6 +374,7 @@ class QuestionController extends Controller
         $illustration = null;
         $secondaryIllustration = null;
         $additionalIllustrations = [];
+        $additionalTemplateIllustrations = [];
         $explanationIllustration = null;
         $matrixRowIllustrations = [];
         $optionIllustrations = [];
@@ -378,6 +385,7 @@ class QuestionController extends Controller
             $illustration = $this->storeStimulusImage($request, $data, $imageService);
             $secondaryIllustration = $this->storeSecondaryStimulusImage($request, $data, $imageService);
             $additionalIllustrations = $this->storeAdditionalStimulusImages($request, $data, $imageService);
+            $additionalTemplateIllustrations = $this->storeAdditionalStimulusTemplates($request, $data);
             $explanationIllustration = $this->storeExplanationImage($request, $data, $imageService);
             $matrixRowIllustrations = $this->storeMatrixRowImages($request, $data, $imageService);
             $data = $this->withMatrixRowImages($data, $question->metadata['matrix_rows'] ?? [], $matrixRowIllustrations);
@@ -387,6 +395,7 @@ class QuestionController extends Controller
                 $data,
                 $explanationIllustration,
             ), $data, $optionIllustrations);
+            $metadata = $this->withAdditionalStimulusTemplates($metadata, $additionalTemplateIllustrations);
             if ($intent === QuestionStatus::Review) {
                 $metadata['verification_locked'] = false;
             }
@@ -422,6 +431,9 @@ class QuestionController extends Controller
             $this->deleteStoredIllustration($secondaryIllustration);
             foreach ($additionalIllustrations as $additionalIllustration) {
                 $this->deleteStoredIllustration($additionalIllustration);
+            }
+            foreach ($additionalTemplateIllustrations as $additionalTemplateIllustration) {
+                $this->deleteStoredIllustration($additionalTemplateIllustration);
             }
             $this->deleteStoredIllustration($explanationIllustration);
             foreach ($matrixRowIllustrations as $matrixRowIllustration) {
@@ -850,6 +862,10 @@ class QuestionController extends Controller
             'stimulus_pie_items.*.value' => ['required', 'numeric', 'min:0', 'max:1000000000'],
             'stimulus_pie_items.*.asked' => ['nullable', 'boolean'],
             'stimulus_pie_items.*.auto_calculate' => ['nullable', 'boolean'],
+            'stimulus_visuals_extra' => ['nullable', 'array', 'max:5'],
+            'stimulus_visuals_extra.*' => ['required', 'array'],
+            'stimulus_visuals_extra.*.type' => ['required', Rule::in(['table', 'bar_chart', 'pictogram', 'pie_chart'])],
+            'stimulus_visuals_extra.*.title' => ['nullable', 'string', 'max:255'],
             'stimulus_image' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:10240', 'dimensions:max_width=5000,max_height=5000'],
             'stimulus_image_secondary' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:10240', 'dimensions:max_width=5000,max_height=5000'],
             'stimulus_images_additional' => ['nullable', 'array', 'max:18'],
@@ -896,6 +912,26 @@ class QuestionController extends Controller
             'stimulus_protractor_angles.*.label' => ['required', 'string', 'max:12', 'distinct'],
             'stimulus_protractor_angles.*.degrees' => ['required', 'numeric', 'gt:0', 'max:360'],
             'stimulus_protractor_angles.*.asked' => ['required', 'boolean'],
+            'stimulus_templates_extra' => ['nullable', 'array', 'max:5'],
+            'stimulus_templates_extra.*.template' => ['required', Rule::in(EducationalGeometryTemplateSvgRenderer::TEMPLATES)],
+            'stimulus_templates_extra.*.dimension_a' => ['required', 'numeric', 'between:-1000000,1000000'],
+            'stimulus_templates_extra.*.dimension_b' => ['nullable', 'numeric', 'between:-1000000,1000000'],
+            'stimulus_templates_extra.*.dimension_c' => ['nullable', 'numeric', 'between:-1000000,1000000'],
+            'stimulus_templates_extra.*.dimension_a_asked' => ['nullable', 'boolean'],
+            'stimulus_templates_extra.*.dimension_b_asked' => ['nullable', 'boolean'],
+            'stimulus_templates_extra.*.dimension_c_asked' => ['nullable', 'boolean'],
+            'stimulus_templates_extra.*.show_area' => ['nullable', 'boolean'],
+            'stimulus_templates_extra.*.area_asked' => ['nullable', 'boolean'],
+            'stimulus_templates_extra.*.show_perimeter' => ['nullable', 'boolean'],
+            'stimulus_templates_extra.*.perimeter_asked' => ['nullable', 'boolean'],
+            'stimulus_templates_extra.*.unit' => ['nullable', 'string', 'max:20'],
+            'stimulus_templates_extra.*.zoom' => ['nullable', 'numeric', 'between:0.25,3'],
+            'stimulus_templates_extra.*.offset_x' => ['nullable', 'numeric', 'between:-500,500'],
+            'stimulus_templates_extra.*.offset_y' => ['nullable', 'numeric', 'between:-300,300'],
+            'stimulus_templates_extra.*.fraction_models' => ['nullable', 'array', 'max:4'],
+            'stimulus_templates_extra.*.overlays' => ['nullable', 'array', 'max:20'],
+            'stimulus_templates_extra.*.protractor_angles' => ['nullable', 'array', 'max:8'],
+            'stimulus_templates_extra.*.alt' => ['nullable', 'string', 'max:255'],
             'stimulus_image_width' => ['nullable', 'integer', 'between:100,1600'],
             'stimulus_image_height' => ['nullable', 'integer', 'between:100,1200'],
             'stimulus_image_position' => ['nullable', 'integer', 'between:0,100'],
@@ -1484,6 +1520,18 @@ class QuestionController extends Controller
             unset($metadata['stimulus_visual']);
         }
 
+        $stimulusVisuals = collect([
+            ...(isset($metadata['stimulus_visual']) ? [$metadata['stimulus_visual']] : []),
+            ...($data['stimulus_visuals_extra'] ?? []),
+        ])->values()->all();
+        if ($stimulusVisuals !== []) {
+            $metadata['stimulus_visuals'] = $stimulusVisuals;
+            // Tetap isi kunci lama agar soal dan deployment lama tetap kompatibel.
+            $metadata['stimulus_visual'] = $stimulusVisuals[0];
+        } else {
+            unset($metadata['stimulus_visual'], $metadata['stimulus_visuals']);
+        }
+
         return [
             'competency_id' => $data['competency_id'],
             'question_blueprint_id' => $data['question_blueprint_id'] ?? null,
@@ -1698,6 +1746,81 @@ class QuestionController extends Controller
             ];
         })->filter()->values()->all();
 
+        if ($metadata['additional_illustrations'] === []) {
+            unset($metadata['additional_illustrations']);
+        }
+
+        return $metadata;
+    }
+
+    private function storeAdditionalStimulusTemplates(Request $request, array $data): array
+    {
+        return collect($data['stimulus_templates_extra'] ?? [])->map(function (array $template) use ($request): array {
+            $svg = $this->geometryTemplateRenderer->render(
+                $template['template'],
+                (float) $template['dimension_a'],
+                isset($template['dimension_b']) && $template['dimension_b'] !== '' ? (float) $template['dimension_b'] : null,
+                trim($template['unit'] ?? '') ?: 'cm',
+                isset($template['dimension_c']) && $template['dimension_c'] !== '' ? (float) $template['dimension_c'] : null,
+                (float) ($template['zoom'] ?? 1),
+                (float) ($template['offset_x'] ?? 0),
+                (float) ($template['offset_y'] ?? 0),
+                [
+                    'fraction_models' => $template['fraction_models'] ?? [],
+                    'overlays' => $template['overlays'] ?? [],
+                    'protractor_angles' => $template['protractor_angles'] ?? [],
+                    'dimension_asked' => [
+                        'a' => (bool) ($template['dimension_a_asked'] ?? false),
+                        'b' => (bool) ($template['dimension_b_asked'] ?? false),
+                        'c' => (bool) ($template['dimension_c_asked'] ?? false),
+                    ],
+                    'show_area' => (bool) ($template['show_area'] ?? false),
+                    'area_asked' => (bool) ($template['area_asked'] ?? false),
+                    'show_perimeter' => (bool) ($template['show_perimeter'] ?? false),
+                    'perimeter_asked' => (bool) ($template['perimeter_asked'] ?? false),
+                ],
+            );
+            $path = 'question-stimuli/'.$request->user()->school_id.'/'.Str::uuid().'.svg';
+            Storage::disk('public')->put($path, $svg, ['visibility' => 'public']);
+
+            return [
+                'disk' => 'public',
+                'path' => $path,
+                'mime_type' => 'image/svg+xml',
+                'source' => 'template-svg',
+                'template' => $template['template'],
+                'dimension_a' => (float) $template['dimension_a'],
+                'dimension_b' => isset($template['dimension_b']) && $template['dimension_b'] !== '' ? (float) $template['dimension_b'] : null,
+                'dimension_c' => isset($template['dimension_c']) && $template['dimension_c'] !== '' ? (float) $template['dimension_c'] : null,
+                'dimension_a_asked' => (bool) ($template['dimension_a_asked'] ?? false),
+                'dimension_b_asked' => (bool) ($template['dimension_b_asked'] ?? false),
+                'dimension_c_asked' => (bool) ($template['dimension_c_asked'] ?? false),
+                'show_area' => (bool) ($template['show_area'] ?? false),
+                'area_asked' => (bool) ($template['area_asked'] ?? false),
+                'show_perimeter' => (bool) ($template['show_perimeter'] ?? false),
+                'perimeter_asked' => (bool) ($template['perimeter_asked'] ?? false),
+                'unit' => trim($template['unit'] ?? '') ?: 'cm',
+                'zoom' => (float) ($template['zoom'] ?? 1),
+                'offset_x' => (float) ($template['offset_x'] ?? 0),
+                'offset_y' => (float) ($template['offset_y'] ?? 0),
+                'fraction_models' => $template['fraction_models'] ?? null,
+                'overlays' => $template['overlays'] ?? [],
+                'protractor_angles' => $template['protractor_angles'] ?? [],
+                'alt' => trim($template['alt'] ?? '') ?: 'Diagram geometri tambahan',
+                'display_width' => 800,
+                'document_x' => 8,
+                'document_y' => 18,
+            ];
+        })->all();
+    }
+
+    private function withAdditionalStimulusTemplates(array $metadata, array $templates): array
+    {
+        $regularIllustrations = collect($metadata['additional_illustrations'] ?? [])
+            ->reject(fn (array $illustration): bool => ($illustration['source'] ?? null) === 'template-svg')
+            ->values()
+            ->all();
+        $metadata['additional_illustrations'] = [...$regularIllustrations, ...$templates];
         if ($metadata['additional_illustrations'] === []) {
             unset($metadata['additional_illustrations']);
         }

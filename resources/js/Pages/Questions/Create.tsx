@@ -34,6 +34,27 @@ type StimulusGroupedChartCategory = { label: string; values: string[] };
 type FractionModel = { numerator: string; denominator: string; shaded_parts?: number[] };
 type CanvasOverlay = { id: string; type: 'text' | 'symbol'; content: string; x: number; y: number; font_size: number; color: string; rotation: number };
 type ProtractorAngle = { id: string; label: string; degrees: string; asked: boolean };
+type SavedStimulusTemplate = {
+    template: GeometryTemplate;
+    dimension_a: string;
+    dimension_b: string;
+    dimension_c: string;
+    dimension_a_asked: boolean;
+    dimension_b_asked: boolean;
+    dimension_c_asked: boolean;
+    show_area: boolean;
+    area_asked: boolean;
+    show_perimeter: boolean;
+    perimeter_asked: boolean;
+    unit: string;
+    zoom: number;
+    offset_x: number;
+    offset_y: number;
+    fraction_models: FractionModel[];
+    overlays: CanvasOverlay[];
+    protractor_angles: ProtractorAngle[];
+    alt: string;
+};
 type DocumentImageSlot = 'primary' | 'secondary' | `additional:${number}`;
 type AdditionalImageLayout = { source: 'existing' | 'upload'; source_index: number; x: number; y: number; width: number; alt: string };
 type StimulusSvgTemplateOption = {
@@ -134,6 +155,7 @@ type QuestionForm = {
     stimulus_pie_total: string;
     stimulus_pie_total_asked: boolean;
     stimulus_pie_items: StimulusPieItem[];
+    stimulus_visuals_extra: StimulusVisualData[];
     stimulus_image: File | null;
     stimulus_image_secondary: File | null;
     stimulus_image_source: 'upload' | 'template';
@@ -155,6 +177,7 @@ type QuestionForm = {
     stimulus_fraction_models: FractionModel[];
     stimulus_svg_overlays: CanvasOverlay[];
     stimulus_protractor_angles: ProtractorAngle[];
+    stimulus_templates_extra: SavedStimulusTemplate[];
     stimulus_image_width: number;
     stimulus_image_height: number;
     stimulus_image_document_x: number;
@@ -276,6 +299,31 @@ const stimulusVisualFromForm = (data: QuestionForm): StimulusVisualData | null =
     return null;
 };
 
+const stimulusTemplateFromForm = (data: QuestionForm): SavedStimulusTemplate => ({
+    template: data.stimulus_svg_template,
+    dimension_a: data.stimulus_svg_dimension_a,
+    dimension_b: data.stimulus_svg_dimension_b,
+    dimension_c: data.stimulus_svg_dimension_c,
+    dimension_a_asked: data.stimulus_svg_dimension_a_asked,
+    dimension_b_asked: data.stimulus_svg_dimension_b_asked,
+    dimension_c_asked: data.stimulus_svg_dimension_c_asked,
+    show_area: data.stimulus_svg_show_area,
+    area_asked: data.stimulus_svg_area_asked,
+    show_perimeter: data.stimulus_svg_show_perimeter,
+    perimeter_asked: data.stimulus_svg_perimeter_asked,
+    unit: data.stimulus_svg_unit,
+    zoom: data.stimulus_svg_zoom,
+    offset_x: data.stimulus_svg_offset_x,
+    offset_y: data.stimulus_svg_offset_y,
+    fraction_models: data.stimulus_fraction_models,
+    overlays: data.stimulus_svg_overlays,
+    protractor_angles: data.stimulus_protractor_angles,
+    alt: data.stimulus_image_alt,
+});
+
+const stimulusTemplateLabel = (template: SavedStimulusTemplate, options: StimulusSvgTemplateOption[]): string =>
+    options.find((option) => option.value === template.template)?.label || template.template;
+
 type ExistingQuestion = {
     id: number;
     status: string;
@@ -304,6 +352,7 @@ type ExistingQuestion = {
         secondary_illustration?: { alt?: string; display_width?: number; document_x?: number; document_y?: number };
         additional_illustrations?: { alt?: string; display_width?: number; document_x?: number; document_y?: number }[];
         stimulus_visual?: StimulusVisualData;
+        stimulus_visuals?: StimulusVisualData[];
         stimulus_text_style?: StimulusTextStyle;
         matching_pairs?: MatchingPair[];
         matching_distractors?: MatchingDistractor[];
@@ -350,6 +399,9 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
     const questionCompetency = question ? competencies.find((competency) => competency.id === question.competency_id) : undefined;
     const initialRootCompetencyId = questionCompetency?.parent_id || questionCompetency?.id;
     const existingStimulusVisual = question?.metadata?.stimulus_visual;
+    const existingStimulusVisuals = question?.metadata?.stimulus_visuals?.length
+        ? question.metadata.stimulus_visuals
+        : existingStimulusVisual ? [existingStimulusVisual] : [];
     const initialPieItems: StimulusPieItem[] = existingStimulusVisual?.type === 'pie_chart'
         ? (() => {
             const items = existingStimulusVisual.items.map((item) => ({
@@ -419,6 +471,7 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
             : '100',
         stimulus_pie_total_asked: existingStimulusVisual?.type === 'pie_chart' ? Boolean(existingStimulusVisual.total_asked) : false,
         stimulus_pie_items: initialPieItems,
+        stimulus_visuals_extra: existingStimulusVisuals.slice(1),
         stimulus_image: null,
         stimulus_image_secondary: null,
         stimulus_image_source: question?.metadata?.illustration?.source === 'template-svg' ? 'template' : 'upload',
@@ -440,6 +493,29 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
         stimulus_fraction_models: question?.metadata?.illustration?.fraction_models?.map((model) => ({ numerator: String(model.numerator), denominator: String(model.denominator), shaded_parts: model.shaded_parts || Array.from({ length: model.numerator }, (_, index) => index) })) || [{ numerator: '1', denominator: '2', shaded_parts: [0] }, { numerator: '2', denominator: '4', shaded_parts: [0, 1] }],
         stimulus_svg_overlays: question?.metadata?.illustration?.overlays || [],
         stimulus_protractor_angles: initialProtractorAngles,
+        stimulus_templates_extra: (question?.metadata?.additional_illustrations || [])
+            .filter((illustration: any) => illustration.source === 'template-svg')
+            .map((illustration: any) => ({
+                template: illustration.template || 'square',
+                dimension_a: String(illustration.dimension_a ?? ''),
+                dimension_b: String(illustration.dimension_b ?? ''),
+                dimension_c: String(illustration.dimension_c ?? ''),
+                dimension_a_asked: Boolean(illustration.dimension_a_asked),
+                dimension_b_asked: Boolean(illustration.dimension_b_asked),
+                dimension_c_asked: Boolean(illustration.dimension_c_asked),
+                show_area: Boolean(illustration.show_area),
+                area_asked: Boolean(illustration.area_asked),
+                show_perimeter: Boolean(illustration.show_perimeter),
+                perimeter_asked: Boolean(illustration.perimeter_asked),
+                unit: illustration.unit || 'cm',
+                zoom: illustration.zoom || 1,
+                offset_x: illustration.offset_x || 0,
+                offset_y: illustration.offset_y || 0,
+                fraction_models: (illustration.fraction_models || []).map((model: any) => ({ ...model, numerator: String(model.numerator), denominator: String(model.denominator) })),
+                overlays: illustration.overlays || [],
+                protractor_angles: (illustration.protractor_angles || []).map((angle: any) => ({ ...angle, degrees: String(angle.degrees) })),
+                alt: illustration.alt || '',
+            })),
         stimulus_image_width: question?.metadata?.illustration?.display_width || 800,
         stimulus_image_height: question?.metadata?.illustration?.display_height || 450,
         stimulus_image_document_x: question?.metadata?.illustration?.document_x ?? 8,
@@ -450,7 +526,7 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
         stimulus_image_secondary_alt: question?.metadata?.secondary_illustration?.alt || '',
         remove_stimulus_image_secondary: false,
         stimulus_images_additional: [],
-        stimulus_images_additional_layouts: (question?.metadata?.additional_illustrations || []).map((illustration, index) => ({
+        stimulus_images_additional_layouts: (question?.metadata?.additional_illustrations || []).map((illustration: any, index) => ({ illustration, index })).filter(({ illustration }) => illustration.source !== 'template-svg').map(({ illustration, index }) => ({
             source: 'existing' as const,
             source_index: index,
             x: illustration.document_x ?? 20 + (index * 8),
@@ -1193,8 +1269,8 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
                             <div role="tablist" aria-label="Jenis stimulus" className="grid grid-cols-3 overflow-hidden rounded-xl border border-slate-200 bg-slate-50 p-1">
                                 {([
                                     { id: 'text' as const, icon: '▤', label: 'Tulisan & gambar', filled: Boolean(data.stimulus.trim() || selectedIllustrationUrl || (data.stimulus_image_source === 'upload' && question?.illustration_url && !data.remove_stimulus_image)) },
-                                    { id: 'visual' as const, icon: '▥', label: 'Tabel/diagram', filled: data.stimulus_visual_type !== 'none' },
-                                    { id: 'template' as const, icon: '◇', label: 'Template gambar', filled: Boolean(data.stimulus_image_source === 'template' && data.stimulus_svg_dimension_a) },
+                                    { id: 'visual' as const, icon: '▥', label: 'Tabel/diagram', filled: data.stimulus_visual_type !== 'none' || data.stimulus_visuals_extra.length > 0 },
+                                    { id: 'template' as const, icon: '◇', label: 'Template gambar', filled: Boolean((data.stimulus_image_source === 'template' && data.stimulus_svg_dimension_a) || data.stimulus_templates_extra.length) },
                                 ]).map((tab) => (
                                     <button key={tab.id} type="button" role="tab" aria-selected={activeStimulusTab === tab.id} onClick={() => {
                                         if (tab.id === 'template') setData((current) => ({ ...current, stimulus_image_source: 'template', remove_stimulus_image: false }));
@@ -1407,6 +1483,15 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
                             )}
                         </div>
                         {activeStimulusTab === 'visual' && <div role="tabpanel" className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-4">
+                            {data.stimulus_visuals_extra.length > 0 && <div className="mb-4 rounded-xl border border-indigo-200 bg-white p-3">
+                                <p className="text-xs font-bold uppercase tracking-wide text-indigo-700">Tabel/diagram yang sudah ditambahkan ({data.stimulus_visuals_extra.length})</p>
+                                <div className="mt-3 space-y-3">
+                                    {data.stimulus_visuals_extra.map((visual, index) => <div key={`${visual.type}-${index}`} className="rounded-lg border border-slate-200 p-3">
+                                        <div className="mb-2 flex items-center justify-between gap-3"><span className="text-xs font-semibold text-slate-700">{visual.title || `Visual ${index + 1}`}</span><button type="button" onClick={() => setData('stimulus_visuals_extra', data.stimulus_visuals_extra.filter((_, itemIndex) => itemIndex !== index))} className="text-xs font-bold text-rose-600">Hapus</button></div>
+                                        <StimulusVisual visual={visual} />
+                                    </div>)}
+                                </div>
+                            </div>}
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
                                 <label className="block flex-1 text-sm font-medium text-slate-700">
                                     Bentuk stimulus terstruktur <span className="font-normal text-slate-500">(opsional)</span>
@@ -1696,11 +1781,25 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
                                 <div className="mt-5 border-t border-indigo-200 pt-4">
                                     <p className="mb-2 text-xs font-bold uppercase tracking-wide text-indigo-700">Preview stimulus</p>
                                     <StimulusVisual visual={stimulusVisualFromForm(data)} />
+                                    <button type="button" disabled={data.stimulus_visuals_extra.length >= 5} onClick={() => {
+                                        const visual = stimulusVisualFromForm(data);
+                                        if (!visual) return;
+                                        setData((current) => ({ ...current, stimulus_visuals_extra: [...current.stimulus_visuals_extra, visual], stimulus_visual_type: 'none', stimulus_visual_title: '' }));
+                                    }} className="mt-4 w-full rounded-lg border border-indigo-300 bg-white px-4 py-2 text-sm font-bold text-indigo-700 hover:bg-indigo-50 disabled:opacity-40">+ Simpan visual ini dan buat visual lain</button>
                                 </div>
                             )}
                             </div>}
                         {activeStimulusTab === 'template' && <div className="rounded-xl border border-slate-200 bg-white p-4">
                             <div className="space-y-4">
+                                {data.stimulus_templates_extra.length > 0 && <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-3">
+                                    <p className="text-xs font-bold uppercase tracking-wide text-violet-700">Template yang sudah ditambahkan ({data.stimulus_templates_extra.length})</p>
+                                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                                        {data.stimulus_templates_extra.map((template, index) => <div key={`${template.template}-${index}`} className="rounded-lg border border-violet-200 bg-white p-3">
+                                            <div className="mb-2 flex items-center justify-between gap-2"><span className="text-xs font-semibold text-slate-700">{stimulusTemplateLabel(template, stimulusSvgTemplates)}</span><button type="button" onClick={() => setData('stimulus_templates_extra', data.stimulus_templates_extra.filter((_, itemIndex) => itemIndex !== index))} className="text-xs font-bold text-rose-600">Hapus</button></div>
+                                            <GeometryTemplatePreview template={template.template} dimensionA={template.dimension_a} dimensionB={template.dimension_b} dimensionC={template.dimension_c} dimensionAAsked={template.dimension_a_asked} dimensionBAsked={template.dimension_b_asked} dimensionCAsked={template.dimension_c_asked} showArea={template.show_area} areaAsked={template.area_asked} showPerimeter={template.show_perimeter} perimeterAsked={template.perimeter_asked} unit={template.unit} fractionModels={template.fraction_models} protractorAngles={template.protractor_angles} overlays={template.overlays} zoom={template.zoom} offsetX={template.offset_x} offsetY={template.offset_y} className="h-auto w-full rounded border border-slate-100" />
+                                        </div>)}
+                                    </div>
+                                </div>}
                                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                                     <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Pilih gambar</p>
                                     <div className={`grid gap-2 sm:grid-cols-2 ${hasSvgSubfamilies ? 'lg:grid-cols-4' : 'lg:grid-cols-3'}`} aria-label="Katalog template gambar berjenjang">
@@ -1802,6 +1901,11 @@ export default function Create({ subjects, competencies, questionBlueprints, ass
                                 />
                                 {renderCanvasEditor()}
                                 <p className="mt-2 text-center text-xs text-slate-500">Tarik kanvas untuk menggeser · tarik elemen untuk memindahkan · tombol panah untuk presisi · Ctrl/⌘ + scroll untuk zoom</p>
+                                <button type="button" disabled={!data.stimulus_svg_dimension_a || data.stimulus_templates_extra.length >= 5} onClick={() => setData((current) => ({
+                                    ...current,
+                                    stimulus_templates_extra: [...current.stimulus_templates_extra, stimulusTemplateFromForm(current)],
+                                    stimulus_svg_dimension_a: '', stimulus_svg_dimension_b: '', stimulus_svg_dimension_c: '', stimulus_image_alt: '', stimulus_svg_overlays: [], stimulus_protractor_angles: [],
+                                }))} className="w-full rounded-lg border border-violet-300 bg-violet-50 px-4 py-2 text-sm font-bold text-violet-700 hover:bg-violet-100 disabled:opacity-40">+ Simpan template ini dan buat template lain</button>
                             </div>
                                 {data.stimulus_image_source === 'template' && (
                                     <label className="mt-4 block text-sm font-medium text-slate-700">
@@ -2188,7 +2292,7 @@ function StudentQuestionPreview({ data, existingIllustrationUrl, uploadedIllustr
         layout: { x: layout.x, y: layout.y, width: layout.width },
     })).filter((image): image is { url: string; alt: string; layout: { x: number; y: number; width: number } } => Boolean(image.url));
     const stimulusVisual = stimulusVisualFromForm(data);
-    const hasStimulus = Boolean(data.stimulus.trim() || illustrationUrl || secondaryIllustrationUrl || additionalIllustrations.length || stimulusVisual || usesGeometryTemplate);
+    const hasStimulus = Boolean(data.stimulus.trim() || illustrationUrl || secondaryIllustrationUrl || additionalIllustrations.length || stimulusVisual || data.stimulus_visuals_extra.length || usesGeometryTemplate || data.stimulus_templates_extra.length);
     const visibleOptions = data.options.filter((option) => option.content.trim() || (option.image_url && !option.remove_image));
     const matchingPairs = data.matching_pairs.filter((pair) => pair.left.trim() || pair.right.trim());
     const matchingRightItems = [
@@ -2237,7 +2341,9 @@ function StudentQuestionPreview({ data, existingIllustrationUrl, uploadedIllustr
                     {hasStimulus && (
                         <aside className="border-b border-slate-200 bg-slate-50/60 p-5 lg:border-b-0 lg:border-r">
                             <p className="text-xs font-semibold uppercase tracking-wider text-indigo-600">Stimulus</p>
+                            {data.stimulus_templates_extra.map((template, index) => <GeometryTemplatePreview key={`${template.template}-${index}`} template={template.template} dimensionA={template.dimension_a} dimensionB={template.dimension_b} dimensionC={template.dimension_c} dimensionAAsked={template.dimension_a_asked} dimensionBAsked={template.dimension_b_asked} dimensionCAsked={template.dimension_c_asked} showArea={template.show_area} areaAsked={template.area_asked} showPerimeter={template.show_perimeter} perimeterAsked={template.perimeter_asked} unit={template.unit} fractionModels={template.fraction_models} protractorAngles={template.protractor_angles} overlays={template.overlays} zoom={template.zoom} offsetX={template.offset_x} offsetY={template.offset_y} className="mx-auto mt-3 h-auto w-full rounded-lg border border-slate-200 bg-white" />)}
                             {usesGeometryTemplate && <GeometryTemplatePreview template={data.stimulus_svg_template} dimensionA={data.stimulus_svg_dimension_a} dimensionB={data.stimulus_svg_dimension_b} dimensionC={data.stimulus_svg_dimension_c} dimensionAAsked={data.stimulus_svg_dimension_a_asked} dimensionBAsked={data.stimulus_svg_dimension_b_asked} dimensionCAsked={data.stimulus_svg_dimension_c_asked} showArea={data.stimulus_svg_show_area} areaAsked={data.stimulus_svg_area_asked} showPerimeter={data.stimulus_svg_show_perimeter} perimeterAsked={data.stimulus_svg_perimeter_asked} unit={data.stimulus_svg_unit} fractionModels={data.stimulus_fraction_models} protractorAngles={data.stimulus_protractor_angles} overlays={data.stimulus_svg_overlays} zoom={data.stimulus_svg_zoom} offsetX={data.stimulus_svg_offset_x} offsetY={data.stimulus_svg_offset_y} className="mx-auto mt-3 h-auto w-full rounded-lg border border-slate-200 bg-white" />}
+                            {data.stimulus_visuals_extra.map((visual, index) => <StimulusVisual key={`${visual.type}-${index}`} visual={visual} className="mt-3" />)}
                             {stimulusVisual && <StimulusVisual visual={stimulusVisual} className="mt-3" />}
                             {!usesGeometryTemplate && (data.stimulus.trim() || illustrationUrl) && <FreeformStimulusDocument
                                 text={data.stimulus}

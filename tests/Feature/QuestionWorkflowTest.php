@@ -583,6 +583,59 @@ class QuestionWorkflowTest extends TestCase
         $this->assertStringContainsString('rotate(-15 420 180)', Storage::disk('public')->get($path));
     }
 
+    public function test_teacher_can_add_multiple_structured_visuals_and_image_templates_to_one_stimulus(): void
+    {
+        Storage::fake('public');
+        [$teacher, $competency] = $this->teacherAndCompetency();
+
+        $this->actingAs($teacher)->post(route('questions.store'), [
+            ...$this->payload($competency, 'Bandingkan informasi pada kedua diagram dan kedua gambar.'),
+            'stimulus_visual_type' => 'bar_chart',
+            'stimulus_visual_title' => 'Jumlah Buku',
+            'stimulus_chart_items' => [
+                ['label' => 'Senin', 'value' => '12'],
+                ['label' => 'Selasa', 'value' => '18'],
+            ],
+            'stimulus_visuals_extra' => [[
+                'type' => 'table',
+                'title' => 'Data Pembanding',
+                'headers' => ['Hari', 'Jumlah'],
+                'rows' => [['Rabu', '20'], ['Kamis', '16']],
+            ]],
+            'stimulus_image_source' => 'template',
+            'stimulus_svg_template' => 'square',
+            'stimulus_svg_dimension_a' => '8',
+            'stimulus_svg_unit' => 'cm',
+            'stimulus_templates_extra' => [[
+                'template' => 'rectangle',
+                'dimension_a' => '12',
+                'dimension_b' => '6',
+                'dimension_c' => '',
+                'unit' => 'cm',
+                'zoom' => 1,
+                'offset_x' => 0,
+                'offset_y' => 0,
+                'alt' => 'Persegi panjang pembanding',
+            ]],
+        ])->assertSessionHasNoErrors()->assertRedirect();
+
+        $question = Question::firstOrFail();
+        $this->assertCount(2, data_get($question->metadata, 'stimulus_visuals'));
+        $this->assertSame('bar_chart', data_get($question->metadata, 'stimulus_visuals.0.type'));
+        $this->assertSame('table', data_get($question->metadata, 'stimulus_visuals.1.type'));
+        $this->assertSame('bar_chart', data_get($question->metadata, 'stimulus_visual.type'));
+        $this->assertCount(1, data_get($question->metadata, 'additional_illustrations'));
+        $this->assertSame('template-svg', data_get($question->metadata, 'additional_illustrations.0.source'));
+        $this->assertSame('rectangle', data_get($question->metadata, 'additional_illustrations.0.template'));
+        Storage::disk('public')->assertExists(data_get($question->metadata, 'illustration.path'));
+        Storage::disk('public')->assertExists(data_get($question->metadata, 'additional_illustrations.0.path'));
+
+        $this->actingAs($teacher)->get(route('questions.show', $question))
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('question.metadata.stimulus_visuals', 2)
+                ->has('question.additional_illustration_urls', 1));
+    }
+
     public function test_geometry_templates_are_grouped_and_support_three_dimensions(): void
     {
         Storage::fake('public');

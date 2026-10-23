@@ -490,6 +490,7 @@ class AssessmentController extends Controller
                         'stimulus' => $snapshot['stimulus'],
                         'stimulus_text_style' => $metadata['stimulus_text_style'] ?? null,
                         'stimulus_visual' => $metadata['stimulus_visual'] ?? null,
+                        'stimulus_visuals' => $metadata['stimulus_visuals'] ?? null,
                         'illustration_url' => $snapshotService->illustrationUrl($snapshot),
                         'secondary_illustration_url' => $snapshotService->secondaryIllustrationUrl($snapshot),
                         'additional_illustration_urls' => $snapshotService->additionalIllustrationUrls($snapshot),
