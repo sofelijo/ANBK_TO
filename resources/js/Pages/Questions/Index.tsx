@@ -41,15 +41,17 @@ type Props = {
         links: { url?: string; label: string; active: boolean }[];
     };
     subjects: { id: number; code: string; name: string; ai_question_format: 'direct' | 'story' }[];
-    filters: { search?: string; status?: string; subject_id?: string };
+    teachers: { id: number; name: string }[];
+    filters: { search?: string; status?: string; subject_id?: string; author_id?: string };
 };
 
 type CreateMethod = 'ai' | 'manual' | 'json';
 
-export default function Index({ questions, subjects, filters }: Props) {
+export default function Index({ questions, subjects, teachers, filters }: Props) {
     const [search, setSearch] = useState(filters.search || '');
     const [status, setStatus] = useState(filters.status || '');
     const [subjectId, setSubjectId] = useState(filters.subject_id || '');
+    const [authorId, setAuthorId] = useState(filters.author_id || '');
     const [showCreateOptions, setShowCreateOptions] = useState(false);
     const [createMethod, setCreateMethod] = useState<CreateMethod | null>(null);
 
@@ -60,7 +62,7 @@ export default function Index({ questions, subjects, filters }: Props) {
 
     const filter = (event: FormEvent) => {
         event.preventDefault();
-        router.get(route('questions.index'), { search, status, subject_id: subjectId }, { preserveState: true });
+        router.get(route('questions.index'), { search, status, subject_id: subjectId, author_id: authorId }, { preserveState: true });
     };
 
     return (
@@ -208,6 +210,15 @@ export default function Index({ questions, subjects, filters }: Props) {
                         <option value="review">Menunggu verifikasi</option>
                         <option value="published">Terbit</option>
                         <option value="archived">Arsip</option>
+                    </select>
+                    <select
+                        aria-label="Guru pembuat soal"
+                        value={authorId}
+                        onChange={(event) => setAuthorId(event.target.value)}
+                        className="min-w-0 rounded-lg border-slate-300 text-sm focus:border-emerald-500 focus:ring-emerald-500 sm:max-w-xs"
+                    >
+                        <option value="">Semua guru pembuat soal</option>
+                        {teachers.map((teacher) => <option key={teacher.id} value={teacher.id}>{teacher.name}</option>)}
                     </select>
                     <button className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white">Terapkan</button>
                 </form>

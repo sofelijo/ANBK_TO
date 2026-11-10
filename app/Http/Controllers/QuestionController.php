@@ -148,6 +148,8 @@ class QuestionController extends Controller
             })
             ->when($request->integer('subject_id'), fn ($query, int $subjectId) => $query
                 ->whereHas('competency', fn ($competency) => $competency->where('subject_id', $subjectId)))
+            ->when($request->integer('author_id'), fn ($query, int $authorId) => $query
+                ->where('questions.author_id', $authorId))
             ->latest()
             ->paginate(15)
             ->withQueryString();
@@ -155,7 +157,13 @@ class QuestionController extends Controller
         return Inertia::render('Questions/Index', [
             'questions' => $questions,
             'subjects' => $this->subjects($request),
-            'filters' => $request->only(['search', 'status', 'subject_id']),
+            'teachers' => User::query()
+                ->where('role', UserRole::Teacher)
+                ->whereHas('authoredQuestions')
+                ->orderBy('name')
+                ->orderBy('id')
+                ->get(['id', 'name']),
+            'filters' => $request->only(['search', 'status', 'subject_id', 'author_id']),
         ]);
     }
 

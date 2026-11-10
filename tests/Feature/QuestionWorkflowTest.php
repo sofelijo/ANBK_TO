@@ -29,6 +29,68 @@ class QuestionWorkflowTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_question_bank_filters_by_teacher_without_exposing_private_drafts(): void
+    {
+        [$viewer, $competency] = $this->teacherAndCompetency();
+        $author = $this->verificationTeacher($viewer, 2);
+        $this->verificationTeacher($viewer, 3);
+        $admin = User::factory()->create(['role' => UserRole::Admin]);
+        $this->question($admin, $competency);
+        $this->question($viewer, $competency);
+        $published = $this->question($author, $competency);
+        $draft = $this->question($author, $competency);
+        $draft->update(['status' => QuestionStatus::Draft]);
+
+        $this->actingAs($viewer)
+            ->get(route('questions.index', [
+                'author_id' => $author->id,
+                'subject_id' => $competency->subject_id,
+                'status' => 'published',
+                'search' => 'Soal sumber',
+            ]))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Questions/Index')
+                ->has('teachers', 2)
+                ->where('teachers', fn ($teachers): bool => $teachers->pluck('id')->sort()->values()->all()
+                    === collect([$viewer->id, $author->id])->sort()->values()->all())
+                ->where('filters.author_id', (string) $author->id)
+                ->has('questions.data', 1)
+                ->where('questions.data.0.id', $published->id));
+
+        $this->actingAs($viewer)
+            ->get(route('questions.index', ['author_id' => $author->id, 'status' => 'draft']))
+            ->assertInertia(fn (Assert $page) => $page->has('questions.data', 0));
+
+        $this->actingAs($author)
+            ->get(route('questions.index', ['author_id' => $author->id, 'status' => 'draft']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('questions.data', 1)
+                ->where('questions.data.0.id', $draft->id));
+    }
+
+    public function test_question_bank_keeps_teacher_filter_when_paginating(): void
+    {
+        [$teacher, $competency] = $this->teacherAndCompetency();
+        foreach (range(1, 16) as $number) {
+            $this->question($teacher, $competency);
+        }
+        $otherAuthor = $this->verificationTeacher($teacher, 2);
+        $this->question($otherAuthor, $competency);
+
+        $this->actingAs($teacher)
+            ->get(route('questions.index', ['author_id' => $teacher->id]))
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('questions.data', 15)
+                ->where('questions.total', 16)
+                ->where('questions.next_page_url', fn ($url): bool => str_contains($url, 'author_id='.$teacher->id)));
+
+        $this->actingAs($teacher)
+            ->get(route('questions.index', ['author_id' => $teacher->id, 'page' => 2]))
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('questions.data', 1)
+                ->where('questions.data.0.author_id', $teacher->id));
+    }
+
     public function test_questions_are_global_across_schools(): void
     {
         [$author, $competency] = $this->teacherAndCompetency();
